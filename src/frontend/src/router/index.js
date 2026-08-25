@@ -9,6 +9,13 @@ const routes = [
     meta: { public: true }
   },
   {
+    // Stage 2 公开分享页（免登，token 即凭证；G-Share 实现文件）
+    path: '/share/:token',
+    name: 'share-public',
+    component: () => import('../views/SharePublicView.vue'),
+    meta: { public: true }
+  },
+  {
     path: '/',
     component: () => import('../layout/AppShell.vue'),
     children: [

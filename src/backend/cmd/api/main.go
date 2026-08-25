@@ -23,6 +23,7 @@ import (
 	"panoalbum/internal/media"
 	"panoalbum/internal/middleware"
 	"panoalbum/internal/queue"
+	"panoalbum/internal/shares"
 	"panoalbum/internal/spaces"
 	"panoalbum/internal/transcode"
 )
@@ -138,6 +139,19 @@ func main() {
 	authed.GET("/albums/:id/comments", permRead, albumsH.ListComments)
 	authed.POST("/albums/:id/comments", permAlbumWrite, albumsH.AddComment)
 	authed.DELETE("/albums/:id/comments/:cid", permAlbumWrite, albumsH.DeleteComment)
+
+	// Stage 2 分享（种子无 share:write，member 角色持 share:create，owner/admin 由 share:* 通配覆盖）
+	sharesH := &shares.Handler{Store: &shares.Store{Pool: pool, Albums: &albums.Store{Pool: pool}}, HLSDir: cfg.HLSDir}
+	permShare := auth.RequirePerm(authStore, "share:create")
+	authed.POST("/shares", permShare, sharesH.Create)
+	authed.GET("/shares", permShare, sharesH.List)
+	authed.DELETE("/shares/:id", permShare, sharesH.Delete)
+
+	// Stage 2 公开端点（无鉴权，token 即凭证；不提供原文件下载）
+	r.GET("/public/shares/:token", sharesH.PublicGet)
+	r.GET("/public/shares/:token/media/:id/thumb", sharesH.PublicThumb)
+	r.GET("/public/shares/:token/media/:id/hls/*file", sharesH.PublicHLS)
+	r.GET("/public/shares/:token/media/:id/download", sharesH.PublicDownload) // 占位：统一 403，P1 实现
 
 	// 管理端点（需 admin:users 权限）
 	admin := authed.Group("/admin", auth.RequirePerm(authStore, "admin:users"))

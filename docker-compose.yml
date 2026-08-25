@@ -61,7 +61,56 @@ services:
       timeout: 3s
       retries: 12
 
+  # ---- 常驻 Worker（TDD §8.1 方案 A）：缩略图 + HLS 转码队列消费 ----
+  # 镜像共用 docker/worker/Dockerfile，由 WORKER_KIND 决定入口分发
+  index-worker:
+    build:
+      context: ./src/backend
+      dockerfile: ../../docker/worker/Dockerfile
+    container_name: pano-index-worker
+    restart: unless-stopped
+    environment:
+      WORKER_KIND: index
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      VALKEY_ADDR: valkey:6379
+      FFMPEG_PATH: /usr/bin
+      THUMB_DIR: /data/thumbnails
+      UPLOAD_DIR: /data/media
+      HLS_DIR: /data/hls
+      MEDIA_ROOT: /data/media
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  transcode-worker:
+    build:
+      context: ./src/backend
+      dockerfile: ../../docker/worker/Dockerfile
+    container_name: pano-transcode-worker
+    restart: unless-stopped
+    environment:
+      WORKER_KIND: transcode
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      VALKEY_ADDR: valkey:6379
+      FFMPEG_PATH: /usr/bin
+      THUMB_DIR: /data/thumbnails
+      UPLOAD_DIR: /data/media
+      HLS_DIR: /data/hls
+      MEDIA_ROOT: /data/media
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
 volumes:
   pgdata:
   valkeydata:
   miniodata:
+  mediadata:

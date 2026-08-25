@@ -53,6 +53,8 @@
           <p class="album-meta">{{ items.length }} 项</p>
 
           <div class="header-actions">
+            <button class="btn" @click="shareOpen = true">分享</button>
+            <button class="btn" @click="shareManageOpen = true">分享管理</button>
             <button class="btn" :disabled="!items.length" @click="coverPickerOpen = true">设置封面</button>
             <button v-if="album.kind === 'smart'" class="btn" @click="criteriaOpen = true">编辑条件</button>
             <button v-if="album.kind !== 'smart'" class="btn primary" @click="pickerOpen = true">添加媒体</button>
@@ -111,6 +113,25 @@
       @saved="onCriteriaSaved"
     />
 
+    <ShareCreateDialog
+      v-if="shareOpen && album"
+      kind="album"
+      :target-id="album.id"
+      :default-title="album.name"
+      @cancel="shareOpen = false"
+      @created="onShareCreated"
+    />
+
+    <div v-if="shareManageOpen" class="dlg-mask" @click.self="shareManageOpen = false">
+      <div class="share-manage-dlg">
+        <h3 class="confirm-title">分享管理</h3>
+        <ShareManageList ref="shareManageRef" />
+        <div class="dlg-actions" style="margin-top: 16px">
+          <button class="btn" @click="shareManageOpen = false">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="removeTarget" class="dlg-mask" @click.self="removeTarget = null">
       <div class="confirm-dlg" role="alertdialog">
         <h3 class="confirm-title">移除媒体</h3>
@@ -135,6 +156,8 @@ import MediaPickerDialog from '../components/albums/MediaPickerDialog.vue'
 import CoverPickerDialog from '../components/albums/CoverPickerDialog.vue'
 import AlbumFormDialog from '../components/albums/AlbumFormDialog.vue'
 import AlbumComments from '../components/albums/AlbumComments.vue'
+import ShareCreateDialog from '../components/shares/ShareCreateDialog.vue'
+import ShareManageList from '../components/shares/ShareManageList.vue'
 import { errMsg, getAlbum, removeAlbumItem, updateAlbum } from '../components/albums/albumApi'
 import { loadThumbUrl } from '../components/timeline/mediaLoader'
 
@@ -149,6 +172,9 @@ const coverUrl = ref('')
 const pickerOpen = ref(false)
 const coverPickerOpen = ref(false)
 const criteriaOpen = ref(false)
+const shareOpen = ref(false)
+const shareManageOpen = ref(false)
+const shareManageRef = ref(null)
 
 const editing = ref(false)
 const editForm = ref({ name: '', description: '' })
@@ -231,6 +257,11 @@ async function saveEdit() {
 function onAdded() {
   pickerOpen.value = false
   load()
+}
+
+function onShareCreated() {
+  // 创建成功后若管理列表已打开，刷新之
+  shareManageRef.value?.refresh?.()
 }
 
 function onCoverSaved(saved) {
@@ -532,5 +563,16 @@ load()
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.share-manage-dlg {
+  width: 720px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  background-color: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 20px;
 }
 </style>
