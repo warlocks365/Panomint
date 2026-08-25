@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"panoalbum/internal/albums"
 	"panoalbum/internal/auth"
 	"panoalbum/internal/config"
 	"panoalbum/internal/folders"
@@ -123,6 +124,20 @@ func main() {
 	authed.POST("/transcode/job", permWrite, transH.CreateJob)
 	authed.GET("/transcode/job/:id", permRead, transH.JobStatus)
 	authed.GET("/transcode/hls/:id/*file", permRead, transH.ServeHLS)
+
+	// Stage 1 相册 + 评论（读 media:read；写 album:write，归属校验在 handler 内）
+	albumsH := &albums.Handler{Store: &albums.Store{Pool: pool}}
+	permAlbumWrite := auth.RequirePerm(authStore, "album:write")
+	authed.POST("/albums", permAlbumWrite, albumsH.Create)
+	authed.GET("/albums", permRead, albumsH.List)
+	authed.GET("/albums/:id", permRead, albumsH.Get)
+	authed.PATCH("/albums/:id", permAlbumWrite, albumsH.Patch)
+	authed.DELETE("/albums/:id", permAlbumWrite, albumsH.Delete)
+	authed.POST("/albums/:id/items", permAlbumWrite, albumsH.AddItems)
+	authed.DELETE("/albums/:id/items/:media_id", permAlbumWrite, albumsH.RemoveItem)
+	authed.GET("/albums/:id/comments", permRead, albumsH.ListComments)
+	authed.POST("/albums/:id/comments", permAlbumWrite, albumsH.AddComment)
+	authed.DELETE("/albums/:id/comments/:cid", permAlbumWrite, albumsH.DeleteComment)
 
 	// 管理端点（需 admin:users 权限）
 	admin := authed.Group("/admin", auth.RequirePerm(authStore, "admin:users"))

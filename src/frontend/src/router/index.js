@@ -38,6 +38,17 @@ const routes = [
         path: 'player/:id',
         name: 'player',
         component: () => import('../views/PlayerView.vue')
+      },
+      // Stage 1 相册路由（G-Frontend 实现对应文件）
+      {
+        path: 'albums',
+        name: 'albums',
+        component: () => import('../views/AlbumsView.vue')
+      },
+      {
+        path: 'albums/:id',
+        name: 'album-detail',
+        component: () => import('../views/AlbumDetailView.vue')
       }
     ]
   },
