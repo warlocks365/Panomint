@@ -1,0 +1,66 @@
+# ===== Dependencies =====
+node_modules/
+src/frontend/node_modules/
+.pnpm-store/
+
+# ===== Build outputs =====
+dist/
+dist-*/
+dist_old/
+dist-g2/
+dist-g2-*/
+dist-g4/
+build/
+bin/
+src/backend/bin/
+*.exe
+
+# ===== Caches =====
+.npm-cache/
+.cache/
+.vite/
+__pycache__/
+*.pyc
+
+# ===== Scratch / dev-only =====
+.scratch/
+*.scratch
+
+# ===== Env & secrets =====
+.env
+.env.local
+*.pem
+!prototypes/**/*.pem
+
+# ===== Test data & uploads =====
+src/backend/data/
+uploads/
+*.part
+
+# ===== OS / editor =====
+.DS_Store
+Thumbs.db
+*.log
+*.timestamp-*.mjs
+
+# ===== Media binaries (source code only) =====
+*.png
+*.jpg
+*.jpeg
+*.mp4
+prototypes/*/streams*/
+prototypes/*/vendor/
+
+# ===== Local tooling / memory =====
+.workbuddy/
+
+# ===== Frontend dev artifacts =====
+src/frontend/.tok.json
+src/frontend/.verify-thumb.*
+src/frontend/cleanup-*.txt
+src/frontend/player-shot.png
+src/frontend/dist_old/
+src/frontend/tmp_*.py
+src/frontend/.npm-cache/
+src/frontend/.build-*.txt
+src/frontend/.build-log.txt
