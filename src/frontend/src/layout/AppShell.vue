@@ -20,13 +20,7 @@
 
     <div class="main-area">
       <header class="topbar">
-        <div class="search-box">
-          <svg class="search-icon" viewBox="0 0 16 16" width="14" height="14" fill="none">
-            <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" />
-            <path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          </svg>
-          <input type="text" placeholder="搜索（开发中）" disabled />
-        </div>
+        <SearchBar />
 
         <div class="user-menu" ref="menuRef">
           <button class="user-btn" @click="menuOpen = !menuOpen">
@@ -54,6 +48,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import SearchBar from '../components/search/SearchBar.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -198,32 +193,6 @@ async function onLogout() {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 320px;
-  padding: 0 12px;
-  height: 34px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-disabled);
-  background-color: var(--color-bg);
-}
-
-.search-box input {
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-}
-
-.search-box input:disabled {
-  cursor: not-allowed;
 }
 
 .user-menu {

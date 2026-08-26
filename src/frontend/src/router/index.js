@@ -46,6 +46,12 @@ const routes = [
         name: 'player',
         component: () => import('../views/PlayerView.vue')
       },
+      // Stage 3 搜索结果页
+      {
+        path: 'search',
+        name: 'search',
+        component: () => import('../views/SearchResultsView.vue')
+      },
       // Stage 1 相册路由（G-Frontend 实现对应文件）
       {
         path: 'albums',

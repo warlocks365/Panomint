@@ -23,6 +23,7 @@ import (
 	"panoalbum/internal/media"
 	"panoalbum/internal/middleware"
 	"panoalbum/internal/queue"
+	"panoalbum/internal/search"
 	"panoalbum/internal/shares"
 	"panoalbum/internal/spaces"
 	"panoalbum/internal/transcode"
@@ -87,7 +88,7 @@ func main() {
 	authed.GET("/auth/me", authH.Me)
 
 	// T1.5 媒体/时间轴（需 media:read）
-	mediaQ := queue.New("media", queue.Config{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPass})      // 缩略图队列（indexctl worker 消费）
+	mediaQ := queue.New("media", queue.Config{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPass}) // 缩略图队列（indexctl worker 消费）
 	defer mediaQ.Close()
 	transQ := queue.New("transcode", queue.Config{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPass}) // 转码队列（transcodectl worker 消费）
 	defer transQ.Close()
@@ -146,6 +147,15 @@ func main() {
 	authed.POST("/shares", permShare, sharesH.Create)
 	authed.GET("/shares", permShare, sharesH.List)
 	authed.DELETE("/shares/:id", permShare, sharesH.Delete)
+
+	// Stage 3 结构化搜索（Job000001，API §10；SemanticRecaller 为 Stage 4 语义召回占位插槽，
+	// place 降级经 geo_cache 缓存的 Nominatim resolver）
+	searchH := &search.Handler{Store: &search.Store{
+		Pool:     pool,
+		Recaller: search.SemanticRecaller{},
+		Resolver: &search.CachedResolver{Pool: pool, Provider: search.NominatimGeocoder{}},
+	}}
+	authed.GET("/search", permRead, searchH.Search)
 
 	// Stage 2 公开端点（无鉴权，token 即凭证；不提供原文件下载）
 	r.GET("/public/shares/:token", sharesH.PublicGet)
