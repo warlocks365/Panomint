@@ -114,6 +114,15 @@ func nullFloat(f float64) any {
 	return f
 }
 
+// EntryOutcome 单条索引结果（IndexEntries 回调用）。
+type EntryOutcome string
+
+const (
+	OutcomeInserted  EntryOutcome = "inserted"
+	OutcomeDuplicate EntryOutcome = "duplicate"
+	OutcomeFailed    EntryOutcome = "failed"
+)
+
 // Scan 扫描 root 目录：建 index_jobs 任务行，逐文件提取元数据、hash 去重入库、派发缩略图任务。
 func (x *Indexer) Scan(ctx context.Context, root string) (*ScanStats, error) {
 	ownerID, err := EnsureSeedUser(ctx, x.db)
@@ -147,9 +156,15 @@ func (x *Indexer) Scan(ctx context.Context, root string) (*ScanStats, error) {
 	}
 
 	for i, e := range entries {
-		if err := x.indexOne(ctx, ownerID, e, st); err != nil {
+		outcome, err := x.indexOne(ctx, ownerID, e)
+		switch {
+		case err != nil:
 			log.Printf("索引失败 %s: %v", e.Rel, err)
 			st.Failed++
+		case outcome == OutcomeDuplicate:
+			st.Duplicate++
+		default:
+			st.Inserted++
 		}
 		// 每 10 个刷一次进度，最后一次由收尾统一更新
 		if (i+1)%10 == 0 {
@@ -166,15 +181,76 @@ func (x *Indexer) Scan(ctx context.Context, root string) (*ScanStats, error) {
 	return st, nil
 }
 
+// IndexEntries 增量入库（P1 迁移工具 watchctl 复用）：对已收集的 entries 逐条
+// 去重/提取元数据/写 media/入队缩略图；jobKind 写入 index_jobs.kind（full|incremental）。
+// onResult 非 nil 时每条处理后回调（供调用方做断点续扫状态落盘）。
+// 中断（ctx 取消）时返回已处理统计与 ctx.Err()，未处理条目留待下次续扫。
+func (x *Indexer) IndexEntries(ctx context.Context, jobKind string, entries []FileEntry,
+	onResult func(e FileEntry, outcome EntryOutcome)) (*ScanStats, error) {
+	ownerID, err := EnsureSeedUser(ctx, x.db)
+	if err != nil {
+		return nil, err
+	}
+
+	var jobID string
+	if err := x.db.QueryRow(ctx,
+		`INSERT INTO index_jobs (kind, user_id, status, started_at)
+		 VALUES ($1, $2, 'running', now()) RETURNING id`, jobKind, ownerID).Scan(&jobID); err != nil {
+		return nil, fmt.Errorf("建 index_jobs: %w", err)
+	}
+	st := &ScanStats{JobID: jobID, Total: len(entries)}
+	if _, err := x.db.Exec(ctx,
+		`UPDATE index_jobs SET total=$1 WHERE id=$2`, st.Total, jobID); err != nil {
+		return st, err
+	}
+
+	processed := 0
+	for _, e := range entries {
+		if ctx.Err() != nil {
+			break // 中断：保留进度，交由调用方续扫
+		}
+		outcome, err := x.indexOne(ctx, ownerID, e)
+		if err != nil {
+			log.Printf("索引失败 %s: %v", e.Rel, err)
+			st.Failed++
+			outcome = OutcomeFailed
+		} else if outcome == OutcomeDuplicate {
+			st.Duplicate++
+		} else {
+			st.Inserted++
+		}
+		processed++
+		if onResult != nil {
+			onResult(e, outcome)
+		}
+		if processed%10 == 0 {
+			_, _ = x.db.Exec(ctx, `UPDATE index_jobs SET processed=$1 WHERE id=$2`, processed, jobID)
+		}
+	}
+
+	status := "done"
+	retErr := error(nil)
+	if ctx.Err() != nil {
+		status = "failed" // 中断视为未完成任务
+		retErr = ctx.Err()
+	}
+	if _, err := x.db.Exec(context.Background(),
+		`UPDATE index_jobs SET status=$1, processed=$2, finished_at=now() WHERE id=$3`,
+		status, processed, jobID); err != nil && retErr == nil {
+		retErr = err
+	}
+	return st, retErr
+}
+
 // indexOne 处理单个文件：去重判定 → 元数据 → 入库 → 缩略图任务入队。
-func (x *Indexer) indexOne(ctx context.Context, ownerID string, e FileEntry, st *ScanStats) error {
+// 返回细分结果（inserted/duplicate）；error 非空即 failed。
+func (x *Indexer) indexOne(ctx context.Context, ownerID string, e FileEntry) (EntryOutcome, error) {
 	dupID, err := x.findByHash(ctx, e.Hash)
 	if err != nil {
-		return err
+		return OutcomeFailed, err
 	}
 	if dupID != "" {
-		st.Duplicate++
-		return nil
+		return OutcomeDuplicate, nil
 	}
 
 	var m *Meta
@@ -184,14 +260,13 @@ func (x *Indexer) indexOne(ctx context.Context, ownerID string, e FileEntry, st 
 		m, err = ExtractPhotoMeta(e.Path)
 	}
 	if err != nil {
-		return fmt.Errorf("元数据: %w", err)
+		return OutcomeFailed, fmt.Errorf("元数据: %w", err)
 	}
 
 	mediaID, err := x.insertMedia(ctx, ownerID, e, m)
 	if err != nil {
-		return fmt.Errorf("写 media: %w", err)
+		return OutcomeFailed, fmt.Errorf("写 media: %w", err)
 	}
-	st.Inserted++
 
 	// 缩略图任务入队（Worker 异步生成三档 WebP）
 	payload := map[string]string{
@@ -204,7 +279,7 @@ func (x *Indexer) indexOne(ctx context.Context, ownerID string, e FileEntry, st 
 	}
 	_, err = x.q.Enqueue(ctx, queue.Job{Kind: "thumbnail", Payload: payload})
 	if err != nil {
-		return fmt.Errorf("缩略图入队: %w", err)
+		return OutcomeFailed, fmt.Errorf("缩略图入队: %w", err)
 	}
-	return nil
+	return OutcomeInserted, nil
 }

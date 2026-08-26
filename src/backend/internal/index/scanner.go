@@ -25,13 +25,17 @@ const (
 )
 
 // 支持的扩展名 → 媒体大类（小写，含点）。
+// 含 Insta360 原生格式（P1 迁移工具）：.insp 照片、.insv/.lrv 视频。
 var extKind = map[string]Kind{
 	".jpg":  KindPhoto,
 	".jpeg": KindPhoto,
 	".png":  KindPhoto,
 	".webp": KindPhoto,
+	".insp": KindPhoto,
 	".mp4":  KindVideo,
 	".mov":  KindVideo,
+	".insv": KindVideo,
+	".lrv":  KindVideo,
 }
 
 // ClassifyExt 按扩展名识别媒体类型；不支持则 ok=false。
@@ -78,6 +82,10 @@ func ScanDir(ctx context.Context, root string) ([]FileEntry, error) {
 			return ctx.Err()
 		}
 		if d.IsDir() {
+			// 跳过群晖 sidecar 目录（内含缩略图 jpeg 副本，导入会污染媒体库；TDD §8.8）
+			if d.Name() == "@eaDir" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		kind, ok := ClassifyExt(d.Name())
