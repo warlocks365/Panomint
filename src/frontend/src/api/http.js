@@ -6,8 +6,12 @@ import {
   clearTokens
 } from '../utils/tokenStore'
 
+// API 基址：默认同源相对路径（生产经 web 容器 nginx 反代，隧道真机联调必需）；
+// 本地直连后端调试时可设 VITE_API_BASE=http://localhost:8080 覆盖；vite dev 经 server.proxy 转发
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+
 const http = axios.create({
-  baseURL: 'http://localhost:8080',
+  baseURL: API_BASE,
   timeout: 15000
 })
 
@@ -29,7 +33,7 @@ function refreshTokens() {
       return Promise.reject(new Error('NO_REFRESH_TOKEN'))
     }
     refreshPromise = axios
-      .post('http://localhost:8080/auth/refresh', { refresh_token })
+      .post(`${API_BASE}/auth/refresh`, { refresh_token })
       .then((res) => {
         updateTokens(res.data)
         return res.data.access_token

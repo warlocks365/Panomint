@@ -2,7 +2,8 @@
 // 关键约束：公开端点不得携带 Authorization 头 —— 这里统一使用裸 fetch / 直拼 URL，
 // 不复用 src/api/http.js（其拦截器会自动注入 Bearer）。
 
-const API_BASE = 'http://localhost:8080'
+// 同源相对路径（生产 nginx 反代 /public/* → api）；本地 dev 由 vite proxy 转发
+const API_BASE = import.meta.env.VITE_API_BASE || ''
 
 function withPassword(url, password) {
   if (!password) return url

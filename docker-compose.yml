@@ -61,6 +61,43 @@ services:
       timeout: 3s
       retries: 12
 
+  # ---- API 服务（cmd/api）：经 web 反代对外，不直接暴露宿主机端口 ----
+  api:
+    build:
+      context: ./src/backend
+      dockerfile: ../../docker/api/Dockerfile
+    container_name: pano-api
+    restart: unless-stopped
+    environment:
+      API_PORT: "8080"
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      VALKEY_ADDR: valkey:6379
+      JWT_SECRET: ${JWT_SECRET:-pano-dev-jwt-secret-lan-only}
+      UPLOAD_DIR: /data/media
+      UPLOAD_TMP: /data/uploads
+      HLS_DIR: /data/hls
+      MEDIA_ROOT: /data/media
+      THUMB_DIR: /data/thumbnails
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  # ---- 前端静态服务 + API 同源反代（LAN 暴露 8088，供本机 cloudflared 隧道回源；服务器直连 Cloudflare 被阻断）----
+  web:
+    build:
+      context: ./src/frontend
+      dockerfile: ../../docker/web/Dockerfile
+    container_name: pano-web
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    depends_on:
+      - api
+
   # ---- 常驻 Worker（TDD §8.1 方案 A）：缩略图 + HLS 转码队列消费 ----
   # 镜像共用 docker/worker/Dockerfile，由 WORKER_KIND 决定入口分发
   index-worker:
