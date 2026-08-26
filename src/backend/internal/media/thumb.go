@@ -35,6 +35,11 @@ func (h *Handler) Thumb(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "BAD_PATH", "message": "非法路径"}})
 		return
 	}
+	// 文件缺失时 c.File 会回落 net/http 默认纯文本 404；先 Stat 返回统一 JSON（与 download 的 FILE_MISSING 对齐）
+	if _, err := os.Stat(path); err != nil {
+		errResp(c, http.StatusNotFound, "FILE_MISSING", "文件不在磁盘上")
+		return
+	}
 	c.Header("Cache-Control", "public, max-age=86400")
 	c.File(path)
 }

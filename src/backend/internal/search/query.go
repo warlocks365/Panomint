@@ -20,7 +20,7 @@ func (SemanticRecaller) Recall(context.Context, SearchParams) ([]string, error) 
 
 // buildWhere 结构化过滤器层：由 SearchParams 组装参数化 WHERE（模式复用 internal/media/timeline.go）。
 //   - extraIDs：召回管道补充的媒体 ID（语义召回并集；MVP 恒空）
-//   - geo：非 nil 时 place 条件由文本 trgm 替换为 ST_DWithin 半径检索（地理降级）
+//   - geo：非 nil 时 place 条件由文本 ILIKE 替换为 ST_DWithin 半径检索（地理降级）
 func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (string, []any) {
 	conds := []string{"m.deleted_at IS NULL"}
 	var args []any
@@ -36,14 +36,16 @@ func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (string, []an
 		OR (m.space = 'shared' AND EXISTS(
 			SELECT 1 FROM shared_space_members sm WHERE sm.user_id = $%[1]d)))`, len(args)))
 
-	// q 关键词：空白分词，逐 token 匹配 文件名/地点（trgm）+ 目录（ILIKE）+ 标签（trgm EXISTS）
+	// q 关键词：空白分词，逐 token 匹配 文件名/地点/目录/标签（统一 ILIKE 子串；
+	// 短词下 trgm `%` 相似度阈值会全灭，pg_trgm GIN 索引同样加速 ILIKE '%x%'）
 	for _, tok := range strings.Fields(p.Q) {
 		args = append(args, tok)
 		n := len(args)
-		conds = append(conds, fmt.Sprintf(`(m.filename %% $%[1]d OR m.place %% $%[1]d
+		conds = append(conds, fmt.Sprintf(`(m.filename ILIKE '%%%%' || $%[1]d || '%%%%'
+			OR m.place ILIKE '%%%%' || $%[1]d || '%%%%'
 			OR m.folder_path ILIKE '%%%%' || $%[1]d || '%%%%'
 			OR EXISTS(SELECT 1 FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
-				WHERE mt.media_id = m.id AND t.name %% $%[1]d))`, n))
+				WHERE mt.media_id = m.id AND t.name ILIKE '%%%%' || $%[1]d || '%%%%'))`, n))
 	}
 	if p.Tag != "" {
 		add(`EXISTS(SELECT 1 FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
@@ -64,7 +66,7 @@ func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (string, []an
 				len(args)-1, len(args), geoRadiusM))
 		} else {
 			args = append(args, p.Place)
-			conds = append(conds, fmt.Sprintf("m.place %% $%d", len(args)))
+			conds = append(conds, fmt.Sprintf("m.place ILIKE '%%' || $%d || '%%'", len(args)))
 		}
 	}
 	switch p.Type {

@@ -1,5 +1,5 @@
 <template>
-  <div class="thumb" :title="item.filename" @click="$emit('open', item)">
+  <div ref="rootEl" class="thumb" @click="$emit('open', item)">
     <img v-if="url" :src="url" :alt="item.filename" class="thumb-img" loading="lazy" />
     <div v-else class="thumb-placeholder">
       <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
@@ -23,17 +23,22 @@
       </svg>
       {{ formatDuration(item.duration) }}
     </span>
+
+    <MediaTooltip :item="item" :anchor="rootEl" />
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { loadThumbUrl } from './mediaLoader'
+import MediaTooltip from './MediaTooltip.vue'
 
 const props = defineProps({
   item: { type: Object, required: true }
 })
 defineEmits(['open'])
+
+const rootEl = ref(null)
 
 const url = ref('')
 let alive = true

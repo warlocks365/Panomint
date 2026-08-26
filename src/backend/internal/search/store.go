@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -55,9 +56,9 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (*SearchResult, erro
 		if needGeoFallback(p.Place, res.Total, hasGPS) {
 			lon, lat, ok, err := s.Resolver.Resolve(ctx, p.Place)
 			if err != nil {
-				return nil, err
-			}
-			if ok {
+				// 解析器故障（如 Nominatim 网络不可达）不应 500：降级为文本检索零结果
+				log.Printf("place 地理解析失败 %q: %v（按不降级继续）", p.Place, err)
+			} else if ok {
 				center := GeoCenter{Lon: lon, Lat: lat}
 				gwhere, gargs := buildWhere(p, extraIDs, &center)
 				res, err = s.query(ctx, p, gwhere, gargs)

@@ -76,7 +76,7 @@ func TestBuildWhere(t *testing.T) {
 	}
 	where, args = buildWhere(p, nil, nil)
 	checks := []string{
-		"m.filename % $", "m.place % $", "m.folder_path ILIKE", "t.name % $", // q trgm
+		"m.filename ILIKE", "m.place ILIKE", "m.folder_path ILIKE", "t.name ILIKE", // q 子串匹配
 		"media_tags mt JOIN tags t",         // tag EXISTS
 		"m.taken_at >= $", "m.taken_at < $", // 日期
 		"m.type = $", "m.is_360 = false", // type
@@ -101,10 +101,10 @@ func TestBuildWhere(t *testing.T) {
 
 func TestBuildWherePlaceGeoFallback(t *testing.T) {
 	p := SearchParams{UserID: "u1", Place: "西湖"}
-	// 文本模式：trgm
+	// 文本模式：ILIKE 子串
 	where, _ := buildWhere(p, nil, nil)
-	if !strings.Contains(where, "m.place % $2") {
-		t.Errorf("文本模式应走 place trgm: %s", where)
+	if !strings.Contains(where, "m.place ILIKE '%' || $2 || '%'") {
+		t.Errorf("文本模式应走 place ILIKE: %s", where)
 	}
 	if strings.Contains(where, "ST_DWithin") {
 		t.Errorf("文本模式不应含 ST_DWithin: %s", where)
@@ -115,7 +115,7 @@ func TestBuildWherePlaceGeoFallback(t *testing.T) {
 	if !strings.Contains(where, "ST_DWithin(m.gps::geography, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, 5000)") {
 		t.Errorf("降级模式应走 5km 半径检索: %s", where)
 	}
-	if strings.Contains(where, "m.place %") {
+	if strings.Contains(where, "m.place ILIKE") {
 		t.Errorf("降级模式不应再做 place 文本匹配: %s", where)
 	}
 	if len(args) != 3 || args[1] != 120.15 || args[2] != 30.27 {
