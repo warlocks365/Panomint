@@ -18,12 +18,17 @@ type SemanticRecaller struct{}
 // Recall 占位：无语义召回。
 func (SemanticRecaller) Recall(context.Context, SearchParams) ([]string, error) { return nil, nil }
 
+// trgmRecallThreshold trgm 补充召回相似度阈值（Job000005 裁决值）。
+const trgmRecallThreshold = 0.15
+
 // buildWhere 结构化过滤器层：由 SearchParams 组装参数化 WHERE（模式复用 internal/media/timeline.go）。
 //   - extraIDs：召回管道补充的媒体 ID（语义召回并集；MVP 恒空）
 //   - geo：非 nil 时 place 条件由文本 ILIKE 替换为 ST_DWithin 半径检索（地理降级）
-func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (string, []any) {
+//
+// 返回 scoreExpr：q 非空时为相关度评分表达式（与 WHERE 复用同一 token 占位符，无额外参数）；
+// q 为空时返回空串（调用方保持 taken_at 排序原行为）。
+func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (where string, scoreExpr string, args []any) {
 	conds := []string{"m.deleted_at IS NULL"}
-	var args []any
 	add := func(cond string, v any) {
 		args = append(args, v)
 		conds = append(conds, fmt.Sprintf(cond, len(args)))
@@ -36,16 +41,36 @@ func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (string, []an
 		OR (m.space = 'shared' AND EXISTS(
 			SELECT 1 FROM shared_space_members sm WHERE sm.user_id = $%[1]d)))`, len(args)))
 
-	// q 关键词：空白分词，逐 token 匹配 文件名/地点/目录/标签（统一 ILIKE 子串；
-	// 短词下 trgm `%` 相似度阈值会全灭，pg_trgm GIN 索引同样加速 ILIKE '%x%'）
+	// q 关键词（Job000005）：多 token OR 召回（任一命中即中），单 token 命中条件 =
+	// ILIKE 完全子串（文件名/地点/目录/标签）OR trgm similarity >= 0.15（文件名/地点/标签）。
+	// 每个 token 只追加一次参数，WHERE 与 scoreExpr 复用同一占位符。
+	var tokConds, tokScores []string
 	for _, tok := range strings.Fields(p.Q) {
 		args = append(args, tok)
 		n := len(args)
-		conds = append(conds, fmt.Sprintf(`(m.filename ILIKE '%%%%' || $%[1]d || '%%%%'
+		tokConds = append(tokConds, fmt.Sprintf(`(m.filename ILIKE '%%%%' || $%[1]d || '%%%%'
 			OR m.place ILIKE '%%%%' || $%[1]d || '%%%%'
 			OR m.folder_path ILIKE '%%%%' || $%[1]d || '%%%%'
+			OR similarity(m.filename, $%[1]d) >= %[2]g
+			OR similarity(coalesce(m.place, ''), $%[1]d) >= %[2]g
 			OR EXISTS(SELECT 1 FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
-				WHERE mt.media_id = m.id AND t.name ILIKE '%%%%' || $%[1]d || '%%%%'))`, n))
+				WHERE mt.media_id = m.id AND (t.name ILIKE '%%%%' || $%[1]d || '%%%%'
+					OR similarity(t.name, $%[1]d) >= %[2]g)))`, n, trgmRecallThreshold))
+		// 评分：ILIKE 完全子串权重最高（文件名 10 / 地点 6 / 目录 4 / 标签 6），
+		// trgm 相似度作连续分补充（×2 缩放，与 ILIKE 同量级但严格更低）
+		tokScores = append(tokScores, fmt.Sprintf(`(10*(m.filename ILIKE '%%%%' || $%[1]d || '%%%%')::int
+			+ 6*(m.place ILIKE '%%%%' || $%[1]d || '%%%%')::int
+			+ 4*(m.folder_path ILIKE '%%%%' || $%[1]d || '%%%%')::int
+			+ 6*(EXISTS(SELECT 1 FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
+				WHERE mt.media_id = m.id AND t.name ILIKE '%%%%' || $%[1]d || '%%%%'))::int
+			+ 2*similarity(m.filename, $%[1]d)
+			+ 2*similarity(coalesce(m.place, ''), $%[1]d)
+			+ 2*COALESCE((SELECT max(similarity(t.name, $%[1]d)) FROM media_tags mt
+				JOIN tags t ON t.id = mt.tag_id WHERE mt.media_id = m.id), 0))`, n))
+	}
+	if len(tokConds) > 0 {
+		conds = append(conds, "("+strings.Join(tokConds, "\n\tOR ")+")")
+		scoreExpr = strings.Join(tokScores, "\n\t+ ")
 	}
 	if p.Tag != "" {
 		add(`EXISTS(SELECT 1 FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
@@ -84,7 +109,7 @@ func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (string, []an
 		args = append(args, extraIDs)
 		// 语义召回并集：结构化条件 OR 召回命中（Stage 4 生效；MVP extraIDs 恒空不拼接）
 		base := strings.Join(conds, " AND ")
-		return fmt.Sprintf("((%s) OR m.id = ANY($%d::uuid[]))", base, len(args)), args
+		return fmt.Sprintf("((%s) OR m.id = ANY($%d::uuid[]))", base, len(args)), scoreExpr, args
 	}
-	return strings.Join(conds, " AND "), args
+	return strings.Join(conds, " AND "), scoreExpr, args
 }

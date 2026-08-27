@@ -37,10 +37,18 @@ type Geo struct {
 	Lng float64 `json:"lng"`
 }
 
-// NamedRef 带名称的关联引用（tags/people/albums）。
+// NamedRef 带名称的关联引用（people/albums）。
 type NamedRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// DetailTagRef 详情页标签引用（含 kind/color，供前端区分 user/ai 并着色）。
+type DetailTagRef struct {
+	ID    string  `json:"id"`
+	Name  string  `json:"name"`
+	Kind  string  `json:"kind"`
+	Color *string `json:"color,omitempty"`
 }
 
 // Detail 媒体详情响应。
@@ -67,8 +75,9 @@ type Detail struct {
 	Filesize       *int64     `json:"filesize,omitempty"`
 	Rating         int        `json:"rating"`
 	Favorite       bool       `json:"favorite"`
+	Notes          *string    `json:"notes,omitempty"`
 	LivePhotoPair  *string    `json:"live_photo_pair_id,omitempty"`
-	Tags           []NamedRef `json:"tags"`
+	Tags           []DetailTagRef `json:"tags"`
 	People         []NamedRef `json:"people"`
 	Albums         []NamedRef `json:"albums"`
 	Exif           Exif       `json:"exif"`
@@ -95,7 +104,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 		       CASE WHEN m.gps IS NOT NULL THEN ST_X(m.gps) END,
 		       m.place, m.is_360, m.projection,
 		       m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg, m.hls_master,
-		       m.filesize, m.rating, m.live_photo_pair_id,
+		       m.filesize, m.rating, m.live_photo_pair_id, m.notes,
 		       m.camera_make, m.camera_model, m.lens_model, m.focal_length, m.aperture,
 		       m.iso, m.shutter_speed, m.exposure_bias,
 		       m.fps, m.bitrate, m.duration, m.hdr, m.color_space,
@@ -106,7 +115,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 		&d.TakenAt, &d.Width, &d.Height, &d.Codec, &lat, &lng,
 		&d.Place, &d.Is360, &d.Projection,
 		&d.ThumbnailSM, &d.ThumbnailMD, &d.ThumbnailLG, &d.HLSMaster,
-		&d.Filesize, &d.Rating, &d.LivePhotoPair,
+		&d.Filesize, &d.Rating, &d.LivePhotoPair, &d.Notes,
 		&d.Exif.CameraMake, &d.Exif.CameraModel, &d.Exif.LensModel, &d.Exif.FocalLength,
 		&d.Exif.Aperture, &d.Exif.ISO, &d.Exif.ShutterSpeed, &d.Exif.ExposureBias,
 		&vm.FPS, &vm.Bitrate, &vm.Duration, &vm.HDR, &vm.ColorSpace,
@@ -126,7 +135,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 	}
 
 	// 关联：标签 / 人物 / 相册（空结果给空数组）
-	d.Tags = []NamedRef{}
+	d.Tags = []DetailTagRef{}
 	d.People = []NamedRef{}
 	d.Albums = []NamedRef{}
 	if err := s.loadRefs(ctx, &d); err != nil {
@@ -137,12 +146,30 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 
 // loadRefs 装载 tags/people/albums 关联数组。
 func (s *Store) loadRefs(ctx context.Context, d *Detail) error {
+	// 标签：JOIN tags 表取 kind/color（前端信息窗格按 kind 区分 user/ai 并着色）
+	tagRows, err := s.Pool.Query(ctx, `
+		SELECT t.id, t.name, t.kind, t.color FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
+		WHERE mt.media_id = $1 ORDER BY t.name`, d.ID)
+	if err != nil {
+		return err
+	}
+	for tagRows.Next() {
+		var t DetailTagRef
+		if err := tagRows.Scan(&t.ID, &t.Name, &t.Kind, &t.Color); err != nil {
+			tagRows.Close()
+			return err
+		}
+		d.Tags = append(d.Tags, t)
+	}
+	tagRows.Close()
+	if err := tagRows.Err(); err != nil {
+		return err
+	}
+
 	queries := []struct {
 		sql  string
 		dest *[]NamedRef
 	}{
-		{`SELECT t.id, t.name FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
-			WHERE mt.media_id = $1 ORDER BY t.name`, &d.Tags},
 		{`SELECT DISTINCT pe.id, COALESCE(pe.name,'') FROM faces f JOIN people pe ON pe.id = f.person_id
 			WHERE f.media_id = $1 ORDER BY 2`, &d.People},
 		{`SELECT a.id, a.name FROM album_items ai JOIN albums a ON a.id = ai.album_id

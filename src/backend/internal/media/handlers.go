@@ -47,3 +47,24 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, res)
 }
+
+// DateHistogram GET /media/date-histogram?granularity=year|month（Job000005，默认 month）。
+// 权限过滤与 List 一致（space=personal 限本人）；taken_at NULL 归 unknown 桶。
+func (h *Handler) DateHistogram(c *gin.Context) {
+	granularity := c.DefaultQuery("granularity", "month")
+	if granularity != "year" && granularity != "month" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": ErrInvalidGranularity.Error()}})
+		return
+	}
+	space := c.Query("space")
+	ownerID := ""
+	if space == "personal" {
+		ownerID = c.GetString("user_id")
+	}
+	buckets, err := h.Store.DateHistogram(c.Request.Context(), ownerID, space, granularity)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, buckets)
+}

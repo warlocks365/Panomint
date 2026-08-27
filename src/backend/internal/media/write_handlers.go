@@ -1,6 +1,7 @@
 package media
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -91,6 +92,35 @@ func (h *Handler) Rate(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "rating": req.Rating})
+}
+
+// Patch PATCH /media/:id {notes}（Job000005：仅允许更新 notes 字段，其他字段拒收 400）
+func (h *Handler) Patch(c *gin.Context) {
+	var req struct {
+		Notes *string `json:"notes"`
+	}
+	dec := json.NewDecoder(c.Request.Body)
+	dec.DisallowUnknownFields() // 设计裁决：非 notes 字段一律拒收（显式优于静默忽略）
+	if err := dec.Decode(&req); err != nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "仅支持更新 notes 字段，请求体需为 {\"notes\": \"...\"}")
+		return
+	}
+	if req.Notes == nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "缺少 notes 字段")
+		return
+	}
+	id := c.Param("id")
+	if _, ok := h.checkAccess(c, id); !ok {
+		return
+	}
+	if err := h.Store.SetNotes(c.Request.Context(), id, *req.Notes); errors.Is(err, ErrNotFound) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
+		return
+	} else if err != nil {
+		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "notes": *req.Notes})
 }
 
 // Delete DELETE /media/:id（软删入回收站）

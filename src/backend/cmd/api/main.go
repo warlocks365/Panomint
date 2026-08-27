@@ -108,7 +108,9 @@ func main() {
 	authed.GET("/media/trash", permRead, mediaH.Trash)
 	authed.POST("/media/trash/:id/restore", permWrite, mediaH.Restore)
 	authed.DELETE("/media/trash/:id", permWrite, mediaH.Purge)
+	authed.GET("/media/date-histogram", permRead, mediaH.DateHistogram) // Job000005 日期密度直方图
 	authed.GET("/media/:id", permRead, mediaH.Detail)
+	authed.PATCH("/media/:id", permWrite, mediaH.Patch) // Job000005 备注（仅 notes 字段）
 	authed.POST("/media/upload", permWrite, mediaH.Upload)
 	authed.GET("/media/:id/download", permRead, mediaH.Download)
 	authed.GET("/media/:id/thumb", permRead, mediaH.Thumb)
@@ -116,6 +118,11 @@ func main() {
 	authed.POST("/media/:id/rate", permWrite, mediaH.Rate)
 	authed.DELETE("/media/:id", permWrite, mediaH.Delete)
 	authed.GET("/media/:id/360", permRead, mediaH.Pano360)
+
+	// Job000005 手工标签（读 media:read；写 media:write + 归属校验）
+	authed.GET("/tags", permRead, mediaH.ListTags)
+	authed.POST("/media/:id/tags", permWrite, mediaH.AddTag)
+	authed.DELETE("/media/:id/tags/:tag_id", permWrite, mediaH.RemoveTag)
 
 	// Phase 3 空间 / 文件夹 / 转码
 	spacesH := &spaces.Handler{Pool: pool}

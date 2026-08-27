@@ -1,58 +1,107 @@
 <template>
   <div class="player-view">
-    <div v-if="loading" class="state">加载中…</div>
-    <div v-else-if="error" class="state error">{{ error }}</div>
+    <!-- 舞台区：按类型渲染核心（照片 / 普通视频 / 360 全景直接球面渲染） -->
+    <div class="stage-area">
+      <div v-if="loading" class="state">加载中…</div>
+      <div v-else-if="error" class="state error">{{ error }}</div>
 
-    <!-- 照片：直接显示原图 -->
-    <div v-else-if="mode === 'photo'" class="photo-wrap">
-      <img v-if="photoUrl" :src="photoUrl" :alt="detail?.filename || '照片'" class="photo">
+      <!-- 照片：直接显示原图 -->
+      <div v-else-if="mode === 'photo'" class="photo-wrap">
+        <img v-if="photoUrl" :src="photoUrl" :alt="detail?.filename || '照片'" class="photo">
+      </div>
+
+      <!-- 360：已转码 → 直接进入全景播放（球面渲染） -->
+      <Player360
+        v-else-if="mode === 'pano' && hlsUrl"
+        :key="hlsUrl"
+        :media-id="mediaId"
+        :src="hlsUrl"
+        :title="detail?.filename || ''"
+        class="pano"
+      />
+
+      <!-- 360：未转码 → 提示并发起转码 -->
+      <div v-else-if="mode === 'pano'" class="state transcode">
+        <template v-if="!transcode.jobId && !transcode.failed">
+          <div class="msg">该 360 视频尚未转码</div>
+          <div class="sub">转码为 HLS 多码率流后才能全景播放</div>
+          <button class="primary" :disabled="transcode.starting" @click="startTranscode">
+            {{ transcode.starting ? '发起中…' : '发起转码（1080p）' }}
+          </button>
+        </template>
+        <template v-else-if="transcode.failed">
+          <div class="msg">转码失败</div>
+          <button class="primary" @click="startTranscode">重新发起转码</button>
+        </template>
+        <template v-else>
+          <div class="msg">转码中…（{{ transcode.status }}）</div>
+          <div class="sub">完成后将自动加载播放</div>
+        </template>
+      </div>
+
+      <!-- 普通视频 -->
+      <div v-else class="video-wrap">
+        <video ref="plainVideoRef" controls playsinline class="plain-video"></video>
+      </div>
+
+      <!-- 退出：移动端返回按钮（左上） + 右上 ×（全端） -->
+      <button v-if="!isDesktop" class="exit-btn back-btn" title="返回" @click="exit">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+          <path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <button class="exit-btn close-btn" title="退出查看器（Esc）" @click="exit">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+          <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button v-if="!isDesktop" class="exit-btn info-btn" title="媒体信息" @click="drawerOpen = true">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+          <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.6" />
+          <path d="M12 11v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          <circle cx="12" cy="7.8" r="1.1" fill="currentColor" />
+        </svg>
+      </button>
     </div>
 
-    <!-- 360：已转码 → 全景播放器 -->
-    <Player360
-      v-else-if="mode === 'pano' && hlsUrl"
-      :key="hlsUrl"
+    <!-- 桌面端：右侧信息窗格平铺 -->
+    <MediaInfoPanel
+      v-if="isDesktop"
       :media-id="mediaId"
-      :src="hlsUrl"
-      :title="detail?.filename || ''"
-      class="pano"
+      :detail="detail"
+      :loading="loading"
+      :show-close="false"
+      @deleted="exit"
     />
 
-    <!-- 360：未转码 → 提示并发起转码 -->
-    <div v-else-if="mode === 'pano'" class="state transcode">
-      <template v-if="!transcode.jobId && !transcode.failed">
-        <div class="msg">该 360 视频尚未转码</div>
-        <div class="sub">转码为 HLS 多码率流后才能全景播放</div>
-        <button class="primary" :disabled="transcode.starting" @click="startTranscode">
-          {{ transcode.starting ? '发起中…' : '发起转码（1080p）' }}
-        </button>
-      </template>
-      <template v-else-if="transcode.failed">
-        <div class="msg">转码失败</div>
-        <button class="primary" @click="startTranscode">重新发起转码</button>
-      </template>
-      <template v-else>
-        <div class="msg">转码中…（{{ transcode.status }}）</div>
-        <div class="sub">完成后将自动加载播放</div>
-      </template>
-    </div>
-
-    <!-- 普通视频 -->
-    <div v-else class="video-wrap">
-      <video ref="plainVideoRef" controls playsinline class="plain-video"></video>
+    <!-- 移动端：信息抽屉 -->
+    <div v-if="!isDesktop && drawerOpen" class="drawer-mask" @click.self="drawerOpen = false">
+      <div class="drawer">
+        <MediaInfoPanel
+          :media-id="mediaId"
+          :detail="detail"
+          :loading="loading"
+          @close="drawerOpen = false"
+          @deleted="exit"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Hls from 'hls.js'
 import http from '../api/http'
 import { getAccessToken } from '../utils/tokenStore'
+import { useResponsive } from '../composables/useResponsive'
 import Player360 from '../components/player/360Player.vue'
+import MediaInfoPanel from '../components/player/MediaInfoPanel.vue'
 
 const route = useRoute()
+const router = useRouter()
+const { isDesktop } = useResponsive()
 const mediaId = computed(() => String(route.params.id || ''))
 
 const loading = ref(true)
@@ -64,6 +113,7 @@ const hlsUrl = ref('')
 const photoUrl = ref('')
 const plainVideoRef = ref(null)
 const transcode = ref({ jobId: '', status: '', starting: false, failed: false })
+const drawerOpen = ref(false)
 
 let pollTimer = 0
 let plainHls = null
@@ -86,6 +136,7 @@ async function load() {
   hlsUrl.value = ''
   detail.value = null
   pano.value = null
+  drawerOpen.value = false
   transcode.value = { jobId: '', status: '', starting: false, failed: false }
 
   try {
@@ -100,6 +151,7 @@ async function load() {
       mode.value = 'photo'
       photoUrl.value = await fetchBlobUrl(`/media/${mediaId.value}/download`)
     } else if (p.data.is_360) {
+      // 360 媒体：直接全景播放，无「普通播放器 → 点按钮」两步
       mode.value = 'pano'
       if (p.data.hls_master) hlsUrl.value = API_BASE + p.data.hls_master
     } else {
@@ -180,19 +232,52 @@ function cleanup() {
   photoUrl.value = ''
 }
 
+/* 退出：返回来源页（优先路由历史，直达链接则回时间轴） */
+function exit() {
+  if (window.history.state?.back) {
+    router.back()
+  } else {
+    router.replace({ name: 'timeline' })
+  }
+}
+
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  // 输入框/文本域内的 Esc 留给控件自身（如关闭标签补全）
+  const tag = e.target?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return
+  exit()
+}
+
 watch(mediaId, (id) => { if (id) load() }, { immediate: true })
-onBeforeUnmount(cleanup)
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  cleanup()
+})
 </script>
 
 <style scoped>
 .player-view {
   position: relative;
-  width: 100%;
+  /* 抵消 AppShell .content 的 24px 内边距，播放器满幅展示 */
+  margin: -24px;
+  width: calc(100% + 48px);
   height: calc(100vh - var(--topbar-height));
   background: #14181d;
   overflow: hidden;
+  display: flex;
 }
+
+.stage-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .pano { position: absolute; inset: 0; }
+
 .state {
   height: 100%;
   display: flex; flex-direction: column;
@@ -217,4 +302,64 @@ onBeforeUnmount(cleanup)
   height: 100%; display: flex; align-items: center; justify-content: center;
 }
 .plain-video { max-width: 100%; max-height: 100%; }
+
+/* 退出 / 信息按钮：悬浮于舞台之上，高于 360 播放器的控制栏（z-index 10） */
+.exit-btn {
+  position: absolute;
+  z-index: 30;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20, 24, 29, 0.6);
+  color: #e6ebf0;
+  backdrop-filter: blur(6px);
+}
+
+.exit-btn:hover {
+  background: rgba(20, 24, 29, 0.85);
+  color: #fff;
+}
+
+.close-btn {
+  top: 10px;
+  right: 10px;
+}
+
+.back-btn {
+  top: 10px;
+  left: 10px;
+}
+
+.info-btn {
+  top: 10px;
+  right: 56px;
+}
+
+/* 移动端信息抽屉：底部上滑面板 */
+.drawer-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-end;
+}
+
+.drawer {
+  width: 100%;
+  max-height: 72vh;
+  background: var(--color-surface);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.drawer :deep(.info-panel) {
+  width: 100%;
+  border-left: none;
+}
 </style>

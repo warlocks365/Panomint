@@ -13,6 +13,56 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ---- Job000005：q 多 token OR + 相关度评分 ----
+
+func TestBuildWhereOrAndScore(t *testing.T) {
+	// 双 token：OR 召回（任一命中），不再逐 token AND
+	where, score, args := buildWhere(SearchParams{UserID: "u1", Q: "西湖 游船"}, nil, nil)
+	if len(args) != 3 { // userID + 2 token（WHERE 与 score 复用同一占位符）
+		t.Fatalf("参数应为 3（userID+2token），实际 %d: %v", len(args), args)
+	}
+	// 两个 token 条件组之间应是 OR 连接
+	if !strings.Contains(where, ")\n\tOR (m.filename ILIKE") {
+		t.Errorf("多 token 应 OR 连接: %s", where)
+	}
+	// trgm 补充召回阈值
+	if !strings.Contains(where, "similarity(m.filename, $2) >= 0.15") {
+		t.Errorf("应含 trgm 补充召回条件: %s", where)
+	}
+	// 评分表达式：ILIKE 权重（::int）+ similarity 连续分
+	for _, want := range []string{"10*(m.filename ILIKE", "6*(m.place ILIKE", "2*similarity(m.filename, $2)", "max(similarity(t.name, $2))"} {
+		if !strings.Contains(score, want) {
+			t.Errorf("score 表达式缺少 %q: %s", want, score)
+		}
+	}
+	// 无 q：scoreExpr 为空（调用方保持 taken_at 排序原行为）
+	if _, scoreEmpty, _ := buildWhere(SearchParams{UserID: "u1"}, nil, nil); scoreEmpty != "" {
+		t.Errorf("无 q 时 scoreExpr 应为空，实际 %q", scoreEmpty)
+	}
+	// 单 token 不拼 OR
+	where1, _, _ := buildWhere(SearchParams{UserID: "u1", Q: "西湖"}, nil, nil)
+	if strings.Count(where1, "m.filename ILIKE") != 1 {
+		t.Errorf("单 token 应仅一组命中条件: %s", where1)
+	}
+}
+
+func TestScoredCursorRoundTrip(t *testing.T) {
+	ts := time.Date(2026, 8, 27, 8, 30, 0, 456, time.UTC)
+	cur := encodeScoredCursor(12.5, ts, "abc-123")
+	sc, gotT, gotID, err := decodeScoredCursor(cur)
+	if err != nil || sc != 12.5 || gotID != "abc-123" || gotT.UnixNano() != ts.UnixNano() {
+		t.Fatalf("v2 游标往返失败: %v %v %q %v", sc, gotT, gotID, err)
+	}
+	// 旧版（无 v2 前缀）游标在评分模式下应拒绝（版本化隔离）
+	legacy := encodeCursor(ts, "abc-123")
+	if _, _, _, err := decodeScoredCursor(legacy); err == nil {
+		t.Fatal("旧版游标在评分模式应报版本错误")
+	}
+	if _, _, _, err := decodeScoredCursor("!!!bad!!!"); err == nil {
+		t.Fatal("非法 base64 应报错")
+	}
+}
+
 // ---- 参数解析器 ----
 
 func queryGetter(raw string) func(string) string {
@@ -54,7 +104,7 @@ func TestParseParams(t *testing.T) {
 
 func TestBuildWhere(t *testing.T) {
 	// 基础：仅权限 + 软删
-	where, args := buildWhere(SearchParams{UserID: "u1"}, nil, nil)
+	where, _, args := buildWhere(SearchParams{UserID: "u1"}, nil, nil)
 	if !strings.Contains(where, "m.deleted_at IS NULL") {
 		t.Errorf("缺软删过滤: %s", where)
 	}
@@ -74,7 +124,7 @@ func TestBuildWhere(t *testing.T) {
 		HasAfter: true, DateAfter: after, HasBefore: true, DateBefore: before,
 		Type: "photo", Favorites: true,
 	}
-	where, args = buildWhere(p, nil, nil)
+	where, _, args = buildWhere(p, nil, nil)
 	checks := []string{
 		"m.filename ILIKE", "m.place ILIKE", "m.folder_path ILIKE", "t.name ILIKE", // q 子串匹配
 		"media_tags mt JOIN tags t",         // tag EXISTS
@@ -93,7 +143,7 @@ func TestBuildWhere(t *testing.T) {
 	}
 
 	// type=360 仅 is_360
-	where, _ = buildWhere(SearchParams{UserID: "u1", Type: "360"}, nil, nil)
+	where, _, _ = buildWhere(SearchParams{UserID: "u1", Type: "360"}, nil, nil)
 	if !strings.Contains(where, "m.is_360 = true") || strings.Contains(where, "m.type =") {
 		t.Errorf("360 过滤错误: %s", where)
 	}
@@ -102,7 +152,7 @@ func TestBuildWhere(t *testing.T) {
 func TestBuildWherePlaceGeoFallback(t *testing.T) {
 	p := SearchParams{UserID: "u1", Place: "西湖"}
 	// 文本模式：ILIKE 子串
-	where, _ := buildWhere(p, nil, nil)
+	where, _, _ := buildWhere(p, nil, nil)
 	if !strings.Contains(where, "m.place ILIKE '%' || $2 || '%'") {
 		t.Errorf("文本模式应走 place ILIKE: %s", where)
 	}
@@ -111,7 +161,7 @@ func TestBuildWherePlaceGeoFallback(t *testing.T) {
 	}
 	// 地理降级模式：ST_DWithin 5km
 	center := &GeoCenter{Lon: 120.15, Lat: 30.27}
-	where, args := buildWhere(p, nil, center)
+	where, _, args := buildWhere(p, nil, center)
 	if !strings.Contains(where, "ST_DWithin(m.gps::geography, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, 5000)") {
 		t.Errorf("降级模式应走 5km 半径检索: %s", where)
 	}
@@ -126,12 +176,12 @@ func TestBuildWherePlaceGeoFallback(t *testing.T) {
 func TestBuildWhereSemanticRecallSlot(t *testing.T) {
 	p := SearchParams{UserID: "u1", Q: "猫"}
 	// 无召回：纯结构化
-	where, _ := buildWhere(p, nil, nil)
+	where, _, _ := buildWhere(p, nil, nil)
 	if strings.Contains(where, "ANY(") {
 		t.Errorf("无召回时不应拼 OR 并集: %s", where)
 	}
 	// 有召回 ID：OR 并集包装
-	where, args := buildWhere(p, []string{"id-a", "id-b"}, nil)
+	where, _, args := buildWhere(p, []string{"id-a", "id-b"}, nil)
 	if !strings.Contains(where, "OR m.id = ANY($3::uuid[])") {
 		t.Errorf("召回应以 OR 并集拼接: %s", where)
 	}

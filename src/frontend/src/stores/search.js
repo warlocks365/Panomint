@@ -83,6 +83,7 @@ export const useSearchStore = defineStore('search', {
         const params = this.buildParams()
         if (this.cursor) params.cursor = this.cursor
         const { data } = await searchMedia(params)
+        // items 可能带 score（OR+score 契约），前端不解析；next_cursor 为不透明三元组编码，原样回传
         const list = Array.isArray(data.items) ? data.items : []
         const seen = new Set(this.results.map((m) => m.id))
         for (const m of list) {

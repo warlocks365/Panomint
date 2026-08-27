@@ -57,6 +57,19 @@ func (s *Store) SetRating(ctx context.Context, id string, rating int) error {
 	return nil
 }
 
+// SetNotes 更新用户备注（仅 notes 字段；空串即清空）。
+func (s *Store) SetNotes(ctx context.Context, id string, notes string) error {
+	ct, err := s.Pool.Exec(ctx,
+		`UPDATE media SET notes = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`, notes, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SoftDelete 软删（入回收站）。
 func (s *Store) SoftDelete(ctx context.Context, id string) error {
 	ct, err := s.Pool.Exec(ctx,

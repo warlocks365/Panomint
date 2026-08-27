@@ -50,6 +50,7 @@ type MediaRef struct {
 	ThumbnailSM *string    `json:"thumbnail_sm,omitempty"`
 	ThumbnailMD *string    `json:"thumbnail_md,omitempty"`
 	ThumbnailLG *string    `json:"thumbnail_lg,omitempty"`
+	Score       *float64   `json:"score,omitempty"` // 搜索相关度（仅 /search 带 q 时挂载）
 }
 
 // Bucket 时间桶（钻取计数）。

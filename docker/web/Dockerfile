@@ -48,7 +48,7 @@ server {
     }
 
     # 纯 API 路由（URI 原样透传，无路径剥离）
-    location ~ ^/(auth|media|transcode|shares|public|admin|health|ready|metrics)(/|$) {
+    location ~ ^/(auth|media|transcode|shares|public|admin|health|ready|metrics|tags)(/|$) {
         proxy_pass http://api:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

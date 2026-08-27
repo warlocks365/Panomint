@@ -512,7 +512,7 @@ onBeforeUnmount(() => {
   transition: opacity 0.3s;
 }
 .bar.hidden { opacity: 0; pointer-events: none; }
-.topbar { top: 0; }
+.topbar { top: 0; padding-right: 56px; /* 为 PlayerView 右上退出按钮预留空间 */ }
 .controls { bottom: 0; flex-wrap: wrap; }
 .bar button, .bar select {
   background: transparent; color: #f2f5f8;

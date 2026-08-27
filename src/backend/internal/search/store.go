@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,8 +42,8 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (*SearchResult, erro
 	}
 
 	// 第一轮：place 文本 trgm 匹配
-	where, args := buildWhere(p, extraIDs, nil)
-	res, err := s.query(ctx, p, where, args)
+	where, scoreExpr, args := buildWhere(p, extraIDs, nil)
+	res, err := s.query(ctx, p, where, scoreExpr, args)
 	if err != nil {
 		return nil, err
 	}
@@ -58,10 +59,10 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (*SearchResult, erro
 			if err != nil {
 				// 解析器故障（如 Nominatim 网络不可达）不应 500：降级为文本检索零结果
 				log.Printf("place 地理解析失败 %q: %v（按不降级继续）", p.Place, err)
-			} else if ok {
-				center := GeoCenter{Lon: lon, Lat: lat}
-				gwhere, gargs := buildWhere(p, extraIDs, &center)
-				res, err = s.query(ctx, p, gwhere, gargs)
+		} else if ok {
+			center := GeoCenter{Lon: lon, Lat: lat}
+			gwhere, gscore, gargs := buildWhere(p, extraIDs, &center)
+			res, err = s.query(ctx, p, gwhere, gscore, gargs)
 				if err != nil {
 					return nil, err
 				}
@@ -86,28 +87,54 @@ func (s *Store) hasGPS(ctx context.Context) (bool, error) {
 }
 
 // query 执行过滤查询：total（不含游标）+ 复合游标分页（与 timeline.go 同构）。
-func (s *Store) query(ctx context.Context, p SearchParams, where string, args []any) (*SearchResult, error) {
+// scoreExpr 非空（q 带关键词）时走相关度模式：排序 score DESC, taken_at DESC, id DESC，
+// 游标为 v2 三元组 (score, taken_at, id)；否则保持原 (taken_at, id) 行为。
+func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr string, args []any) (*SearchResult, error) {
+	scored := scoreExpr != ""
+
+	// 游标条件独立于 where 拼装（total 统计不含游标，避免字符串剥离的脆弱性）
+	cursorWhere := ""
+	cursorArgs := 0
 	if p.Cursor != "" {
-		t, id, err := decodeCursor(p.Cursor)
-		if err != nil {
-			return nil, ErrInvalidCursor
+		if scored {
+			sc, t, id, err := decodeScoredCursor(p.Cursor)
+			if err != nil {
+				return nil, ErrInvalidCursor
+			}
+			args = append(args, sc, t, id)
+			cursorWhere = fmt.Sprintf(" AND ((%s), m.taken_at, m.id) < ($%d::float8, $%d::timestamptz, $%d::uuid)",
+				scoreExpr, len(args)-2, len(args)-1, len(args))
+			cursorArgs = 3
+		} else {
+			t, id, err := decodeCursor(p.Cursor)
+			if err != nil {
+				return nil, ErrInvalidCursor
+			}
+			args = append(args, t, id)
+			cursorWhere = fmt.Sprintf(" AND (m.taken_at, m.id) < ($%d, $%d)", len(args)-1, len(args))
+			cursorArgs = 2
 		}
-		args = append(args, t, id)
-		where += fmt.Sprintf(" AND (m.taken_at, m.id) < ($%d, $%d)", len(args)-1, len(args))
 	}
 
 	var total int
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM media m WHERE `+stripCursor(where),
-		args[:len(args)-cursorArgCount(p)]...).Scan(&total); err != nil {
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM media m WHERE `+where,
+		args[:len(args)-cursorArgs]...).Scan(&total); err != nil {
 		return nil, err
 	}
 
+	selectScore := "NULL::float8"
+	orderBy := "m.taken_at DESC, m.id DESC"
+	if scored {
+		selectScore = "(" + scoreExpr + ")"
+		orderBy = "score DESC, m.taken_at DESC, m.id DESC"
+	}
 	args = append(args, p.Limit+1)
 	rows, err := s.Pool.Query(ctx, `
 		SELECT m.id, m.type, m.filename, m.folder_path, m.taken_at, m.width, m.height, m.duration,
-		       m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg
-		FROM media m WHERE `+where+`
-		ORDER BY m.taken_at DESC, m.id DESC
+		       m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg,
+		       `+selectScore+` AS score
+		FROM media m WHERE `+where+cursorWhere+`
+		ORDER BY `+orderBy+`
 		LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, err
@@ -119,7 +146,7 @@ func (s *Store) query(ctx context.Context, p SearchParams, where string, args []
 		var it media.MediaRef
 		if err := rows.Scan(&it.ID, &it.Type, &it.Filename, &it.FolderPath, &it.TakenAt, &it.Width, &it.Height,
 			&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG); err != nil {
+			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG, &it.Score); err != nil {
 			return nil, err
 		}
 		res.Items = append(res.Items, it)
@@ -129,7 +156,11 @@ func (s *Store) query(ctx context.Context, p SearchParams, where string, args []
 	}
 	if len(res.Items) > p.Limit {
 		last := res.Items[p.Limit-1]
-		res.NextCursor = encodeCursor(last.TakenAt, last.ID)
+		if scored && last.Score != nil {
+			res.NextCursor = encodeScoredCursor(*last.Score, last.TakenAt, last.ID)
+		} else {
+			res.NextCursor = encodeCursor(last.TakenAt, last.ID)
+		}
 		res.Items = res.Items[:p.Limit]
 	}
 	return res, nil
@@ -154,16 +185,29 @@ func decodeCursor(s string) (time.Time, string, error) {
 	return t, id, err
 }
 
-func cursorArgCount(p SearchParams) int {
-	if p.Cursor != "" {
-		return 2
-	}
-	return 0
+// ---- v2 评分游标（score, taken_at, id）降序（Job000005；前缀 v2 与旧格式明确版本化隔离）----
+
+func encodeScoredCursor(score float64, t time.Time, id string) string {
+	return base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("v2|%g|%s|%s",
+		score, t.UTC().Format(time.RFC3339Nano), id)))
 }
 
-func stripCursor(where string) string {
-	if i := strings.LastIndex(where, " AND (m.taken_at, m.id) < "); i != -1 {
-		return where[:i]
+func decodeScoredCursor(s string) (float64, time.Time, string, error) {
+	b, err := base64.URLEncoding.DecodeString(s)
+	if err != nil {
+		return 0, time.Time{}, "", err
 	}
-	return where
+	parts := strings.SplitN(string(b), "|", 4)
+	if len(parts) != 4 || parts[0] != "v2" {
+		return 0, time.Time{}, "", errors.New("评分游标格式错误（需 v2 前缀三元组）")
+	}
+	sc, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return 0, time.Time{}, "", err
+	}
+	t, err := time.Parse(time.RFC3339Nano, parts[2])
+	if err != nil {
+		return 0, time.Time{}, "", err
+	}
+	return sc, t, parts[3], nil
 }

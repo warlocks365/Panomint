@@ -7,6 +7,7 @@
       <div v-if="item.type === 'video' && item.duration != null" class="tt-row">
         时长：{{ durationText }}
       </div>
+      <div v-if="item.score != null" class="tt-row">相关度：{{ scoreText }}</div>
     </div>
   </Teleport>
 </template>
@@ -51,6 +52,12 @@ const durationText = computed(() => {
   const s = Math.round(sec)
   const m = Math.floor(s / 60)
   return `${m}:${String(s % 60).padStart(2, '0')}`
+})
+
+// 搜索 OR+score 契约：调试期在 tooltip 展示相关度
+const scoreText = computed(() => {
+  const s = Number(props.item.score)
+  return Number.isFinite(s) ? s.toFixed(2) : String(props.item.score)
 })
 
 function clearTimer() {
