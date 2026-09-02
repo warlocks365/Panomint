@@ -30,7 +30,7 @@ func newIndexer(cfg config.Config, db *pgxpool.Pool, q *queue.Queue) *index.Inde
 		return index.New(db, q)
 	}
 	log.Print("AMAP_KEY 已加载：入库将自动反查地名填充 place")
-	return index.NewWithGeocoder(db, q, &geo.AmapGeocoder{Key: cfg.AmapKey, Pool: db})
+	return index.NewWithGeocoder(db, q, &geo.AmapGeocoder{Key: cfg.AmapKey, Secret: cfg.AmapSecret, Pool: db})
 }
 
 func main() {

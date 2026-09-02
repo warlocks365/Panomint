@@ -20,6 +20,7 @@ type Config struct {
 	HLSDir      string   // HLS 输出根目录（./data/hls）
 	MediaRoot   string   // 既有索引媒体根（media.path 相对解析回退）
 	AmapKey     string   // 高德逆地理编码 Key（空=不启用，入库时不自动填 place）
+	AmapSecret  string   // 高德安全密钥（空=不带 sig 签名；Key 绑定安全密钥后必填）
 }
 
 func env(key, def string) string {
@@ -44,6 +45,7 @@ func Load() Config {
 		HLSDir:      env("HLS_DIR", "./data/hls"),
 		MediaRoot:   env("MEDIA_ROOT", "./testdata/media"),
 		AmapKey:     env("AMAP_KEY", ""), // 空=不启用逆地理编码，入库时 place 留空
+		AmapSecret:  env("AMAP_SECRET", ""), // 空=请求不带 sig 签名
 	}
 }
 

@@ -7,12 +7,15 @@ package geo
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +47,9 @@ const (
 type AmapGeocoder struct {
 	// Key 高德 Web 服务 Key；为空时回退读取环境变量 AMAP_KEY。
 	Key string
+	// Secret 高德安全密钥（jscode）；为空时回退读取环境变量 AMAP_SECRET。
+	// 非空时为每个请求附加 sig 数字签名（Key 在控制台绑定安全密钥后必须签名）。
+	Secret string
 	// BaseURL 接口根地址，默认 https://restapi.amap.com（测试可指向 httptest server）。
 	BaseURL string
 	// Client HTTP 客户端，默认超时 5s。
@@ -125,6 +131,15 @@ func (g *AmapGeocoder) reverseGeocode(ctx context.Context, lat, lng float64) (st
 	q.Set("location", formatLocation(gLng, gLat)) // 高德要求 "lng,lat"
 	q.Set("extensions", "base")
 	q.Set("output", "JSON")
+
+	// 安全密钥（jscode）非空时附加 sig 数字签名；Key 未绑定安全密钥时不带 sig 也合法。
+	secret := strings.TrimSpace(g.Secret)
+	if secret == "" {
+		secret = strings.TrimSpace(os.Getenv("AMAP_SECRET"))
+	}
+	if secret != "" {
+		q.Set("sig", amapSig(q, secret))
+	}
 	u.RawQuery = q.Encode()
 
 	cli := g.Client
@@ -160,6 +175,29 @@ func (g *AmapGeocoder) reverseGeocode(ctx context.Context, lat, lng float64) (st
 		return "", ErrEmptyAddress
 	}
 	return addr, nil
+}
+
+// amapSig 高德数字签名：除 sig 外的全部请求参数按 key 字典序排序，
+// 以 "key=value&..." 拼接后在末尾追加安全密钥，取 md5 十六进制（小写）。
+// 注意拼接使用原始值，不做 URL 编码（高德签名规范）。
+func amapSig(q url.Values, secret string) string {
+	keys := make([]string, 0, len(q))
+	for k := range q {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	for i, k := range keys {
+		if i > 0 {
+			sb.WriteByte('&')
+		}
+		sb.WriteString(k)
+		sb.WriteByte('=')
+		sb.WriteString(q.Get(k))
+	}
+	sb.WriteString(secret)
+	sum := md5.Sum([]byte(sb.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // formatLocation 高德 location 参数："lng,lat"，最多 6 位小数。

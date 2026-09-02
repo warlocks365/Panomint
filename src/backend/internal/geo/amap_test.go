@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -248,6 +249,49 @@ func TestQPSLimiter(t *testing.T) {
 	}
 	if time.Since(start) > 100*time.Millisecond {
 		t.Errorf("ctx 取消后应立即返回，实际耗时 %v", time.Since(start))
+	}
+}
+
+// TestReverseGeocodeWithSig 配置安全密钥后请求必须带 sig，且服务端可独立复算校验。
+func TestReverseGeocodeWithSig(t *testing.T) {
+	t.Setenv("AMAP_KEY", "unit-test-key")
+	t.Setenv("AMAP_SECRET", "")
+	const secret = "unit-test-secret"
+	srv, rec := newMockServer(t, amapOKBody)
+
+	g := &AmapGeocoder{BaseURL: srv.URL, Secret: secret}
+	if _, err := g.ReverseGeocode(context.Background(), 39.908692, 116.397428); err != nil {
+		t.Fatalf("期望成功，得到 err=%v", err)
+	}
+	if rec.req == nil {
+		t.Fatal("mock 服务未收到请求")
+	}
+	q := rec.req.URL.Query()
+	got := q.Get("sig")
+	if got == "" {
+		t.Fatal("配置了 Secret 但请求未带 sig")
+	}
+	// 服务端视角独立复算：剔除 sig 后按签名规范重算，必须一致。
+	q.Del("sig")
+	if want := amapSig(q, secret); got != want {
+		t.Errorf("sig 校验失败: 请求带 %q，复算得 %q", got, want)
+	}
+}
+
+// TestAmapSigVector 签名的确定性：同输入同输出；参数乱序不影响结果（内部按 key 排序）。
+func TestAmapSigVector(t *testing.T) {
+	q1 := url.Values{"key": {"k1"}, "location": {"116.4,39.9"}, "output": {"JSON"}}
+	q2 := url.Values{"output": {"JSON"}, "key": {"k1"}, "location": {"116.4,39.9"}}
+	s1, s2 := amapSig(q1, "sec"), amapSig(q2, "sec")
+	if s1 != s2 {
+		t.Errorf("同参数不同构造顺序签名应一致: %q vs %q", s1, s2)
+	}
+	if len(s1) != 32 {
+		t.Errorf("md5 十六进制应为 32 字符，实际 %d", len(s1))
+	}
+	// 密钥不同签名必须不同
+	if amapSig(q1, "sec2") == s1 {
+		t.Error("不同安全密钥得到相同签名")
 	}
 }
 

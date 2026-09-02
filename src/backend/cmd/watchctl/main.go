@@ -68,7 +68,7 @@ func main() {
 		indexer = index.New(db, q)
 	} else {
 		log.Print("AMAP_KEY 已加载：入库将自动反查地名填充 place")
-		indexer = index.NewWithGeocoder(db, q, &geo.AmapGeocoder{Key: cfg.AmapKey, Pool: db})
+		indexer = index.NewWithGeocoder(db, q, &geo.AmapGeocoder{Key: cfg.AmapKey, Secret: cfg.AmapSecret, Pool: db})
 	}
 
 	switch os.Args[1] {
