@@ -19,6 +19,7 @@ type Config struct {
 	UploadTmp   string   // 分块上传临时目录（./data/uploads）
 	HLSDir      string   // HLS 输出根目录（./data/hls）
 	MediaRoot   string   // 既有索引媒体根（media.path 相对解析回退）
+	AmapKey     string   // 高德逆地理编码 Key（空=不启用，入库时不自动填 place）
 }
 
 func env(key, def string) string {
@@ -42,6 +43,7 @@ func Load() Config {
 		UploadTmp:   env("UPLOAD_TMP", "./data/uploads"),
 		HLSDir:      env("HLS_DIR", "./data/hls"),
 		MediaRoot:   env("MEDIA_ROOT", "./testdata/media"),
+		AmapKey:     env("AMAP_KEY", ""), // 空=不启用逆地理编码，入库时 place 留空
 	}
 }
 

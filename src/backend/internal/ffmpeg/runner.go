@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -313,6 +314,33 @@ func (t *Task) finish(waitErr error) {
 		t.mu.Unlock()
 		close(t.done)
 	})
+}
+
+// ProbeSize 用 ffprobe 获取首个视频流的分辨率（像素）。
+// media 表缺 width/height 时作为兜底，供 LadderForSource 裁剪阶梯。
+func ProbeSize(ctx context.Context, input string) (int, int, error) {
+	bin, err := LookProbePath()
+	if err != nil {
+		return 0, 0, err
+	}
+	out, err := exec.CommandContext(ctx, bin,
+		"-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+		"-of", "csv=p=0", input).Output()
+	if err != nil {
+		return 0, 0, fmt.Errorf("ffprobe: %w", err)
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	line = strings.TrimSpace(line)
+	ws, hs, ok := strings.Cut(line, ",")
+	if !ok {
+		return 0, 0, fmt.Errorf("ffprobe: 解析分辨率失败: %q", line)
+	}
+	w, errW := strconv.Atoi(strings.TrimSpace(ws))
+	h, errH := strconv.Atoi(strings.TrimSpace(hs))
+	if errW != nil || errH != nil || w <= 0 || h <= 0 {
+		return 0, 0, fmt.Errorf("ffprobe: 解析分辨率失败: %q", line)
+	}
+	return w, h, nil
 }
 
 // ProbeDurationUs 用 ffprobe 获取媒体总时长（微秒）。

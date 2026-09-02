@@ -17,9 +17,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"panoalbum/internal/config"
+	"panoalbum/internal/geo"
 	"panoalbum/internal/index"
 	"panoalbum/internal/queue"
 )
+
+// newIndexer 构造索引器：配置了 AMAP_KEY 时启用高德逆地理编码（入库自动填 place），
+// 否则降级为不填。Geocoder 内部失败不会阻塞入库，仅记日志。
+func newIndexer(cfg config.Config, db *pgxpool.Pool, q *queue.Queue) *index.Indexer {
+	if cfg.AmapKey == "" {
+		log.Print("AMAP_KEY 未设置：入库不自动填充 place（逆地理编码已禁用）")
+		return index.New(db, q)
+	}
+	log.Print("AMAP_KEY 已加载：入库将自动反查地名填充 place")
+	return index.NewWithGeocoder(db, q, &geo.AmapGeocoder{Key: cfg.AmapKey, Pool: db})
+}
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmsgprefix)
@@ -64,7 +76,7 @@ func main() {
 		if *dir == "" {
 			log.Fatal("scan 需要 -dir")
 		}
-		st, err := index.New(db, q).Scan(ctx, *dir)
+		st, err := newIndexer(cfg, db, q).Scan(ctx, *dir)
 		if err != nil {
 			log.Fatalf("扫描失败: %v", err)
 		}

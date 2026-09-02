@@ -1,7 +1,8 @@
-// transcodectl 转码命令行：worker 子命令消费 HLS 转码任务。
+// transcodectl 转码命令行：worker 子命令消费 HLS 转码任务；enqueue-videos 批量补齐缺失的 HLS 任务。
 // 用法：
 //
 //	transcodectl worker [-hlsdir ./data/hls] [-mediaroot ./testdata/media] [-uploaddir ./data/media] [-count N]
+//	transcodectl enqueue-videos [-dsn <PG 连接串>] [-profile 1080p|2k|4k] [-dry-run]
 package main
 
 import (
@@ -25,7 +26,7 @@ func main() {
 	log.SetPrefix("[transcodectl] ")
 
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "用法: transcodectl <worker> [flags]")
+		fmt.Fprintln(os.Stderr, "用法: transcodectl <worker|enqueue-videos> [flags]")
 		os.Exit(2)
 	}
 
@@ -40,21 +41,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	db, err := pgxpool.New(ctx, cfg.PGDSN)
-	if err != nil {
-		log.Fatalf("连接 PG 失败: %v", err)
-	}
-	defer db.Close()
-	if err := db.Ping(ctx); err != nil {
-		log.Fatalf("PG 不可达: %v", err)
-	}
-
-	q := queue.New("transcode", queue.Config{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPass})
-	defer q.Close()
-	if err := q.Ping(ctx); err != nil {
-		log.Fatalf("Valkey 不可达: %v", err)
-	}
-
 	switch os.Args[1] {
 	case "worker":
 		fs := flag.NewFlagSet("worker", flag.ExitOnError)
@@ -63,6 +49,11 @@ func main() {
 		uploadDir := fs.String("uploaddir", envOr("UPLOAD_DIR", "./data/media"), "上传媒体根目录")
 		count := fs.Int("count", 0, "处理 N 个任务后退出（0=持续消费）")
 		_ = fs.Parse(os.Args[2:])
+
+		db := openPG(ctx, cfg.PGDSN)
+		defer db.Close()
+		q := openQueue(ctx, cfg)
+		defer q.Close()
 
 		w := transcode.NewHLSWorker(db, q, *hlsDir, *uploadDir, *mediaRoot)
 		if *count > 0 {
@@ -83,10 +74,51 @@ func main() {
 			log.Fatalf("worker 错误: %v", err)
 		}
 
+	case "enqueue-videos":
+		fs := flag.NewFlagSet("enqueue-videos", flag.ExitOnError)
+		dsn := fs.String("dsn", cfg.PGDSN, "PostgreSQL 连接串（默认取 PG_DSN / .env）")
+		profile := fs.String("profile", "", "强制档位 1080p|2k|4k（默认按源分辨率自动选择）")
+		dryRun := fs.Bool("dry-run", false, "只打印将要入队的清单，不写库不入队")
+		_ = fs.Parse(os.Args[2:])
+
+		db := openPG(ctx, *dsn)
+		defer db.Close()
+		var q *queue.Queue // dry-run 不需要队列
+		if !*dryRun {
+			q = openQueue(ctx, cfg)
+			defer q.Close()
+		}
+		res, err := transcode.EnqueueMissingHLS(ctx, db, q, *dryRun, *profile)
+		if err != nil {
+			log.Fatalf("批量入队失败: %v", err)
+		}
+		fmt.Printf("入队完成 pending=%d enqueued=%d failed=%d\n", res.Total, res.Enqueued, res.Failed)
+
 	default:
-		fmt.Fprintf(os.Stderr, "未知子命令 %q（支持 worker）\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "未知子命令 %q（支持 worker|enqueue-videos）\n", os.Args[1])
 		os.Exit(2)
 	}
+}
+
+// openPG 建立 PG 连接池并探活。
+func openPG(ctx context.Context, dsn string) *pgxpool.Pool {
+	db, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		log.Fatalf("连接 PG 失败: %v", err)
+	}
+	if err := db.Ping(ctx); err != nil {
+		log.Fatalf("PG 不可达: %v", err)
+	}
+	return db
+}
+
+// openQueue 建立转码队列客户端并探活。
+func openQueue(ctx context.Context, cfg config.Config) *queue.Queue {
+	q := queue.New("transcode", queue.Config{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPass})
+	if err := q.Ping(ctx); err != nil {
+		log.Fatalf("Valkey 不可达: %v", err)
+	}
+	return q
 }
 
 func envOr(key, def string) string {

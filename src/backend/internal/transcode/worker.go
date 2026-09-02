@@ -76,8 +76,10 @@ func (w *HLSWorker) Handle(ctx context.Context, job queue.Job) error {
 	}
 
 	var rel string
+	var srcW, srcH int
 	if err := w.db.QueryRow(ctx,
-		`SELECT path FROM media WHERE id = $1 AND deleted_at IS NULL`, mediaID).Scan(&rel); err != nil {
+		`SELECT path, COALESCE(width, 0), COALESCE(height, 0) FROM media WHERE id = $1 AND deleted_at IS NULL`,
+		mediaID).Scan(&rel, &srcW, &srcH); err != nil {
 		// 媒体不存在：重试无意义，死信
 		_ = w.setStatus(ctx, jobID, "failed", "")
 		return fmt.Errorf("%w: 媒体查询失败: %v", queue.ErrStop, err)
@@ -92,8 +94,21 @@ func (w *HLSWorker) Handle(ctx context.Context, job queue.Job) error {
 		return err
 	}
 
-	ladder := LadderForProfile(profile)
+	// 源分辨率决定码率阶梯（绝不上采样）；库里缺失时退回 ffprobe 探测
+	if srcW <= 0 || srcH <= 0 {
+		if pw, ph, perr := ffmpeg.ProbeSize(ctx, input); perr == nil {
+			srcW, srcH = pw, ph
+		} else {
+			log.Printf("无法确认源分辨率 media=%s: %v，回退按档位名取阶梯", mediaID, perr)
+		}
+	}
+
+	ladder := LadderForSourceProfile(profile, srcW, srcH)
+	if len(ladder) == 0 { // 分辨率仍未知：沿用档位名阶梯
+		ladder = LadderForProfile(profile)
+	}
 	outDir := filepath.Join(w.hlsDir, mediaID)
+	log.Printf("转码 media=%s profile=%s src=%dx%d 档位=%s", mediaID, profile, srcW, srcH, ladderNames(ladder))
 	// 重试场景：清掉半成品目录（幂等重转）
 	_ = os.RemoveAll(outDir)
 	for _, d := range append([]string{outDir}, ffmpeg.HLSDirs(outDir, ladder)...) {
@@ -122,6 +137,15 @@ func (w *HLSWorker) Handle(ctx context.Context, job queue.Job) error {
 		return err
 	}
 	return w.setStatus(ctx, jobID, "done", masterURL)
+}
+
+// ladderNames 档位名列表（日志用）。
+func ladderNames(ladder []ffmpeg.HLSRendition) string {
+	names := make([]string, 0, len(ladder))
+	for _, r := range ladder {
+		names = append(names, r.Name)
+	}
+	return strings.Join(names, ",")
 }
 
 func (w *HLSWorker) setStatus(ctx context.Context, jobID, status, resultPath string) error {

@@ -27,15 +27,29 @@ type ScanStats struct {
 	Failed    int    // 元数据/入库失败数
 }
 
-// Indexer 媒体索引器。
-type Indexer struct {
-	db *pgxpool.Pool
-	q  *queue.Queue
+// Geocoder 逆地理编码能力抽象（实现见 internal/geo.AmapGeocoder）。
+// 实现必须容忍失败：无 Key / 配额耗尽 / 网络不通时返回错误，
+// 由索引器降级跳过、仅记日志，绝不阻塞媒体入库。
+type Geocoder interface {
+	ReverseGeocode(ctx context.Context, lat, lng float64) (string, error)
 }
 
-// New 创建索引器。
+// Indexer 媒体索引器。
+type Indexer struct {
+	db       *pgxpool.Pool
+	q        *queue.Queue
+	geocoder Geocoder // 可为 nil，表示不启用逆地理编码
+}
+
+// New 创建索引器（不启用逆地理编码）。
 func New(db *pgxpool.Pool, q *queue.Queue) *Indexer {
 	return &Indexer{db: db, q: q}
+}
+
+// NewWithGeocoder 创建带逆地理编码能力的索引器：入库时若取到 GPS，
+// 会调用 g 反查地名写入 media.place。g 为 nil 时行为等价于 New。
+func NewWithGeocoder(db *pgxpool.Pool, q *queue.Queue, g Geocoder) *Indexer {
+	return &Indexer{db: db, q: q, geocoder: g}
 }
 
 // EnsureSeedUser 保证存在 owner 种子用户，返回其 id（幂等）。
@@ -79,18 +93,21 @@ func (x *Indexer) insertMedia(ctx context.Context, ownerID string, e FileEntry, 
 		INSERT INTO media (
 			type, space, owner_id, path, folder_path, filename,
 			taken_at, width, height, duration, codec, fps,
-			gps, hash, filesize, camera_make, camera_model
+			gps, hash, filesize, camera_make, camera_model,
+			is_360, projection, place
 		) VALUES (
 			$1, 'personal', $2, $3, $4, $5,
 			$6, $7, $8, $9, $10, $11,
 			CASE WHEN $12::float8 IS NOT NULL AND $13::float8 IS NOT NULL
 			     THEN ST_SetSRID(ST_MakePoint($13, $12), 4326) END,
-			$14, $15, $16, $17
+			$14, $15, $16, $17,
+			$18, $19, $20
 		) RETURNING id`,
 		string(e.Kind), ownerID, e.Rel, e.Folder, e.Filename,
 		*takenAt, nullInt(m.Width), nullInt(m.Height), duration, nullStr(m.Codec), nullFloat(m.FPS),
 		m.Lat, m.Lng,
 		e.Hash, e.Size, nullStr(m.CameraMake), nullStr(m.CameraModel),
+		m.Is360, nullStr(m.Projection), nullStr(m.Place),
 	).Scan(&id)
 	return id, err
 }
@@ -261,6 +278,17 @@ func (x *Indexer) indexOne(ctx context.Context, ownerID string, e FileEntry) (En
 	}
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("元数据: %w", err)
+	}
+
+	// 逆地理编码：有 GPS 且配置了 Geocoder 时回填 place。
+	// 失败（无 Key / 配额耗尽 / 网络不通 / 境外坐标）只记日志，绝不阻塞入库。
+	if m.Place == "" && m.Lat != nil && m.Lng != nil && x.geocoder != nil {
+		place, gerr := x.geocoder.ReverseGeocode(ctx, *m.Lat, *m.Lng)
+		if gerr != nil {
+			log.Printf("逆地理编码跳过: %s (%v,%v): %v", e.Rel, *m.Lat, *m.Lng, gerr)
+		} else {
+			m.Place = place
+		}
 	}
 
 	mediaID, err := x.insertMedia(ctx, ownerID, e, m)

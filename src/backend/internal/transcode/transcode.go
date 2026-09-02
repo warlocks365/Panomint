@@ -37,6 +37,52 @@ func LadderForProfile(profile string) []ffmpeg.HLSRendition {
 	}
 }
 
+// profileMaxHeight 档位名 → 允许的最大档位高度（0 = 不额外限制）。
+func profileMaxHeight(profile string) int {
+	switch profile {
+	case "1080p":
+		return 1080
+	case "2k":
+		return 1440
+	default: // 4k 及未知档位不额外限高（仍受源分辨率约束）
+		return 0
+	}
+}
+
+// LadderForSourceProfile 结合源分辨率与档位上限裁剪码率阶梯，**绝不上采样**：
+// 先按 srcWidth/srcHeight 裁剪（ffmpeg.LadderForSource），再按档位名限高。
+// srcWidth/srcHeight ≤ 0（分辨率未知）时返回 nil，调用方应回退 LadderForProfile。
+func LadderForSourceProfile(profile string, srcWidth, srcHeight int) []ffmpeg.HLSRendition {
+	ladder := ffmpeg.LadderForSource(srcWidth, srcHeight)
+	maxH := profileMaxHeight(profile)
+	if maxH <= 0 {
+		return ladder
+	}
+	out := make([]ffmpeg.HLSRendition, 0, len(ladder))
+	for _, r := range ladder {
+		if r.Height <= maxH {
+			out = append(out, r)
+		}
+	}
+	// 阶梯本身已按源裁剪，理论上不会全被限高剔除；兜底保留最高档
+	if len(out) == 0 {
+		return ladder
+	}
+	return out
+}
+
+// ProfileForSource 按源分辨率推荐档位名（写入 transcode_jobs.profile）。
+func ProfileForSource(srcWidth, srcHeight int) string {
+	switch {
+	case srcWidth > 2560 || srcHeight > 1440:
+		return "4k"
+	case srcWidth > 1920 || srcHeight > 1080:
+		return "2k"
+	default: // 含分辨率未知的保守档
+		return "1080p"
+	}
+}
+
 // validProfile 校验档位名。
 func validProfile(p string) bool {
 	return p == "1080p" || p == "2k" || p == "4k"

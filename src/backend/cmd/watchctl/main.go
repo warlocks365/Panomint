@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"panoalbum/internal/config"
+	"panoalbum/internal/geo"
 	"panoalbum/internal/index"
 	"panoalbum/internal/queue"
 	"panoalbum/internal/watch"
@@ -59,7 +60,16 @@ func main() {
 	if err := q.Ping(ctx); err != nil {
 		log.Fatalf("Valkey 不可达: %v", err)
 	}
-	indexer := index.New(db, q)
+	// 配置了 AMAP_KEY 时启用逆地理编码（入库自动填 place），否则降级为不填。
+	// Geocoder 内部失败不会阻塞入库，仅记日志。
+	var indexer *index.Indexer
+	if cfg.AmapKey == "" {
+		log.Print("AMAP_KEY 未设置：入库不自动填充 place（逆地理编码已禁用）")
+		indexer = index.New(db, q)
+	} else {
+		log.Print("AMAP_KEY 已加载：入库将自动反查地名填充 place")
+		indexer = index.NewWithGeocoder(db, q, &geo.AmapGeocoder{Key: cfg.AmapKey, Pool: db})
+	}
 
 	switch os.Args[1] {
 	case "scan":
