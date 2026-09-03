@@ -115,6 +115,9 @@ services:
       UPLOAD_DIR: /data/media
       HLS_DIR: /data/hls
       MEDIA_ROOT: /data/media
+      # 高德逆地理编码（空=入库不自动填 place；AMAP_SECRET 非空时请求带 sig 签名）
+      AMAP_KEY: ${AMAP_KEY:-}
+      AMAP_SECRET: ${AMAP_SECRET:-}
     volumes:
       - mediadata:/data
     depends_on:
