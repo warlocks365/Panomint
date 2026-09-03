@@ -4,9 +4,9 @@
     <video ref="videoRef" crossorigin="anonymous" playsinline webkit-playsinline loop muted class="pano-video"></video>
 
     <div class="bar topbar" :class="{ hidden: barsHidden }">
-      <span class="title">{{ title || '360 全景播放' }}</span>
+      <span class="title">{{ title || (isPhoto ? '360 全景照片' : '360 全景播放') }}</span>
       <span class="stats">{{ statsText }}</span>
-      <select v-model="qualityValue" @change="onQualityChange">
+      <select v-if="!isPhoto" v-model="qualityValue" @change="onQualityChange">
         <option value="-1">自动</option>
         <option v-for="q in qualityOptions" :key="q.value" :value="q.value" :disabled="q.disabled">
           {{ q.label }}
@@ -15,13 +15,13 @@
     </div>
 
     <div class="bar controls" :class="{ hidden: barsHidden }">
-      <div class="progress-wrap">
+      <div v-if="!isPhoto" class="progress-wrap">
         <span class="time">{{ timeText }}</span>
         <input type="range" class="progress" min="0" max="1000" v-model="progressValue" @input="onSeek">
       </div>
-      <button @click="togglePlay">{{ playing ? '暂停' : '播放' }}</button>
-      <button :class="{ active: !muted }" @click="toggleMute">音量</button>
-      <select v-model="rate" @change="onRateChange">
+      <button v-if="!isPhoto" @click="togglePlay">{{ playing ? '暂停' : '播放' }}</button>
+      <button v-if="!isPhoto" :class="{ active: !muted }" @click="toggleMute">音量</button>
+      <select v-if="!isPhoto" v-model="rate" @change="onRateChange">
         <option value="0.5">0.5x</option>
         <option value="1">1.0x</option>
         <option value="1.5">1.5x</option>
@@ -43,16 +43,20 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import * as THREE from 'three'
 import Hls from 'hls.js'
 import { getAccessToken } from '../../utils/tokenStore'
 
 const props = defineProps({
   mediaId: { type: String, required: true },
-  src: { type: String, required: true }, // hls master 完整 URL
-  title: { type: String, default: '' }
+  src: { type: String, required: true }, // video: hls master 完整 URL；photo: 图片 URL
+  title: { type: String, default: '' },
+  mode: { type: String, default: 'video' }, // video | photo（360 照片球面渲染）
+  auth: { type: String, default: 'bearer' }, // bearer（主站 HLS 带 token）| none（分享公开端点免鉴权）
+  appendQuery: { type: String, default: '' } // 追加到每个 HLS 请求 URL 的查询串（如分享密码 password=xxx）
 })
+const isPhoto = computed(() => props.mode === 'photo')
 
 const containerRef = ref(null)
 const videoRef = ref(null)
@@ -207,18 +211,16 @@ async function enterVr() {
   try {
     const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] })
     session.addEventListener('end', () => {
-      video.pause()
-      playing.value = false
+      if (!isPhoto.value) { video.pause(); playing.value = false }
     })
     await renderer.xr.setSession(session)
-    video.play()
-    playing.value = true
+    if (!isPhoto.value) { video.play().catch(() => {}); playing.value = true }
   } catch (err) {
     showToast('VR 会话启动失败：' + err.message)
   }
 }
 function onVisibilityChange() {
-  if (document.hidden) { video.pause(); playing.value = false }
+  if (!isPhoto.value && document.hidden) { video.pause(); playing.value = false }
 }
 
 /* ---- hls.js ---- */
@@ -229,10 +231,17 @@ function attachHls(url) {
     hls = new Hls({
       maxBufferLength: 30,
       capLevelToPlayerSize: false,
-      // HLS 端点需 Bearer 鉴权
-      xhrSetup: (xhr) => {
-        const token = getAccessToken()
-        if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+      xhrSetup: (xhr, url) => {
+        // 分享密码：m3u8 相对路径的 ts 切片请求不继承 master URL 查询串，逐请求补挂
+        if (props.appendQuery) {
+          const sep = url.includes('?') ? '&' : '?'
+          xhr.open('GET', url + sep + props.appendQuery, true)
+        }
+        // 主站 HLS 需 Bearer；分享公开端点免鉴权
+        if (props.auth === 'bearer') {
+          const token = getAccessToken()
+          if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
+        }
       }
     })
     hls.loadSource(url)
@@ -293,6 +302,33 @@ function onQualityChange() {
   hls.currentLevel = Number(qualityValue.value)
 }
 
+/* ---- 360 照片：TextureLoader 贴球（与视频共用球体/交互/陀螺仪/VR） ---- */
+function attachPhoto(url) {
+  statsText.value = '加载中…'
+  new THREE.TextureLoader().load(
+    url,
+    (tex) => {
+      if (disposed) { tex.dispose(); return }
+      // SphereGeometry 顶部 UV v=1 → 图片顶行；flipY=true 时 v=1 恰为顶行，天顶朝上（与初始纹理约定一致）
+      tex.flipY = true
+      tex.colorSpace = THREE.SRGBColorSpace
+      const old = texture
+      texture = tex
+      sphereMat.uniforms.map.value = tex
+      if (old) old.dispose()
+      showToast('全景照片已加载')
+    },
+    undefined,
+    () => { showOverlay('图片加载失败', '请检查网络后重试') }
+  )
+}
+
+/* ---- 按媒体形态分派加载：照片贴图 / 视频 HLS ---- */
+function attachSource() {
+  if (isPhoto.value) attachPhoto(props.src)
+  else attachHls(props.src)
+}
+
 /* ---- 性能监测 ---- */
 function fpsTick() {
   frameCount++
@@ -350,7 +386,7 @@ function showOverlay(msg, sub) {
 }
 function onRetry() {
   overlay.show = false
-  attachHls(props.src)
+  attachSource()
 }
 function showToast(text) {
   statsText.value = text
@@ -382,8 +418,10 @@ onMounted(() => {
   scene = new THREE.Scene()
   camera = new THREE.PerspectiveCamera(75, w / h, 0.1, 1000)
 
-  texture = new THREE.VideoTexture(video)
-  texture.flipY = false
+  texture = isPhoto.value ? new THREE.Texture() : new THREE.VideoTexture(video)
+  // SphereGeometry 顶部 UV v=1 → 图片/帧顶行；flipY=true 时 v=1 恰为顶行，天顶朝上。
+  // （此前视频路径 flipY=false 为合成素材期未暴露的朝向缺陷，本次一并修正）
+  texture.flipY = true
   texture.colorSpace = THREE.SRGBColorSpace
 
   sphereGeo = new THREE.SphereGeometry(500, 64, 32)
@@ -440,7 +478,7 @@ onMounted(() => {
     renderer.render(scene, camera)
   })
 
-  attachHls(props.src)
+  attachSource()
   pokeBars()
 })
 

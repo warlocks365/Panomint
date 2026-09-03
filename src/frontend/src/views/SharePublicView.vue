@@ -105,10 +105,27 @@
         </button>
         <div class="player-box">
           <video ref="videoEl" class="player-video" controls autoplay playsinline webkit-playsinline></video>
-          <p v-if="is360(playingItem)" class="pano-note">
-            360 媒体本期以普通视频模式播放，全景模式即将上线
-          </p>
           <p v-if="playerError" class="player-error">{{ playerError }}</p>
+        </div>
+      </div>
+
+      <!-- 360 全景（照片/视频统一球面渲染） -->
+      <div v-if="panoItem" class="viewer-mask" @click.self="closePano">
+        <button class="viewer-close" type="button" aria-label="关闭" @click="closePano">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </button>
+        <div class="pano-box">
+          <Player360
+            :key="panoItem.id"
+            :media-id="String(panoItem.id)"
+            :mode="panoItem.type === 'photo' ? 'photo' : 'video'"
+            :src="panoSrc"
+            :title="panoItem.filename || ''"
+            auth="none"
+            :append-query="panoAppendQuery"
+          />
         </div>
       </div>
     </template>
@@ -116,10 +133,11 @@
 </template>
 
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import Hls from 'hls.js'
-import { fetchPublicShare, loadPublicThumb, publicHlsUrl } from '../components/shares/publicApi'
+import { fetchPublicShare, loadPublicThumb, publicHlsUrl, publicThumbUrl } from '../components/shares/publicApi'
+import Player360 from '../components/player/360Player.vue'
 
 const route = useRoute()
 const token = route.params.token
@@ -145,12 +163,24 @@ const videoEl = ref(null)
 let hls = null
 let alive = true
 
+/* 360 全景查看器状态：照片取 lg 缩略图贴球面，视频走公开 HLS */
+const panoItem = ref(null)
+const panoSrc = computed(() => {
+  if (!panoItem.value) return ''
+  if (panoItem.value.type === 'photo') return publicThumbUrl(token, panoItem.value.id, 'lg', password.value)
+  return publicHlsUrl(token, panoItem.value.id, password.value)
+})
+// 密码分享的 HLS ts 切片请求不继承 master URL 查询串，需逐请求补挂
+const panoAppendQuery = computed(() => (password.value ? `password=${encodeURIComponent(password.value)}` : ''))
+
 function isVideo(m) {
-  return m.type === 'video' || m.type === '360'
+  // 360 视频走全景播放，不进普通播放器
+  return m.type === 'video' && !is360(m)
 }
 
 function is360(m) {
-  return m.type === '360'
+  // MediaRef.type 恒为枚举原值（photo|video），360 以独立 is_360 标记；'360' 兼容旧契约
+  return !!m.is_360 || m.type === '360'
 }
 
 function thumbOf(id) {
@@ -229,6 +259,10 @@ async function submitPassword() {
 }
 
 async function openItem(m) {
+  if (is360(m)) {
+    panoItem.value = m // 360 照片/视频统一进全景查看器
+    return
+  }
   if (isVideo(m)) {
     openPlayer(m)
   } else {
@@ -256,7 +290,16 @@ async function openPlayer(m) {
   if (!v) return
   const url = publicHlsUrl(token, m.id, password.value)
   if (Hls.isSupported()) {
-    hls = new Hls({ enableWorker: true })
+    hls = new Hls({
+      enableWorker: true,
+      // 密码分享：m3u8 相对路径的 ts 切片请求不继承 master URL 查询串，逐请求补挂 password
+      xhrSetup: (xhr, url) => {
+        if (password.value) {
+          const sep = url.includes('?') ? '&' : '?'
+          xhr.open('GET', url + sep + 'password=' + encodeURIComponent(password.value), true)
+        }
+      }
+    })
     hls.on(Hls.Events.ERROR, (_evt, data) => {
       if (data?.fatal) playerError.value = '视频加载失败，请稍后重试'
     })
@@ -287,6 +330,10 @@ function closePlayer() {
   destroyPlayer()
   playingItem.value = null
   playerError.value = ''
+}
+
+function closePano() {
+  panoItem.value = null // v-if 卸载即触发 Player360 自身资源销毁
 }
 
 onMounted(async () => {
@@ -574,6 +621,17 @@ onBeforeUnmount(() => {
   width: 100%;
   max-height: 80vh;
   background-color: #000;
+}
+
+/* 360 球面渲染容器：占满可视区（Player360 内部自带控制栏） */
+.pano-box {
+  position: relative;
+  width: 94vw;
+  height: 84vh;
+  max-width: 1200px;
+  background-color: #14181d;
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 .pano-note {

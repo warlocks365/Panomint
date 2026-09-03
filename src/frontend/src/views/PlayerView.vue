@@ -10,18 +10,19 @@
         <img v-if="photoUrl" :src="photoUrl" :alt="detail?.filename || '照片'" class="photo">
       </div>
 
-      <!-- 360：已转码 → 直接进入全景播放（球面渲染） -->
+      <!-- 360：照片 → 球面渲染（TextureLoader）；视频已转码 → 全景播放 -->
       <Player360
-        v-else-if="mode === 'pano' && hlsUrl"
-        :key="hlsUrl"
+        v-else-if="mode === 'pano' && panoReady"
+        :key="panoSrc"
         :media-id="mediaId"
-        :src="hlsUrl"
+        :mode="panoKind"
+        :src="panoSrc"
         :title="detail?.filename || ''"
         class="pano"
       />
 
-      <!-- 360：未转码 → 提示并发起转码 -->
-      <div v-else-if="mode === 'pano'" class="state transcode">
+      <!-- 360 视频：未转码 → 提示并发起转码（照片无需转码） -->
+      <div v-else-if="mode === 'pano' && panoKind === 'video'" class="state transcode">
         <template v-if="!transcode.jobId && !transcode.failed">
           <div class="msg">该 360 视频尚未转码</div>
           <div class="sub">转码为 HLS 多码率流后才能全景播放</div>
@@ -111,6 +112,7 @@ const pano = ref(null)
 const mode = ref('') // photo | pano | video
 const hlsUrl = ref('')
 const photoUrl = ref('')
+const panoPhotoUrl = ref('') // 360 照片：原图 blob URL（球面贴图）
 const plainVideoRef = ref(null)
 const transcode = ref({ jobId: '', status: '', starting: false, failed: false })
 const drawerOpen = ref(false)
@@ -120,6 +122,11 @@ let plainHls = null
 let blobUrls = []
 
 const API_BASE = http.defaults.baseURL
+
+/* 360 播放属性：照片走 TextureLoader，视频走 HLS */
+const panoKind = computed(() => (detail.value?.type === 'photo' ? 'photo' : 'video'))
+const panoSrc = computed(() => (panoKind.value === 'photo' ? panoPhotoUrl.value : hlsUrl.value))
+const panoReady = computed(() => !!panoSrc.value)
 
 function trackBlob(url) { blobUrls.push(url); return url }
 
@@ -147,13 +154,17 @@ async function load() {
     detail.value = d.data
     pano.value = p.data
 
-    if (d.data.type === 'photo') {
+    if (p.data.is_360) {
+      // 360 媒体：直接全景播放（照片贴球面 / 视频走 HLS），无「普通播放器 → 点按钮」两步
+      mode.value = 'pano'
+      if (d.data.type === 'photo') {
+        panoPhotoUrl.value = await fetchBlobUrl(`/media/${mediaId.value}/download`)
+      } else if (p.data.hls_master) {
+        hlsUrl.value = API_BASE + p.data.hls_master
+      }
+    } else if (d.data.type === 'photo') {
       mode.value = 'photo'
       photoUrl.value = await fetchBlobUrl(`/media/${mediaId.value}/download`)
-    } else if (p.data.is_360) {
-      // 360 媒体：直接全景播放，无「普通播放器 → 点按钮」两步
-      mode.value = 'pano'
-      if (p.data.hls_master) hlsUrl.value = API_BASE + p.data.hls_master
     } else {
       mode.value = 'video'
       loading.value = false // 先渲染出 video 元素再挂载 HLS
@@ -230,6 +241,7 @@ function cleanup() {
   for (const u of blobUrls) URL.revokeObjectURL(u)
   blobUrls = []
   photoUrl.value = ''
+  panoPhotoUrl.value = ''
 }
 
 /* 退出：返回来源页（优先路由历史，直达链接则回时间轴） */
