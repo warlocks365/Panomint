@@ -1,0 +1,23 @@
+# 内网 HTTPS 入口（Job000008）：泛域名证书静态挂载，反代到 pano-web
+# 证书：Let's Encrypt *.warlocks.cn（来此加密渠道签发，2026-10-13 到期，需手动续期后重启本容器）
+{
+	auto_https disable_redirects
+}
+
+panomint.warlocks.cn, photo.warlocks.cn {
+	tls /etc/caddy/certs/fullchain.crt /etc/caddy/certs/private.pem
+	reverse_proxy web:80 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+	# 与 web 容器一致的上传体上限（100m）
+	request_body {
+		max_size 100MB
+	}
+	encode zstd gzip
+	log {
+		output stdout
+		format console
+	}
+}

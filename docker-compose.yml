@@ -98,6 +98,23 @@ services:
     depends_on:
       - api
 
+  # ---- 内网 HTTPS 入口（Job000008）：泛域名证书静态挂载，443 反代 web:80 ----
+  # 证书文件部署在宿主机 ./docker/caddy/certs/（fullchain.crt + private.pem，权限 600，不入库）
+  # 续期：证书 2026-10-13 到期（来此加密手动签发），换新后 docker compose restart caddy
+  caddy:
+    image: caddy:2-alpine
+    container_name: pano-caddy
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docker/caddy/certs:/etc/caddy/certs:ro
+      - caddydata:/data
+    depends_on:
+      - web
+
   # ---- 常驻 Worker（TDD §8.1 方案 A）：缩略图 + HLS 转码队列消费 ----
   # 镜像共用 docker/worker/Dockerfile，由 WORKER_KIND 决定入口分发
   index-worker:
@@ -154,3 +171,4 @@ volumes:
   valkeydata:
   miniodata:
   mediadata:
+  caddydata:

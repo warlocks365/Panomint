@@ -31,6 +31,8 @@ __pycache__/
 .env.local
 *.pem
 !prototypes/**/*.pem
+# TLS 证书与私钥（Job000008 内网 HTTPS）
+docker/caddy/certs/
 
 # ===== Test data & uploads =====
 src/backend/data/
