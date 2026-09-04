@@ -220,27 +220,34 @@ Step 7: 许可合规扫描
 
 ---
 
-## 四-补、当前进度快照（2026-09-03 更新，Job000007 完成节点）
+## 四-补、当前进度快照（2026-09-04 更新，Job000008 完成节点）
 
 **已完成**：Phase 0-3 全部（合规前置、后端骨架、双原型、P0 完整化六任务）；Phase 4 Stage 1（相册+智能相册+两级评论）、Stage 2（微信 H5 分享）、#7（Worker 容器化）；Stage 3 结构化搜索；七项遗留问题全部闭环。
 
-**Job 流水线**：Job000001 搜索后端+UI ｜ Job000002 GitHub 同步+watchctl+全栈容器化 ｜ Job000003 搜索三连修复+悬停浮窗 ｜ Job000004 孤儿清理+72 样本重建 ｜ Job000005 统一播放器+时间轴滑块+备注标签+搜索排序 ｜ Job000006 媒体处理流水线补齐（360 自动检测 / 高德逆地理编码 / 批量 HLS 转码）｜ **Job000007 360 播放引擎补全（360 照片球面渲染 / 分享页内嵌全景 / flipY 朝向修正）**。**全部完成并推送**。
+**Job 流水线**：Job000001 搜索后端+UI ｜ Job000002 GitHub 同步+watchctl+全栈容器化 ｜ Job000003 搜索三连修复+悬停浮窗 ｜ Job000004 孤儿清理+72 样本重建 ｜ Job000005 统一播放器+时间轴滑块+备注标签+搜索排序 ｜ Job000006 媒体处理流水线补齐 ｜ Job000007 360 播放引擎补全 ｜ **Job000008 内网 HTTPS 打通（Caddy 容器反代 + *.warlocks.cn 泛域名证书）**。**全部完成并推送**。
 
 **Job000007 要点（9/03，60d543c）**：
 - **360 照片球面渲染**：360Player 扩展 `mode=video|photo`（TextureLoader 贴球，与视频共用球体/拖拽/捏合/陀螺仪/VR）；PlayerView 按 is_360 优先路由，360 照片直接进 pano 模式
 - **分享页内嵌全景**：SharePublicView 点击 360 媒体直接球面渲染（`auth=none` 免鉴权）；密码分享的 HLS ts 切片逐请求补挂 `?password=`（hls.js 不继承 master 查询串的潜伏缺陷，普通视频播放器同类问题一并修复）；`is360` 判定改 `m.is_360`（修 type==='360' 失效契约）
 - **flipY 朝向修正**：SphereGeometry 顶部 UV v=1=图片顶行 → flipY 统一 true（原视频路径 false 是合成素材期未暴露的潜伏缺陷）；截图实证天顶朝上
-- **验证**：测试服 headless Chrome（CfT linux64）+ CDP 脚本四场景截图全过：主站 360 照片/视频、分享 360 照片（免密）、分享 360 视频（密码全链）；陀螺仪/VR 仍待内网 HTTPS
+- **验证**：测试服 headless Chrome（CfT linux64）+ CDP 脚本四场景截图全过：主站 360 照片/视频、分享 360 照片（免密）、分享 360 视频（密码全链）
 - **工程教训**：同文件多 Edit 并行竞态已两次丢编辑（vite build 无感）——必须串行+grep 核验；web 镜像只 COPY dist，须先本机 build 再同步服务器重建
 
-**代码基线**：`main` @ `60d543c`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v12**。
-**测试服**：192.168.1.115 七容器全 Up，web 绑 :8088；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**）；新增 CfT headless 验证环境。
-**Token 累计**：**21,887.41**（Job000006=881.83 已入账）；Job000007 消耗待用户报数。
+**Job000008 要点（9/04，74c1b7c）**：
+- **TLS 架构**：新增 `pano-caddy` 容器（caddy:2-alpine）静态挂载 `*.warlocks.cn` 泛域名证书（Let's Encrypt，来此加密渠道手动签发），443 反代 `web:80`；80 端口宝塔 nginx 不动，:8088 直连保留
+- **域名**：`panomint.warlocks.cn`（主站）/ `photo.warlocks.cn`（分享页）均 A 记录 → 192.168.1.115；本机 curl 双域名 https=200、证书链校验通过
+- **服务器 DNS 坑（本次超时根因）**：服务器首选 DNS 192.168.1.1 无响应、114DNS 对该记录 SERVFAIL → Chrome `DNS_PROBE_FINISHED_NXDOMAIN`，四场景全挂同一错误页且 ssh_exec 5 分钟读取超时；修法：`/etc/hosts` 固定两条记录（内网域名内网直连，最小侵入）
+- **验证**：HTTPS 通道四场景 headless Chrome 回归全绿——`secure: true`（isSecureContext 解锁）×4、canvas 全 true、密码分享全链通过、截图与 HTTP 基线一致；后台 nohup + 日志轮询规避 ssh 读取超时
+- **证书运维**：2026-10-13 到期；换新后替换 `docker/caddy/certs/` 内文件并 `docker compose restart caddy`；certs 目录已 gitignore
+
+**代码基线**：`main` @ `74c1b7c`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v12**。
+**测试服**：192.168.1.115 **八容器**全 Up（+pano-caddy），web 绑 :8088 / caddy 绑 :443；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**）；CfT headless 验证环境 + verify360.py（支持 base 参数）。
+**Token 累计**：**21,887.41**（Job000006=881.83 已入账）；Job000007/000008 消耗待用户报数。
 
 **⚠️ 大模型切换**：2026-09-02 用户由 Kimi-K3 切至 Hy4 preview。已出**阶段性快照**存档：
 `文档/阶段性快照_Job000005节点.md`（含回滚指引、部署拓扑、数据状态、契约事实、坑位红线、Token 台账）。后续 Job 如需回滚，读该文件即可从 Job000006 精确续做。
 
-**待办**：地图模式原型（P0）/ 数据迁移扫描器（P1，注意 scan -dir 路径坑）；测试服 mkcert + Caddy 内网 HTTPS（修微信陀螺仪根因，陀螺仪/VR 真机验证前置）；云端 DDL 勘误三项待接受；真机验证三项未回收 + 360 球面真机抽查（两条测试分享保留中）。
+**待办**：地图模式原型（P0）/ 数据迁移扫描器（P1，注意 scan -dir 路径坑）；陀螺仪/VR 真机验证（HTTPS 前置已就绪，等用户手机实测）；云端 DDL 勘误三项待接受；真机验证三项未回收 + 360 球面真机抽查（两条测试分享保留中）。
 
 ---
 
