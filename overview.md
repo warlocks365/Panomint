@@ -220,11 +220,11 @@ Step 7: 许可合规扫描
 
 ---
 
-## 四-补、当前进度快照（2026-09-04 更新，Job000008 完成节点）
+## 四-补、当前进度快照（2026-09-11 更新，Job000009 完成节点）
 
 **已完成**：Phase 0-3 全部（合规前置、后端骨架、双原型、P0 完整化六任务）；Phase 4 Stage 1（相册+智能相册+两级评论）、Stage 2（微信 H5 分享）、#7（Worker 容器化）；Stage 3 结构化搜索；七项遗留问题全部闭环。
 
-**Job 流水线**：Job000001 搜索后端+UI ｜ Job000002 GitHub 同步+watchctl+全栈容器化 ｜ Job000003 搜索三连修复+悬停浮窗 ｜ Job000004 孤儿清理+72 样本重建 ｜ Job000005 统一播放器+时间轴滑块+备注标签+搜索排序 ｜ Job000006 媒体处理流水线补齐 ｜ Job000007 360 播放引擎补全 ｜ **Job000008 内网 HTTPS 打通（Caddy 容器反代 + *.warlocks.cn 泛域名证书）**。**全部完成并推送**。
+**Job 流水线**：Job000001 搜索后端+UI ｜ Job000002 GitHub 同步+watchctl+全栈容器化 ｜ Job000003 搜索三连修复+悬停浮窗 ｜ Job000004 孤儿清理+72 样本重建 ｜ Job000005 统一播放器+时间轴滑块+备注标签+搜索排序 ｜ Job000006 媒体处理流水线补齐 ｜ Job000007 360 播放引擎补全 ｜ Job000008 内网 HTTPS 打通 ｜ **Job000009 全屏地图模式（MapLibre + 高德瓦片反代 + 时间轴双向联动）**。**全部完成并推送**。
 
 **Job000007 要点（9/03，60d543c）**：
 - **360 照片球面渲染**：360Player 扩展 `mode=video|photo`（TextureLoader 贴球，与视频共用球体/拖拽/捏合/陀螺仪/VR）；PlayerView 按 is_360 优先路由，360 照片直接进 pano 模式
@@ -240,16 +240,21 @@ Step 7: 许可合规扫描
 - **验证**：HTTPS 通道四场景 headless Chrome 回归全绿——`secure: true`（isSecureContext 解锁）×4、canvas 全 true、密码分享全链通过、截图与 HTTP 基线一致；后台 nohup + 日志轮询规避 ssh 读取超时
 - **证书运维**：2026-10-13 到期；换新后替换 `docker/caddy/certs/` 内文件并 `docker compose restart caddy`；certs 目录已 gitignore
 
-**代码基线**：`main` @ `74c1b7c`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v12**。
-**测试服**：192.168.1.115 **八容器**全 Up（+pano-caddy），web 绑 :8088 / caddy 绑 :443；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**）；CfT headless 验证环境 + verify360.py（支持 base 参数）。
-**Token 累计**：**24,681.96**（Job000007+Job000008 = 2,794.55 已入账；前序累计 21,887.41）。
+**Job000009 要点（9/11，ad971c9）**：
+- **后端**：`/geo/clusters`（bbox+zoom 网格聚合+时间范围过滤，provider=amap 输出 GCJ-02）、`/geo/items`（bbox 内媒体摘要）、`/geo/histogram`（bbox 内时间分布）、`/tiles/amap/{z}/{x}/{y}`（Key 服务端注入+**磁盘缓存**治高德 429）；**视口 bbox 是 GCJ-02，查询前在后端反变换回 WGS-84**（否则偏移数百米）
+- **前端**：MapLibre GL v6 全屏地图（`MapView.vue`）+ `MapTimeline.vue`（直方图+拖拽框选时间范围）+ `MapItemList.vue`（点击簇展开媒体卡片）；左侧导航新增「地图」入口（/map）；双向联动：视口变化→重算聚合+时间轴，框选时间→过滤聚合点
+- **验证**：headless Chrome 三场景全绿——地图渲染（canvas+统计+12 bars）/ 点击簇下钻展开（"7 个位置 · 9 项"→列表 2 项）/ 时间轴框选过滤（33→10 项）；瓦片缓存实测 miss→hit
+- **工程教训（maplibre v6 三连坑）**：① v6 GeoJSON worker 靠 import.meta.url 相对路径，vite 打包后缺失→图层**静默不渲染**（vite plugin 复制 worker 到 public + `setWorkerUrl` 修复）；② nginx .mjs 默认 octet-stream 被 module worker 拒绝（`default_type application/javascript` 修复）；③ v6 纯 ESM 无 default 导出，用具名导入
+- **代码基线**：`main` @ `ad971c9`；**测试服**：八容器全 Up + tilecache 卷；库内 72 媒体（60 带 GPS）
+
+**代码基线**：`main` @ `ad971c9`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v12**。
+**测试服**：192.168.1.115 **八容器**全 Up（+pano-caddy），web 绑 :8088 / caddy 绑 :443；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**，60 带 GPS）；CfT headless 验证环境 + verify360.py / verifyMap.py。
+**Token 累计**：**24,681.96**（Job000007+Job000008 = 2,794.55 已入账）；Job000009 消耗待用户报数。
 
 **⚠️ 大模型切换**：2026-09-02 用户由 Kimi-K3 切至 Hy4 preview。已出**阶段性快照**存档：
 `文档/阶段性快照_Job000005节点.md`（含回滚指引、部署拓扑、数据状态、契约事实、坑位红线、Token 台账）。后续 Job 如需回滚，读该文件即可从 Job000006 精确续做。
 
-**待办**：~~地图模式原型（P0）~~ → **Job000009 设计方案已确认、用户指示暂缓开工**（方向=地图模式；底图=高德瓦片反代+GCJ02 转换；形态=地图+时间轴双向联动版；验证=headless 自动化+真机抽查）/ 数据迁移扫描器（P1，注意 scan -dir 路径坑）；陀螺仪/VR 真机验证（HTTPS 前置已就绪，等用户手机实测）；云端 DDL 勘误三项待接受；真机验证三项未回收 + 360 球面真机抽查（两条测试分享保留中）。
-
-**Job000009 预勘察（9/04，开工前基线）**：后端 `cmd/mapproto` 早期原型已存在（195 行：bbox+zoom 聚合 /map/items、amap|osm 瓦片反代、合成 seed），但**未接入主 API 服务**；前端**零地图代码**（无 maplibre 依赖、无视图、无路由）；DB 72 媒体中 **60 条带 GPS**（北京为主，WGS84），4 条 360；坐标转换 `internal/geo.WGS84ToGCJ02` 已有可直接复用。
+**待办**：Stage 4 AI 语义搜索（GPU 就绪，候选 Job000010）/ 数据迁移扫描器（P1，注意 scan -dir 路径坑）；地图模式真机抽查（左侧「地图」入口，等用户手机实测）；云端 DDL 勘误三项待接受；真机验证三项未回收 + 360 球面真机抽查（两条测试分享保留中）。
 
 ---
 
