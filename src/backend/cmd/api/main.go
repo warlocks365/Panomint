@@ -19,6 +19,7 @@ import (
 	"panoalbum/internal/auth"
 	"panoalbum/internal/config"
 	"panoalbum/internal/folders"
+	"panoalbum/internal/geo"
 	"panoalbum/internal/health"
 	"panoalbum/internal/media"
 	"panoalbum/internal/middleware"
@@ -163,6 +164,17 @@ func main() {
 		Resolver: &search.CachedResolver{Pool: pool, Provider: search.NominatimGeocoder{}},
 	}}
 	authed.GET("/search", permRead, searchH.Search)
+
+	// Job000009 地图模式（读 media:read）：全屏地图 + 时间轴双向联动
+	geoH := &geo.Handler{
+		Media:    &geo.MediaStore{Pool: pool},
+		Tiles:    &geo.AmapTileProxy{Key: cfg.AmapKey, CacheDir: cfg.TileCacheDir},
+		Provider: "amap", // 底图为高德 → 对外输出 GCJ-02（库内仍存 WGS-84）
+	}
+	authed.GET("/geo/clusters", permRead, geoH.Clusters)
+	authed.GET("/geo/items", permRead, geoH.Items)
+	authed.GET("/geo/histogram", permRead, geoH.Histogram)
+	authed.GET("/tiles/amap/:z/:x/:y", permRead, geoH.Tiles.Serve) // Key 服务端注入，前端不持 Key
 
 	// Stage 2 公开端点（无鉴权，token 即凭证；不提供原文件下载）
 	r.GET("/public/shares/:token", sharesH.PublicGet)

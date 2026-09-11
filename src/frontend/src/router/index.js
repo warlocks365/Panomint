@@ -25,6 +25,12 @@ const routes = [
         name: 'timeline',
         component: () => import('../views/TimelineView.vue')
       },
+      // Job000009 地图模式（全屏地图 + 时间轴双向联动）
+      {
+        path: 'map',
+        name: 'map',
+        component: () => import('../views/MapView.vue')
+      },
       // Wave 2 路由（G2/G3/G4 视图，由各组实现对应文件）
       {
         path: 'spaces',

@@ -48,7 +48,7 @@ server {
     }
 
     # 纯 API 路由（URI 原样透传，无路径剥离）
-    location ~ ^/(auth|media|transcode|shares|public|admin|health|ready|metrics|tags)(/|$) {
+    location ~ ^/(auth|media|transcode|shares|public|admin|health|ready|metrics|tags|geo|tiles)(/|$) {
         proxy_pass http://api:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -57,6 +57,13 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
+    }
+
+    # maplibre worker（.mjs 必须可执行 MIME，否则 module worker 被浏览器拒绝 → GeoJSON 图层静默不渲染）
+    location ~ \.mjs$ {
+        types { }
+        default_type application/javascript;
+        try_files $uri =404;
     }
 
     # SPA 页面回退目标

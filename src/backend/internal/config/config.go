@@ -21,6 +21,7 @@ type Config struct {
 	MediaRoot   string   // 既有索引媒体根（media.path 相对解析回退）
 	AmapKey     string   // 高德逆地理编码 Key（空=不启用，入库时不自动填 place）
 	AmapSecret  string   // 高德安全密钥（空=不带 sig 签名；Key 绑定安全密钥后必填）
+	TileCacheDir string  // 瓦片磁盘缓存目录（Job000009；空=不缓存，高频率拖动易触发高德 429 限流）
 }
 
 func env(key, def string) string {
@@ -46,6 +47,7 @@ func Load() Config {
 		MediaRoot:   env("MEDIA_ROOT", "./testdata/media"),
 		AmapKey:     env("AMAP_KEY", ""), // 空=不启用逆地理编码，入库时 place 留空
 		AmapSecret:  env("AMAP_SECRET", ""), // 空=请求不带 sig 签名
+		TileCacheDir: env("TILE_CACHE_DIR", ""), // 空=瓦片不缓存
 	}
 }
 

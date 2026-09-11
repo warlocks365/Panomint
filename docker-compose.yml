@@ -78,8 +78,10 @@ services:
       HLS_DIR: /data/hls
       MEDIA_ROOT: /data/media
       THUMB_DIR: /data/thumbnails
+      TILE_CACHE_DIR: /tile-cache # Job000009 瓦片缓存（高德 429 限流对策）
     volumes:
       - mediadata:/data
+      - tilecache:/tile-cache
     depends_on:
       db:
         condition: service_healthy
@@ -172,3 +174,4 @@ volumes:
   miniodata:
   mediadata:
   caddydata:
+  tilecache:

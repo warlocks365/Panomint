@@ -75,11 +75,14 @@ const icons = {
   folder:
     '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 4a1 1 0 0 1 1-1h3.6l1.6 2H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
   settings:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6L11 5M5 11l-1.4 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'
+    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6L11 5M5 11l-1.4 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+  map:
+    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 4l4-1.5 4 1.5 4-1.5v10L10 14l-4-1.5L2 14V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 2.5v11M10 4v11" stroke="currentColor" stroke-width="1.4"/></svg>'
 }
 
 const navItems = [
   { label: '时间轴', to: '/timeline', ready: true, icon: icons.timeline },
+  { label: '地图', to: '/map', ready: true, icon: icons.map },
   { label: '相册', ready: false, icon: icons.album },
   { label: '人物', ready: false, icon: icons.person },
   { label: '地点', ready: false, icon: icons.place },
