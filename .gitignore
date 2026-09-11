@@ -72,3 +72,14 @@ src/frontend/.build-log.txt
 
 # maplibre worker（构建时从 node_modules 复制到 public，不入库）
 src/frontend/public/maplibre-gl-*.mjs
+
+# ===== 模型权重与原生推理库（Job000010；不入库，按 docs 脚本下载）=====
+assets/models/
+assets/lib/
+*.onnx
+*.so
+*.dll
+*.dylib
+
+# ===== GPU 执行器回传产物（本地临时）=====
+runs/

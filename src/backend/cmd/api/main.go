@@ -18,6 +18,7 @@ import (
 	"panoalbum/internal/albums"
 	"panoalbum/internal/auth"
 	"panoalbum/internal/config"
+	"panoalbum/internal/embed"
 	"panoalbum/internal/folders"
 	"panoalbum/internal/geo"
 	"panoalbum/internal/health"
@@ -156,11 +157,14 @@ func main() {
 	authed.GET("/shares", permShare, sharesH.List)
 	authed.DELETE("/shares/:id", permShare, sharesH.Delete)
 
-	// Stage 3 结构化搜索（Job000001，API §10；SemanticRecaller 为 Stage 4 语义召回占位插槽，
-	// place 降级经 geo_cache 缓存的 Nominatim resolver）
+	// Stage 3 结构化搜索（Job000001，API §10）；Stage 4 语义召回（Job000010）在此接入。
+	// place 降级经 geo_cache 缓存的 Nominatim resolver。
+	// 语义召回依赖 CLIP 模型与 onnxruntime 原生库：任一缺失则降级为占位实现（Stage 3 行为），
+	// 绝不因 AI 资产缺失导致 API 无法启动。
+	recaller := buildRecaller(pool, log)
 	searchH := &search.Handler{Store: &search.Store{
 		Pool:     pool,
-		Recaller: search.SemanticRecaller{},
+		Recaller: recaller,
 		Resolver: &search.CachedResolver{Pool: pool, Provider: search.NominatimGeocoder{}},
 	}}
 	authed.GET("/search", permRead, searchH.Search)
@@ -214,4 +218,24 @@ func main() {
 		log.Error("优雅停机失败", zap.Error(err))
 	}
 	log.Info("已停机")
+}
+
+// buildRecaller 构造 Stage 4 语义召回器。
+// CLIP 模型或 onnxruntime 原生库缺失时降级为占位实现（等价 Stage 3 行为），
+// 保证 AI 资产未就绪也不会阻断 API 启动。推理在**本地 CPU** 完成。
+func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) search.Recaller {
+	modelDir := embed.ModelDirFromEnv()
+	lib := os.Getenv("EMBED_LIB")
+	enc, err := embed.NewEncoder(embed.Config{ModelDir: modelDir, LibPath: lib})
+	if err != nil {
+		logger.Warn("语义召回未启用（CLIP 初始化失败，降级为结构化检索）",
+			zap.String("model_dir", modelDir), zap.Error(err))
+		return search.SemanticRecaller{}
+	}
+	logger.Info("语义召回已启用", zap.String("model_dir", modelDir))
+	return &search.VectorRecaller{
+		Enc:   enc,
+		Store: &embed.Store{Pool: pool},
+		TopK:  50,
+	}
 }
