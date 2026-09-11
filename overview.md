@@ -220,7 +220,7 @@ Step 7: 许可合规扫描
 
 ---
 
-## 四-补、当前进度快照（2026-09-11 更新，Job000009 完成节点）
+## 四-补、当前进度快照（2026-09-11 更新，Job000009 优化完成节点）
 
 **已完成**：Phase 0-3 全部（合规前置、后端骨架、双原型、P0 完整化六任务）；Phase 4 Stage 1（相册+智能相册+两级评论）、Stage 2（微信 H5 分享）、#7（Worker 容器化）；Stage 3 结构化搜索；七项遗留问题全部闭环。
 
@@ -247,8 +247,16 @@ Step 7: 许可合规扫描
 - **工程教训（maplibre v6 三连坑）**：① v6 GeoJSON worker 靠 import.meta.url 相对路径，vite 打包后缺失→图层**静默不渲染**（vite plugin 复制 worker 到 public + `setWorkerUrl` 修复）；② nginx .mjs 默认 octet-stream 被 module worker 拒绝（`default_type application/javascript` 修复）；③ v6 纯 ESM 无 default 导出，用具名导入
 - **代码基线**：`main` @ `ad971c9`；**测试服**：八容器全 Up + tilecache 卷；库内 72 媒体（60 带 GPS）
 
-**代码基线**：`main` @ `ad971c9`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v12**。
-**测试服**：192.168.1.115 **八容器**全 Up（+pano-caddy），web 绑 :8088 / caddy 绑 :443；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**，60 带 GPS）；CfT headless 验证环境 + verify360.py / verifyMap.py。
+**Job000009 优化（9/11，1064aba，用户追加四需求）**：
+- **时间轴可缩放滑块**：年/月/日三档粒度切换（−/＋控件），直方图平滑重排，框选区间随粒度重算
+- **四类媒体实时统计**：照片/视频/全景照片/全景视频四张统计卡片，随缩放粒度+框选+视口动态更新；后端 histogram 单查询返回四类计数（`type×is_360` 条件聚合）
+- **图标可配置**：默认红点；矢量形状（圆/三角/菱形/五角星）+ 色卡选色 + 内置 PNG（图钉/倒三角）+ 上传自定义 PNG；**账户级持久化**（新增 user_preferences 表 + GET/PUT /preferences/map，跨设备同步）
+- **悬停/长按即时预览**：鼠标悬停（120ms 防抖）即弹本层级媒体预览卡（地名+3缩略图+四类计数）；触摸长按（500ms，移动>10px 判定平移取消）；预览窗按触点四向翻转防溢出
+- **验证**：headless 四场景全绿——粒度缩放（月13→日21→年3 bars）/ 四类统计（照片24·视频8·全景照片3·全景视频1，与 DB 吻合）/ 图标面板（symbol 图层+icon-image）/ 悬停预览（hover-card）；后端偏好 PUT→GET 持久化通过
+- **数据增强**：给 8 视频+3 全景照片+1 全景视频补北京周边 GPS（原 60 条带 GPS 全是普通照片），四类齐全便于演示
+
+**代码基线**：`main` @ `1064aba`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v13**。
+**测试服**：192.168.1.115 **八容器**全 Up（+pano-caddy），web 绑 :8088 / caddy 绑 :443；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**，全部 72 带 GPS）；CfT headless 验证环境 + verify360.py / verifyMap.py / verifyMapOpt.py。
 **Token 累计**：**24,681.96**（Job000007+Job000008 = 2,794.55 已入账）；Job000009 消耗待用户报数。
 
 **⚠️ 大模型切换**：2026-09-02 用户由 Kimi-K3 切至 Hy4 preview。已出**阶段性快照**存档：
