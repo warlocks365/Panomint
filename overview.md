@@ -255,9 +255,9 @@ Step 7: 许可合规扫描
 - **验证**：headless 四场景全绿——粒度缩放（月13→日21→年3 bars）/ 四类统计（照片24·视频8·全景照片3·全景视频1，与 DB 吻合）/ 图标面板（symbol 图层+icon-image）/ 悬停预览（hover-card）；后端偏好 PUT→GET 持久化通过
 - **数据增强**：给 8 视频+3 全景照片+1 全景视频补北京周边 GPS（原 60 条带 GPS 全是普通照片），四类齐全便于演示
 
-**代码基线**：`main` @ `1064aba`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v13**。
-**测试服**：192.168.1.115 **八容器**全 Up（+pano-caddy），web 绑 :8088 / caddy 绑 :443；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**，全部 72 带 GPS）；CfT headless 验证环境 + verify360.py / verifyMap.py / verifyMapOpt.py。
-**Token 累计**：**24,681.96**（Job000007+Job000008 = 2,794.55 已入账）；Job000009 消耗待用户报数。
+**代码基线**：`main` @ `8faacd0`，GitHub `warlocks365/Panomint` 同源；DB 迁移 **v13**。
+**测试服**：192.168.1.115 **八容器**全 Up（+pano-caddy），web 绑 :8088 / caddy 绑 :443；库内 72 媒体（360 共 4 已带元数据，**HLS 9/9**，全部 72 带 GPS）；CfT headless 验证环境 + verify360.py / verifyMap.py / verifyMapOpt.py / verifyMapOpt2.py。
+**Token 累计**：**25,039.72**（Job000007+000008 = 2,794.55 + Job000009 主项+四需求优化+三需求追加 = 1,897.61 已入账；前序累计 21,005.96）。
 
 **⚠️ 大模型切换**：2026-09-02 用户由 Kimi-K3 切至 Hy4 preview。已出**阶段性快照**存档：
 `文档/阶段性快照_Job000005节点.md`（含回滚指引、部署拓扑、数据状态、契约事实、坑位红线、Token 台账）。后续 Job 如需回滚，读该文件即可从 Job000006 精确续做。
