@@ -40,6 +40,15 @@ export function fetchHistogram(bbox, granularity = 'month') {
   return http.get(`/geo/histogram?${q.toString()}`).then((r) => r.data.buckets || [])
 }
 
+// fetchPlaces bbox 内去重地名列表（底部地理位置罗列）
+export function fetchPlaces(bbox, from, to, limit = 50) {
+  const q = bboxQuery(bbox)
+  if (from) q.set('from', from)
+  if (to) q.set('to', to)
+  q.set('limit', String(limit))
+  return http.get(`/geo/places?${q.toString()}`).then((r) => r.data.places || [])
+}
+
 // getMapIconPref 读取账户级地图图标偏好
 export function getMapIconPref() {
   return http.get('/preferences/map').then((r) => r.data.pref || null)

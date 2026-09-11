@@ -178,6 +178,38 @@ func (h *Handler) Histogram(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"buckets": buckets})
 }
 
+// Places GET /geo/places?min_lng=&...&from=&to=&limit=
+// 返回 bbox 内去重地名列表（含计数），供地图底部"地理位置罗列"横向滑动展示。
+func (h *Handler) Places(c *gin.Context) {
+	b, ok := h.bboxFor(c)
+	if !ok {
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	from, err := ParseTime(c.Query("from"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		return
+	}
+	to, err := ParseTime(c.Query("to"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		return
+	}
+	places, err := h.Media.Places(c.Request.Context(), b, from, to, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"places": places})
+}
+
 // GetMapIconPref GET /preferences/map 读取当前用户地图图标偏好。
 // 无记录返回 200 + 默认值（前端据此用默认红点，无需额外处理 404）。
 func (h *Handler) GetMapIconPref(c *gin.Context) {

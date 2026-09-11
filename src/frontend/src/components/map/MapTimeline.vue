@@ -59,6 +59,13 @@
         <span class="stat-num">{{ statTotals.panoVideos }}</span>
       </div>
     </div>
+
+    <div v-if="places.length" class="tl-places">
+      <span class="pl-label">位置</span>
+      <div class="pl-scroll">
+        <span v-for="p in places" :key="p.name" class="pl-chip">{{ p.name }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -70,13 +77,16 @@ const props = defineProps({
   buckets: { type: Array, default: () => [] }, // GET /geo/histogram → [{ bucket, count, photos, videos, pano_photos, pano_videos }]
   range: { type: Object, default: null }, // { from: ISO, to: ISO } 或 null
   loading: { type: Boolean, default: false },
-  granularity: { type: String, default: 'month' } // year|month|day（由父组件控制）
+  granularity: { type: String, default: 'month' }, // year|month|day（由父组件控制）
+  places: { type: Array, default: () => [] } // GET /geo/places → [{ name, count }]（底部位置罗列）
 })
 const emit = defineEmits(['change', 'zoom'])
 
 const trackRef = ref(null)
 const dragging = ref(false)
 const sel = ref([-1, -1]) // 框选中的索引区间（未提交）
+const downX = ref(0) // 按下时的 clientX（用于位移阈值，区分单击/拖拽）
+const downIndex = ref(-1) // 按下时的 bucket 索引
 
 const granularityLabel = computed(() => ({ year: '年', month: '月', day: '日' })[props.granularity] || '月')
 
@@ -175,28 +185,39 @@ function indexAt(clientX) {
   return Math.min(bars.value.length - 1, Math.max(0, i))
 }
 
+// 位移阈值（px）：pointermove 移动超过此值才视为拖拽，更新结束索引；
+// 否则视为单击（可能因浮点抖动派发 1~2px 的 pointermove，不改变选区）
+const DRAG_THRESHOLD = 6
+
 function onDown(e) {
   if (!bars.value.length) return
   dragging.value = true
-  const i = indexAt(e.clientX)
-  sel.value = [i, i]
+  downX.value = e.clientX
+  downIndex.value = indexAt(e.clientX)
+  sel.value = [downIndex.value, downIndex.value]
   trackRef.value.setPointerCapture?.(e.pointerId)
 }
 
 function onMove(e) {
   if (!dragging.value) return
+  if (Math.abs(e.clientX - downX.value) < DRAG_THRESHOLD) return // 未达拖拽阈值，保持单选
   const i = indexAt(e.clientX)
-  sel.value = [sel.value[0], i]
+  sel.value = [downIndex.value, i]
 }
 
-function onUp() {
+function onUp(e) {
   if (!dragging.value) return
   dragging.value = false
   const [a0, b0] = sel.value
   const a = Math.min(a0, b0)
   const b = Math.max(a0, b0)
   if (!bars.value[a] || !bars.value[b]) return
-  emit('change', toRange(bars.value[a].key, bars.value[b].key))
+  // 判断单击 vs 拖拽：sel 未扩展（起止仍相同）→ 单击单选该 bucket；否则范围选择
+  if (a === b) {
+    emit('change', toRange(bars.value[a].key, bars.value[a].key))
+  } else {
+    emit('change', toRange(bars.value[a].key, bars.value[b].key))
+  }
 }
 
 function clear() {
@@ -205,6 +226,8 @@ function clear() {
 }
 
 // bucket → ISO 区间（闭区间：起始 00:00 ~ 末尾 23:59:59.999）
+// 注意：一律用 UTC 构造，避免 toISOString() 因本地时区导致月初/月末跨月错位
+// （否则 committedIdx 反推时 prefixOf(from/to) 与 bucket key 对不上，单选会退化为范围）
 function toRange(fromKey, toKey) {
   const from = bucketStart(fromKey)
   const to = bucketEnd(toKey)
@@ -212,23 +235,23 @@ function toRange(fromKey, toKey) {
 }
 
 function bucketStart(key) {
-  if (/^\d{4}$/.test(key)) return new Date(+key, 0, 1, 0, 0, 0, 0)
+  if (/^\d{4}$/.test(key)) return new Date(Date.UTC(+key, 0, 1, 0, 0, 0, 0))
   if (/^\d{4}-\d{2}$/.test(key)) {
     const [y, m] = key.split('-').map(Number)
-    return new Date(y, m - 1, 1, 0, 0, 0, 0)
+    return new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0))
   }
   const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, m - 1, d, 0, 0, 0, 0)
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0))
 }
 
 function bucketEnd(key) {
-  if (/^\d{4}$/.test(key)) return new Date(+key + 1, 0, 1, 0, 0, 0, -1)
+  if (/^\d{4}$/.test(key)) return new Date(Date.UTC(+key + 1, 0, 1, 0, 0, 0, -1))
   if (/^\d{4}-\d{2}$/.test(key)) {
     const [y, m] = key.split('-').map(Number)
-    return new Date(y, m, 1, 0, 0, 0, -1) // 次月 1 日 -1ms
+    return new Date(Date.UTC(y, m, 1, 0, 0, 0, -1)) // 次月 1 日 -1ms
   }
   const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, m - 1, d, 23, 59, 59, 999)
+  return new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999))
 }
 </script>
 
@@ -378,4 +401,47 @@ function bucketEnd(key) {
   color: #0f172a;
   font-variant-numeric: tabular-nums;
 }
+
+.tl-places {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pl-label {
+  font-size: 11px;
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.pl-scroll {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pl-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.pl-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.5);
+  border-radius: 2px;
+}
+
+.pl-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #475569;
+  background: #f1f5f9;
+  border-radius: 10px;
+  padding: 2px 10px;
+}
+
 </style>
