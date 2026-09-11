@@ -11,26 +11,32 @@
     <template v-else-if="items.length">
       <div class="hc-place">{{ place }}</div>
 
-      <!-- 主显预览图 + 翻书 -->
+      <!-- 翻书区：同一行，中间当前图 + 左右渐变叠加的书页（真实翻书质感） -->
       <div
         class="hc-stage"
         @pointerdown="onSwipeDown"
         @pointerup="onSwipeUp"
       >
-        <div
-          class="hc-book"
-          :style="{ transform: 'translateX(' + (-mainIndex * 100) + '%)' }"
-        >
-          <div v-for="it in items" :key="it.id" class="hc-page">
-            <img v-if="thumbs[it.id]" :src="thumbs[it.id]" :alt="it.filename" />
-            <div v-else class="hc-ph"></div>
-            <span v-if="it.is_360" class="hc-badge">360</span>
-          </div>
+        <!-- 左页（上一张，向右渐隐） -->
+        <div v-if="mainIndex > 0" class="hc-page hc-page-left">
+          <img v-if="thumbs[items[mainIndex - 1].id]" :src="thumbs[items[mainIndex - 1].id]" :alt="items[mainIndex - 1].filename" />
+          <div v-else class="hc-ph"></div>
+        </div>
+        <!-- 右页（下一张，向左渐隐） -->
+        <div v-if="mainIndex < items.length - 1" class="hc-page hc-page-right">
+          <img v-if="thumbs[items[mainIndex + 1].id]" :src="thumbs[items[mainIndex + 1].id]" :alt="items[mainIndex + 1].filename" />
+          <div v-else class="hc-ph"></div>
+        </div>
+        <!-- 当前主显页 -->
+        <div class="hc-page hc-page-current">
+          <img v-if="thumbs[items[mainIndex].id]" :src="thumbs[items[mainIndex].id]" :alt="items[mainIndex].filename" />
+          <div v-else class="hc-ph"></div>
+          <span v-if="items[mainIndex].is_360" class="hc-badge">360</span>
         </div>
         <span v-if="items.length > 1" class="hc-counter">{{ mainIndex + 1 }}/{{ items.length }}</span>
       </div>
 
-      <!-- 缩略图条（可点选） -->
+      <!-- 缩略图条（可点选进播放器） -->
       <div class="hc-strip">
         <button
           v-for="(it, i) in items"
@@ -196,25 +202,63 @@ const cardStyle = computed(() => {
   background: #e2e8f0;
   cursor: grab;
   touch-action: pan-y;
+  perspective: 1200px;
 }
 
-.hc-book {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  transition: transform 0.3s ease;
-}
-
+/* 翻书三页叠加：当前页居中 z 最高，左右页各占 40% 宽度、渐变渐隐，营造翻书厚度 */
 .hc-page {
-  position: relative;
-  flex: 0 0 100%;
+  position: absolute;
+  top: 0;
+  bottom: 0;
   height: 100%;
+  overflow: hidden;
+  transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
 .hc-page img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
+}
+
+/* 当前主显页：居中，占满 */
+.hc-page-current {
+  left: 0;
+  right: 0;
+  z-index: 3;
+}
+
+/* 左页（上一张）：靠左 40%，右侧渐变融入主显图 */
+.hc-page-left {
+  left: 0;
+  width: 42%;
+  z-index: 2;
+  opacity: 0.9;
+  transform-origin: right center;
+}
+
+.hc-page-left::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, rgba(255,255,255,0.05), rgba(255,255,255,0.85));
+}
+
+/* 右页（下一张）：靠右 40%，左侧渐变融入主显图 */
+.hc-page-right {
+  right: 0;
+  width: 42%;
+  z-index: 2;
+  opacity: 0.9;
+  transform-origin: left center;
+}
+
+.hc-page-right::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to left, rgba(255,255,255,0.05), rgba(255,255,255,0.85));
 }
 
 .hc-ph {

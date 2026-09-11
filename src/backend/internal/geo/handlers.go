@@ -202,7 +202,7 @@ func (h *Handler) Places(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
 		return
 	}
-	places, err := h.Media.Places(c.Request.Context(), b, from, to, limit)
+	places, err := h.Media.Places(c.Request.Context(), b, h.provider(c), from, to, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
 		return

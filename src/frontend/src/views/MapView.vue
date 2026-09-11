@@ -43,6 +43,7 @@
       :places="places"
       @change="onRangeChange"
       @zoom="onZoomChange"
+      @place="onPlaceClick"
     />
   </div>
 </template>
@@ -234,6 +235,17 @@ function onRangeChange(next) {
 function onZoomChange(next) {
   granularity.value = next
   reload() // 重取直方图（新粒度 + 四类计数）
+}
+
+// 点击位置标签 → 地图飞过去定位（放大到街道级，突出该地点）
+function onPlaceClick(place) {
+  if (!map || place.lng === undefined || place.lat === undefined) return
+  closeHover()
+  map.flyTo({
+    center: [place.lng, place.lat],
+    zoom: Math.max(14, map.getZoom() + 6),
+    duration: 800
+  })
 }
 
 async function openCluster(props, lngLat) {

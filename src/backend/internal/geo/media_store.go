@@ -214,20 +214,23 @@ func (s *MediaStore) Histogram(ctx context.Context, b BBox, granularity string) 
 	return out, rows.Err()
 }
 
-// Place 地理位置名称（去重 + 计数，供底部横向罗列）。
+// Place 地理位置名称（去重 + 计数 + 代表坐标，供底部横向罗列与点击定位）。
 type Place struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
+	Name  string  `json:"name"`
+	Count int     `json:"count"`
+	Lng   float64 `json:"lng"` // 该地名下媒体的质心（已按 provider 转换）
+	Lat   float64 `json:"lat"`
 }
 
 // Places 列出 bbox 内出现的地名（place 非空、去重、按计数降序）。
-// taken_at 时间过滤可选；用于地图底部"地理位置罗列"（横向滑动）。
-func (s *MediaStore) Places(ctx context.Context, b BBox, from, to *time.Time, limit int) ([]Place, error) {
+// taken_at 时间过滤可选；用于地图底部"地理位置罗列"（横向滑动 + 点击定位）。
+func (s *MediaStore) Places(ctx context.Context, b BBox, provider string, from, to *time.Time, limit int) ([]Place, error) {
 	conds, args := baseCond(b)
 	conds, args = appendTimeRange(conds, args, from, to)
 	args = append(args, limit)
 	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
-		SELECT COALESCE(place, '') AS name, count(*)::int
+		SELECT COALESCE(place, '') AS name, count(*)::int,
+		       ST_X(ST_Centroid(ST_Collect(gps))), ST_Y(ST_Centroid(ST_Collect(gps)))
 		FROM media
 		WHERE %s AND COALESCE(place,'') <> ''
 		GROUP BY 1
@@ -241,9 +244,10 @@ func (s *MediaStore) Places(ctx context.Context, b BBox, from, to *time.Time, li
 	out := []Place{}
 	for rows.Next() {
 		var p Place
-		if err := rows.Scan(&p.Name, &p.Count); err != nil {
+		if err := rows.Scan(&p.Name, &p.Count, &p.Lng, &p.Lat); err != nil {
 			return nil, err
 		}
+		p.Lng, p.Lat = convert(p.Lng, p.Lat, provider)
 		out = append(out, p)
 	}
 	return out, rows.Err()

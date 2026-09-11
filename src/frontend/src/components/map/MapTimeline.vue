@@ -63,7 +63,14 @@
     <div v-if="places.length" class="tl-places">
       <span class="pl-label">位置</span>
       <div class="pl-scroll">
-        <span v-for="p in places" :key="p.name" class="pl-chip">{{ p.name }}</span>
+        <button
+          v-for="p in places"
+          :key="p.name"
+          class="pl-chip"
+          type="button"
+          :title="`${p.name} · ${p.count} 项（点击定位）`"
+          @click="$emit('place', p)"
+        >{{ p.name }}</button>
       </div>
     </div>
   </div>
@@ -80,7 +87,7 @@ const props = defineProps({
   granularity: { type: String, default: 'month' }, // year|month|day（由父组件控制）
   places: { type: Array, default: () => [] } // GET /geo/places → [{ name, count }]（底部位置罗列）
 })
-const emit = defineEmits(['change', 'zoom'])
+const emit = defineEmits(['change', 'zoom', 'place'])
 
 const trackRef = ref(null)
 const dragging = ref(false)
@@ -440,8 +447,15 @@ function bucketEnd(key) {
   font-size: 11px;
   color: #475569;
   background: #f1f5f9;
+  border: none;
   border-radius: 10px;
   padding: 2px 10px;
+  cursor: pointer;
+}
+
+.pl-chip:hover {
+  background: #e2e8f0;
+  color: #0f172a;
 }
 
 </style>
