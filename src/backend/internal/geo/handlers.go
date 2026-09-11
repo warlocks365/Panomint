@@ -9,6 +9,7 @@ package geo
 
 import (
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +21,27 @@ type Handler struct {
 	Tiles  *AmapTileProxy
 	// Provider 默认坐标系输出（amap=GCJ-02，osm/其他=WGS-84）。
 	Provider string
+}
+
+// defaultMapIcon 默认图标（红色圆形，对齐需求"默认红点"）。
+func defaultMapIcon() *MapIconPref {
+	return &MapIconPref{Shape: "circle", Color: "#ef4444"}
+}
+
+// validShape 合法图标形状集合。
+func validShape(s string) bool {
+	switch s {
+	case "circle", "triangle", "diamond", "star", "pin", "inverted", "custom":
+		return true
+	}
+	return false
+}
+
+var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// validColor 校验十六进制颜色。
+func validColor(c string) bool {
+	return hexColorRe.MatchString(c)
 }
 
 func (h *Handler) provider(c *gin.Context) string {
@@ -133,8 +155,9 @@ func (h *Handler) Items(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
 }
 
-// Histogram GET /geo/histogram?min_lng=&...&granularity=year|month
+// Histogram GET /geo/histogram?min_lng=&...&granularity=year|month|day
 // 地图 viewport 变化 → 重算时间轴分布（双向联动的"地图→时间轴"方向）。
+// Job000009：每桶返回四类媒体分类计数。
 func (h *Handler) Histogram(c *gin.Context) {
 	b, ok := h.bboxFor(c)
 	if !ok {
@@ -153,4 +176,44 @@ func (h *Handler) Histogram(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"buckets": buckets})
+}
+
+// GetMapIconPref GET /preferences/map 读取当前用户地图图标偏好。
+// 无记录返回 200 + 默认值（前端据此用默认红点，无需额外处理 404）。
+func (h *Handler) GetMapIconPref(c *gin.Context) {
+	userID := c.GetString("user_id")
+	p, err := h.Media.GetMapIcon(c.Request.Context(), userID)
+	if err == ErrPrefNotFound {
+		c.JSON(http.StatusOK, gin.H{"pref": defaultMapIcon()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"pref": p})
+}
+
+// PutMapIconPref PUT /preferences/map 写入当前用户地图图标偏好。
+func (h *Handler) PutMapIconPref(c *gin.Context) {
+	userID := c.GetString("user_id")
+	var p MapIconPref
+	if err := c.ShouldBindJSON(&p); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		return
+	}
+	// 基础校验：shape 必须为已知值，颜色必须为合法十六进制色值
+	if !validShape(p.Shape) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "shape 非法"}})
+		return
+	}
+	if !validColor(p.Color) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "color 非法"}})
+		return
+	}
+	if err := h.Media.PutMapIcon(c.Request.Context(), userID, &p); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"pref": &p})
 }

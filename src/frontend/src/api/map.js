@@ -33,10 +33,21 @@ export function fetchItems(bbox, from, to, limit = 60) {
 }
 
 // fetchHistogram bbox 内时间分布（地图 viewport → 时间轴）
+// granularity: year|month|day（Job000009 新增 day）；每桶含四类计数
 export function fetchHistogram(bbox, granularity = 'month') {
   const q = bboxQuery(bbox)
   q.set('granularity', granularity)
   return http.get(`/geo/histogram?${q.toString()}`).then((r) => r.data.buckets || [])
+}
+
+// getMapIconPref 读取账户级地图图标偏好
+export function getMapIconPref() {
+  return http.get('/preferences/map').then((r) => r.data.pref || null)
+}
+
+// putMapIconPref 写入账户级地图图标偏好
+export function putMapIconPref(pref) {
+  return http.put('/preferences/map', pref).then((r) => r.data.pref || null)
 }
 
 // thumbBlobUrl 缩略图需 Bearer 鉴权，img src 无法带 header → 取 blob 后转本地 URL

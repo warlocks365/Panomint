@@ -58,10 +58,14 @@ type MediaPoint struct {
 	Lat      float64    `json:"lat"`
 }
 
-// Bucket 时间直方图桶（与 media.DateHistogram 同构，便于前端复用时间轴组件）。
+// Bucket 时间直方图桶（Job000009 扩展：四类媒体分类计数，count=四类之和保持向后兼容）。
 type Bucket struct {
-	Bucket string `json:"bucket"`
-	Count  int    `json:"count"`
+	Bucket      string `json:"bucket"`
+	Count       int    `json:"count"`        // 四类之和（向后兼容旧前端）
+	Photos      int    `json:"photos"`       // type=photo && !is_360
+	Videos      int    `json:"videos"`       // type=video && !is_360
+	PanoPhotos  int    `json:"pano_photos"`  // type=photo && is_360
+	PanoVideos  int    `json:"pano_videos"`  // type=video && is_360
 }
 
 // MediaStore 媒体库空间数据访问（数据源：media.gps）。
@@ -70,11 +74,12 @@ type MediaStore struct {
 }
 
 // ErrInvalidGranularity 直方图粒度非法。
-var ErrInvalidGranularity = errors.New("granularity 仅支持 year|month")
+var ErrInvalidGranularity = errors.New("granularity 仅支持 year|month|day")
 
 var mediaHistogramTrunc = map[string]struct{ trunc, layout string }{
 	"year":  {"year", "YYYY"},
 	"month": {"month", "YYYY-MM"},
+	"day":   {"day", "YYYY-MM-DD"},
 }
 
 // baseCond 公共过滤条件：有 GPS、未软删、落在 bbox 内；args 前缀为 bbox 四元组。
@@ -175,6 +180,8 @@ func (s *MediaStore) Items(ctx context.Context, b BBox, provider string, from, t
 
 // Histogram bbox 内的时间分布直方图（地图 viewport → 时间轴 联动）。
 // taken_at 为空的媒体归入 "unknown" 桶（字典序自然落末位）。
+// Job000009：每桶同时返回四类媒体分类计数（照片/视频/全景照片/全景视频），
+// 供时间轴实时统计卡片使用，与直方图一次查询返回、天然随 bbox 与粒度联动。
 func (s *MediaStore) Histogram(ctx context.Context, b BBox, granularity string) ([]Bucket, error) {
 	g, ok := mediaHistogramTrunc[granularity]
 	if !ok {
@@ -182,7 +189,12 @@ func (s *MediaStore) Histogram(ctx context.Context, b BBox, granularity string) 
 	}
 	conds, args := baseCond(b)
 	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
-		SELECT COALESCE(to_char(date_trunc('%s', taken_at), '%s'), 'unknown') AS bucket, count(*)::int
+		SELECT COALESCE(to_char(date_trunc('%s', taken_at), '%s'), 'unknown') AS bucket,
+		       count(*)::int,
+		       count(*) FILTER (WHERE type='photo' AND NOT COALESCE(is_360,false))::int,
+		       count(*) FILTER (WHERE type='video' AND NOT COALESCE(is_360,false))::int,
+		       count(*) FILTER (WHERE type='photo' AND COALESCE(is_360,false))::int,
+		       count(*) FILTER (WHERE type='video' AND COALESCE(is_360,false))::int
 		FROM media
 		WHERE %s
 		GROUP BY 1 ORDER BY 1 ASC`, g.trunc, g.layout, strings.Join(conds, " AND ")), args...)
@@ -194,7 +206,7 @@ func (s *MediaStore) Histogram(ctx context.Context, b BBox, granularity string) 
 	out := []Bucket{}
 	for rows.Next() {
 		var bkt Bucket
-		if err := rows.Scan(&bkt.Bucket, &bkt.Count); err != nil {
+		if err := rows.Scan(&bkt.Bucket, &bkt.Count, &bkt.Photos, &bkt.Videos, &bkt.PanoPhotos, &bkt.PanoVideos); err != nil {
 			return nil, err
 		}
 		out = append(out, bkt)

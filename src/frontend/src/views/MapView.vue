@@ -6,7 +6,15 @@
       <span class="mt-title">地图</span>
       <span class="mt-stat">{{ clusterCount }} 个位置 · {{ pointCount }} 项</span>
       <span v-if="err" class="mt-err">{{ err }}</span>
+      <button class="mt-icon-btn" type="button" @click="iconPickerOpen = !iconPickerOpen">图标</button>
     </div>
+
+    <MapIconPicker
+      v-if="iconPickerOpen"
+      :pref="iconPref"
+      @update="onIconPrefUpdate"
+      @close="iconPickerOpen = false"
+    />
 
     <MapItemList
       v-if="listOpen"
@@ -16,11 +24,21 @@
       @open="openItem"
     />
 
+    <MapHoverCard
+      v-if="hoverOpen"
+      :items="hoverItems"
+      :loading="hoverLoading"
+      :place="hoverPlace"
+      :pos="hoverPos"
+    />
+
     <MapTimeline
       :buckets="buckets"
       :range="range"
       :loading="timelineLoading"
+      :granularity="granularity"
       @change="onRangeChange"
+      @zoom="onZoomChange"
     />
   </div>
 </template>
@@ -28,23 +46,23 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl' // v6 为纯 ESM，无 default 导出
+import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl' // v6 纯 ESM
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { getAccessToken } from '../utils/tokenStore'
-import { fetchClusters, fetchHistogram, fetchItems } from '../api/map'
+import { fetchClusters, fetchHistogram, fetchItems, getMapIconPref, putMapIconPref } from '../api/map'
 import MapTimeline from '../components/map/MapTimeline.vue'
 import MapItemList from '../components/map/MapItemList.vue'
+import MapIconPicker from '../components/map/MapIconPicker.vue'
+import MapHoverCard from '../components/map/MapHoverCard.vue'
 
-// 地图模式（Job000009）：全屏地图 + 时间轴双向联动
-// 坐标系：底图为高德栅格瓦片（GCJ-02），后端 /geo/* 在 provider=amap 下输出的坐标也是 GCJ-02，
-// 两侧一致，可直接上图层；请求 bbox 直接取 map.getBounds()（后端负责还原为库内 WGS-84）。
-
+// 地图模式（Job000009 优化）：全屏地图 + 时间轴缩放滑块 + 图标可配置 + 悬停预览
 const router = useRouter()
 const mapRef = ref(null)
 
 const clusters = ref([])
 const buckets = ref([])
 const range = ref(null) // { from: ISO, to: ISO } | null
+const granularity = ref('month') // year|month|day
 const err = ref('')
 const timelineLoading = ref(false)
 
@@ -52,11 +70,23 @@ const items = ref([])
 const listOpen = ref(false)
 const listLoading = ref(false)
 
+const iconPickerOpen = ref(false)
+const iconPref = ref({ shape: 'circle', color: '#ef4444' })
+
+const hoverOpen = ref(false)
+const hoverItems = ref([])
+const hoverLoading = ref(false)
+const hoverPlace = ref('')
+const hoverPos = ref(null)
+
 const clusterCount = computed(() => clusters.value.length)
 const pointCount = computed(() => clusters.value.reduce((s, c) => s + (c.count || 0), 0))
 
 let map = null
 let reloadTimer = null
+let hoverTimer = null
+let hoverRequestId = 0
+let touchStartInfo = null
 
 // 高德栅格瓦片（经本站反代，Key 不下发浏览器）
 const rasterStyle = {
@@ -70,6 +100,70 @@ const rasterStyle = {
     }
   },
   layers: [{ id: 'amap-base', type: 'raster', source: 'amap' }]
+}
+
+// ---- 图标：矢量形状 SVG path（填充色由 iconPref.color 控制）----
+const SHAPE_PATHS = {
+  circle: '<circle cx="12" cy="12" r="10" />',
+  triangle: '<path d="M12 2l10 20H2z" />',
+  diamond: '<path d="M12 2l10 10-10 10L2 12z" />',
+  star: '<path d="M12 2l3 6.5 7 .8-5.2 4.7 1.4 7-6.2-3.6L5.8 21l1.4-7L2 9.3l7-.8z" />'
+}
+
+function shapeSvgDataUrl(shape, color) {
+  const path = SHAPE_PATHS[shape]
+  if (!path) return null
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="${color}">${path}</g></svg>`
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
+}
+
+// 加载图标到 map（矢量 SVG → dataURL；内置 PNG → 静态路径；自定义 → dataURL）
+function applyIcon() {
+  if (!map || !map.hasImage) return
+  const pref = iconPref.value
+  let url = null
+  if (pref.shape === 'pin') url = '/map-icons/pin.png'
+  else if (pref.shape === 'inverted') url = '/map-icons/inverted.png'
+  else if (pref.shape === 'custom' && pref.data_url) url = pref.data_url
+  else url = shapeSvgDataUrl(pref.shape, pref.color || '#ef4444')
+
+  if (!url) return
+  const img = new Image()
+  img.onload = () => {
+    if (!map) return
+    // 尺寸统一 24px；删除旧图标避免累积
+    if (map.hasImage('cluster-icon')) map.removeImage('cluster-icon')
+    map.addImage('cluster-icon', img, { sdf: false })
+  }
+  img.src = url
+}
+
+// ---- 图标偏好：账户级持久化（服务端失败降级 localStorage）----
+async function loadIconPref() {
+  try {
+    const p = await getMapIconPref()
+    if (p && p.shape) {
+      iconPref.value = { shape: p.shape, color: p.color || '#ef4444', data_url: p.data_url || '' }
+    }
+  } catch {
+    // 服务端不可达 → 读本地兜底
+    try {
+      const local = localStorage.getItem('map_icon_pref')
+      if (local) iconPref.value = JSON.parse(local)
+    } catch {}
+  }
+}
+
+async function onIconPrefUpdate(pref) {
+  iconPref.value = pref
+  applyIcon()
+  // 本地兜底 + 服务端持久化
+  try { localStorage.setItem('map_icon_pref', JSON.stringify(pref)) } catch {}
+  try {
+    await putMapIconPref(pref)
+  } catch {
+    err.value = '图标偏好已本地保存，服务端同步失败'
+  }
 }
 
 function bboxOf() {
@@ -105,7 +199,7 @@ async function reload() {
   try {
     const [cs, hs] = await Promise.all([
       fetchClusters(bbox, zoom, from, to),
-      fetchHistogram(bbox).catch(() => [])
+      fetchHistogram(bbox, granularity.value).catch(() => [])
     ])
     clusters.value = cs
     buckets.value = hs
@@ -120,7 +214,7 @@ async function reload() {
 
 function scheduleReload() {
   clearTimeout(reloadTimer)
-  reloadTimer = setTimeout(reload, 250) // 拖动过程不打断，停手后再查
+  reloadTimer = setTimeout(reload, 250)
 }
 
 function onRangeChange(next) {
@@ -129,14 +223,18 @@ function onRangeChange(next) {
   reload()
 }
 
+function onZoomChange(next) {
+  granularity.value = next
+  reload() // 重取直方图（新粒度 + 四类计数）
+}
+
 async function openCluster(props, lngLat) {
-  // 单条目或已放大到街道级 → 直接列出该处媒体；否则继续下钻
   const zoom = map.getZoom()
   if (props.count > 1 && zoom < 12) {
     map.flyTo({ center: lngLat, zoom: Math.min(18, zoom + 2), duration: 500 })
     return
   }
-  const half = 0.02 // 以簇为中心的经纬度半窗（低 zoom 下的网格尺寸量级）
+  const half = 0.02
   const bbox = {
     minLng: lngLat[0] - half,
     minLat: lngLat[1] - half,
@@ -146,6 +244,7 @@ async function openCluster(props, lngLat) {
   listLoading.value = true
   listOpen.value = true
   items.value = []
+  closeHover()
   try {
     items.value = await fetchItems(bbox, range.value?.from || '', range.value?.to || '')
   } catch (e) {
@@ -164,16 +263,52 @@ function openItem(it) {
   router.push(`/player/${it.id}`)
 }
 
-onMounted(() => {
-  // v6 GeoJSON worker：vite 打包后 worker 相对路径失效，构建时由 vite.config 复制到 public/，
-  // 此处显式指定（缺失时 GeoJSON 图层静默不渲染，无任何报错）
+// ---- 悬停预览（mouseenter）+ 长按预览（touch）----
+function closeHover() {
+  hoverOpen.value = false
+  hoverItems.value = []
+  hoverPos.value = null
+}
+
+function showHover(feature, clientX, clientY) {
+  const coord = feature.geometry.coordinates.slice()
+  const half = 0.02
+  const bbox = {
+    minLng: coord[0] - half,
+    minLat: coord[1] - half,
+    maxLng: coord[0] + half,
+    maxLat: coord[1] + half
+  }
+  hoverPos.value = { x: clientX, y: clientY }
+  hoverLoading.value = true
+  hoverOpen.value = true
+  hoverItems.value = []
+
+  const reqId = ++hoverRequestId
+  fetchItems(bbox, range.value?.from || '', range.value?.to || '', 12)
+    .then((list) => {
+      if (reqId !== hoverRequestId) return // 过期请求丢弃
+      hoverItems.value = list
+      hoverPlace.value = list[0]?.place || ''
+      hoverLoading.value = false
+    })
+    .catch(() => {
+      if (reqId === hoverRequestId) {
+        hoverItems.value = []
+        hoverLoading.value = false
+      }
+    })
+}
+
+onMounted(async () => {
   setWorkerUrl('/maplibre-gl-worker.mjs')
+  await loadIconPref()
+
   map = new MapLibreMap({
     container: mapRef.value,
     style: rasterStyle,
-    center: [116.397, 39.909], // 北京（GCJ-02，与底图一致）
+    center: [116.397, 39.909],
     zoom: 4,
-    // 瓦片走本站鉴权端点：MapLibre 默认不带 Authorization，需在此注入
     transformRequest: (url) => {
       if (url.includes('/tiles/')) {
         const token = getAccessToken()
@@ -188,49 +323,85 @@ onMounted(() => {
     map.addSource('clusters', { type: 'geojson', data: toGeoJSON([]) })
     map.addLayer({
       id: 'cluster-circles',
-      type: 'circle',
+      type: 'symbol',
       source: 'clusters',
-      paint: {
-        'circle-color': '#2563eb',
-        'circle-opacity': 0.85,
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
-        // 半径随聚合数量增长（1→7，大量→20）
-        'circle-radius': [
-          'interpolate',
-          ['linear'],
-          ['get', 'count'],
-          1, 7,
-          10, 12,
-          100, 20
-        ]
+      layout: {
+        'icon-image': 'cluster-icon',
+        'icon-size': 1,
+        'icon-allow-overlap': true
       }
     })
 
+    // 加载初始图标（默认红点）
+    applyIcon()
+
+    // 点击下钻 / 展开
     map.on('click', 'cluster-circles', (e) => {
       const f = e.features?.[0]
       if (!f) return
       openCluster(f.properties, f.geometry.coordinates.slice())
     })
-    map.on('mouseenter', 'cluster-circles', () => {
+
+    // 悬停预览（桌面）
+    map.on('mouseenter', 'cluster-circles', (e) => {
+      const f = e.features?.[0]
+      if (!f) return
+      clearTimeout(hoverTimer)
+      hoverTimer = setTimeout(() => {
+        showHover(f, e.originalEvent.clientX, e.originalEvent.clientY)
+      }, 120)
+    })
+    map.on('mousemove', 'cluster-circles', () => {
       map.getCanvas().style.cursor = 'pointer'
     })
     map.on('mouseleave', 'cluster-circles', () => {
+      clearTimeout(hoverTimer)
       map.getCanvas().style.cursor = ''
+      closeHover()
     })
 
-    // 调试/自动化验证用：暴露只读 map 引用（无安全影响，便于投影坐标计算）
     window.__map = map
     reload()
   })
 
-  // 视口变化 → 重算聚合 + 时间轴（地图 → 时间轴）
+  // 长按预览（触摸）：500ms 未移动触发，移动超阈值取消（与平移互斥）
+  const canvas = map.getCanvas()
+  canvas.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return
+    const t = e.touches[0]
+    touchStartInfo = { x: t.clientX, y: t.clientY, t: Date.now() }
+    clearTimeout(hoverTimer)
+    hoverTimer = setTimeout(() => {
+      const fs = map.queryRenderedFeatures([t.clientX, t.clientY], { layers: ['cluster-circles'] })
+      if (fs.length) showHover(fs[0], t.clientX, t.clientY)
+      touchStartInfo = null
+    }, 500)
+  }, { passive: true })
+  canvas.addEventListener('touchmove', (e) => {
+    if (!touchStartInfo || !e.touches.length) return
+    const t = e.touches[0]
+    const dx = t.clientX - touchStartInfo.x
+    const dy = t.clientY - touchStartInfo.y
+    if (dx * dx + dy * dy > 100) { // 移动超过 10px → 判定为平移，取消长按
+      clearTimeout(hoverTimer)
+      closeHover()
+      touchStartInfo = null
+    }
+  }, { passive: true })
+  canvas.addEventListener('touchend', () => {
+    clearTimeout(hoverTimer)
+    // 延迟关闭预览（长按松手后短暂停留）
+    setTimeout(() => { if (!touchStartInfo) closeHover() }, 600)
+    touchStartInfo = null
+  }, { passive: true })
+
   map.on('moveend', scheduleReload)
   map.on('zoomend', scheduleReload)
 })
 
 onBeforeUnmount(() => {
   clearTimeout(reloadTimer)
+  clearTimeout(hoverTimer)
   map?.remove()
   map = null
 })
@@ -281,5 +452,21 @@ onBeforeUnmount(() => {
 .mt-err {
   font-size: 12px;
   color: #dc2626;
+}
+
+.mt-icon-btn {
+  margin-left: auto;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: #fff;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.mt-icon-btn:hover {
+  border-color: rgba(15, 23, 42, 0.28);
+  color: #0f172a;
 }
 </style>

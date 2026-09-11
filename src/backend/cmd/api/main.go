@@ -175,6 +175,8 @@ func main() {
 	authed.GET("/geo/items", permRead, geoH.Items)
 	authed.GET("/geo/histogram", permRead, geoH.Histogram)
 	authed.GET("/tiles/amap/:z/:x/:y", permRead, geoH.Tiles.Serve) // Key 服务端注入，前端不持 Key
+	authed.GET("/preferences/map", permRead, geoH.GetMapIconPref)    // Job000009 图标配置（账户级）
+	authed.PUT("/preferences/map", permRead, geoH.PutMapIconPref)
 
 	// Stage 2 公开端点（无鉴权，token 即凭证；不提供原文件下载）
 	r.GET("/public/shares/:token", sharesH.PublicGet)

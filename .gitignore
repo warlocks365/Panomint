@@ -50,6 +50,9 @@ Thumbs.db
 *.jpg
 *.jpeg
 *.mp4
+# 例外：地图内置图标（Job000009 功能资源，非临时产物）
+!src/frontend/public/map-icons/
+!src/frontend/public/map-icons/*.png
 prototypes/*/streams*/
 prototypes/*/vendor/
 
