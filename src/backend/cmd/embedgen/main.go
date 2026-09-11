@@ -1,19 +1,27 @@
-// embedgen CLIP 向量工具（Job000010）：为媒体生成 embedding / 语义检索自检 / 查看进度。
+// embedgen CLIP 向量工具（Job000010）：为媒体生成 embedding / 语义检索自检 / 设备探针。
 //
 // 用法：
 //
+//	embedgen -mode probe                         # 设备探针（报告实际生效的 CPU/CUDA 执行提供器）
 //	embedgen -mode status                        # 查看已向量化进度
 //	embedgen -mode encode [-limit N] [-force]    # 批量生成（缩略图 → CLIP 图像塔 → media.embedding）
 //	embedgen -mode query -text "sunset" [-k 10]  # 语义检索自检（文本塔 → pgvector 余弦检索）
 //	embedgen -mode selftest                      # 编码器自检（无需 DB：文本/图像各编码一次）
 //
+// 设备选择（GPU / CPU 双接口，同一二进制由配置切换）：
+//
+//	-device cpu|cuda|auto   或 EMBED_DEVICE（默认 auto：优先 CUDA，不可用回落 CPU）
+//	-deviceID N             或 EMBED_DEVICE_ID（CUDA 设备序号，默认 0）
+//	-threads N              或 EMBED_THREADS（CPU 线程数，0=ORT 默认）
+//	-gpuMemMB N             或 EMBED_GPU_MEM_MB（CUDA 显存上限，0=不限）
+//
 // 路径：
 //
 //	模型目录  -modeldir  或 EMBED_MODEL_DIR（默认 assets/models/clip）
-//	原生库    -lib       或 EMBED_LIB（默认按平台名走系统搜索）
+//	原生库    -lib       或 EMBED_LIB（默认按平台名走系统搜索；CUDA 需指向 GPU 版库）
 //	缩略图    -thumbdir  或 THUMB_DIR（默认 ./data/thumbnails）
 //
-// 说明：本工具的推理全部在**本地 CPU** 完成，不依赖任何远程 GPU 节点。
+// 说明：推理在**本地** CPU / GPU 完成，不依赖任何远程 GPU 节点。
 package main
 
 import (
@@ -31,42 +39,51 @@ import (
 	"panoalbum/internal/embed"
 )
 
+type options struct {
+	mode     string
+	limit    int
+	force    bool
+	text     string
+	k        int
+	modelDir string
+	lib      string
+	thumbDir string
+	device   string
+	deviceID int
+	threads  int
+	gpuMemMB int
+}
+
 func main() {
-	mode := flag.String("mode", "status", "status|encode|query|selftest")
-	limit := flag.Int("limit", 500, "encode 模式最多处理条数")
-	force := flag.Bool("force", false, "encode 模式重算已有向量")
-	text := flag.String("text", "", "query 模式的查询文本")
-	k := flag.Int("k", 10, "query 模式返回条数")
-	modelDir := flag.String("modeldir", "", "CLIP 模型目录")
-	lib := flag.String("lib", "", "onnxruntime 原生库路径")
-	thumbDir := flag.String("thumbdir", "", "缩略图目录")
+	var o options
+	flag.StringVar(&o.mode, "mode", "status", "probe|status|encode|query|selftest")
+	flag.IntVar(&o.limit, "limit", 500, "encode 模式最多处理条数")
+	flag.BoolVar(&o.force, "force", false, "encode 模式重算已有向量")
+	flag.StringVar(&o.text, "text", "", "query 模式的查询文本")
+	flag.IntVar(&o.k, "k", 10, "query 模式返回条数")
+	flag.StringVar(&o.modelDir, "modeldir", "", "CLIP 模型目录")
+	flag.StringVar(&o.lib, "lib", "", "onnxruntime 原生库路径")
+	flag.StringVar(&o.thumbDir, "thumbdir", "", "缩略图目录")
+	flag.StringVar(&o.device, "device", "", "推理设备 cpu|cuda|auto")
+	flag.IntVar(&o.deviceID, "deviceID", -1, "CUDA 设备序号")
+	flag.IntVar(&o.threads, "threads", -1, "CPU 线程数")
+	flag.IntVar(&o.gpuMemMB, "gpuMemMB", -1, "CUDA 显存上限 MB")
 	flag.Parse()
 
-	md := *modelDir
-	if md == "" {
-		md = embed.ModelDirFromEnv()
-	}
-	td := *thumbDir
-	if td == "" {
-		td = os.Getenv("THUMB_DIR")
-	}
-	if td == "" {
-		td = filepath.Join(".", "data", "thumbnails")
-	}
+	cfg, thumbDir := buildConfig(o)
 
-	// selftest 不需要 DB
-	if *mode == "selftest" {
-		if err := selfTest(md, *lib); err != nil {
-			log.Fatalf("自检失败: %v", err)
+	if o.mode == "selftest" || o.mode == "probe" {
+		if err := selfTest(cfg, o.mode == "probe"); err != nil {
+			log.Fatalf("失败: %v", err)
 		}
 		return
 	}
 
-	cfg := config.Load()
+	appCfg := config.Load()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, cfg.PGDSN)
+	pool, err := pgxpool.New(ctx, appCfg.PGDSN)
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
@@ -74,7 +91,7 @@ func main() {
 
 	st := &embed.Store{Pool: pool}
 
-	switch *mode {
+	switch o.mode {
 	case "status":
 		done, total, err := st.CountEmbedded(ctx)
 		if err != nil {
@@ -83,29 +100,61 @@ func main() {
 		fmt.Printf("已向量化 %d / %d\n", done, total)
 
 	case "encode":
-		runEncode(ctx, st, md, *lib, td, *limit, *force)
+		runEncode(ctx, st, cfg, thumbDir, o.limit, o.force)
 
 	case "query":
-		if *text == "" {
+		if o.text == "" {
 			log.Fatal("query 模式需要 -text")
 		}
-		runQuery(ctx, st, md, *lib, *text, *k)
+		runQuery(ctx, st, cfg, o.text, o.k)
 
 	default:
-		log.Fatalf("未知 mode: %s", *mode)
+		log.Fatalf("未知 mode: %s", o.mode)
 	}
 }
 
-// newEncoder 构造编码器（本地 CPU 推理）。
-func newEncoder(modelDir, lib string) (*embed.Encoder, error) {
-	if lib == "" {
-		lib = os.Getenv("EMBED_LIB")
+// buildConfig 合并 flag / 环境变量 / 默认值，返回编码器配置与缩略图目录。
+func buildConfig(o options) (embed.Config, string) {
+	cfg := embed.ConfigFromEnv()
+	if o.modelDir != "" {
+		cfg.ModelDir = o.modelDir
 	}
-	log.Printf("加载 CLIP 模型：dir=%s lib=%s", modelDir, lib)
-	return embed.NewEncoder(embed.Config{ModelDir: modelDir, LibPath: lib})
+	if o.lib != "" {
+		cfg.LibPath = o.lib
+	}
+	if o.device != "" {
+		cfg.Device = embed.ParseDevice(o.device)
+	}
+	if o.deviceID >= 0 {
+		cfg.DeviceID = o.deviceID
+	}
+	if o.threads >= 0 {
+		cfg.IntraThreads = o.threads
+	}
+	if o.gpuMemMB >= 0 {
+		cfg.GpuMemLimitMB = o.gpuMemMB
+	}
+	td := o.thumbDir
+	if td == "" {
+		td = os.Getenv("THUMB_DIR")
+	}
+	if td == "" {
+		td = filepath.Join(".", "data", "thumbnails")
+	}
+	return cfg, td
 }
 
-func runEncode(ctx context.Context, st *embed.Store, modelDir, lib, thumbDir string, limit int, force bool) {
+func newEncoder(cfg embed.Config) (*embed.Encoder, error) {
+	log.Printf("加载 CLIP：dir=%s lib=%s 请求设备=%s", cfg.ModelDir, cfg.LibPath, cfg.Device)
+	enc, err := embed.NewEncoder(cfg)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("执行提供器：%s（设备=%s）", enc.Provider(), enc.Device())
+	return enc, nil
+}
+
+func runEncode(ctx context.Context, st *embed.Store, cfg embed.Config, thumbDir string, limit int, force bool) {
 	list, err := st.ListPending(ctx, force, limit)
 	if err != nil {
 		log.Fatalf("查询待编码媒体失败: %v", err)
@@ -116,7 +165,7 @@ func runEncode(ctx context.Context, st *embed.Store, modelDir, lib, thumbDir str
 	}
 	fmt.Printf("待编码 %d 条，缩略图目录 %s\n", len(list), thumbDir)
 
-	enc, err := newEncoder(modelDir, lib)
+	enc, err := newEncoder(cfg)
 	if err != nil {
 		log.Fatalf("加载编码器失败: %v", err)
 	}
@@ -147,12 +196,12 @@ func runEncode(ctx context.Context, st *embed.Store, modelDir, lib, thumbDir str
 		}
 	}
 	rate := float64(ok) / time.Since(start).Seconds()
-	fmt.Printf("完成：成功 %d，跳过 %d（无缩略图），失败 %d，用时 %s（%.1f 张/秒）\n",
-		ok, skip, fail, time.Since(start).Round(time.Millisecond), rate)
+	fmt.Printf("完成：成功 %d，跳过 %d（无缩略图），失败 %d，用时 %s（%.1f 张/秒）· 设备 %s\n",
+		ok, skip, fail, time.Since(start).Round(time.Millisecond), rate, enc.Provider())
 }
 
-func runQuery(ctx context.Context, st *embed.Store, modelDir, lib, text string, k int) {
-	enc, err := newEncoder(modelDir, lib)
+func runQuery(ctx context.Context, st *embed.Store, cfg embed.Config, text string, k int) {
+	enc, err := newEncoder(cfg)
 	if err != nil {
 		log.Fatalf("加载编码器失败: %v", err)
 	}
@@ -169,7 +218,7 @@ func runQuery(ctx context.Context, st *embed.Store, modelDir, lib, text string, 
 	if err != nil {
 		log.Fatalf("检索失败: %v", err)
 	}
-	fmt.Printf("查询 %q（编码 %dms，命中 %d 条）：\n", text, encMS, len(hits))
+	fmt.Printf("查询 %q（编码 %dms，%s，命中 %d 条）：\n", text, encMS, enc.Provider(), len(hits))
 	for i, h := range hits {
 		tag := h.Type
 		if h.Is360 {
@@ -179,22 +228,30 @@ func runQuery(ctx context.Context, st *embed.Store, modelDir, lib, text string, 
 	}
 }
 
-// selfTest 不依赖 DB 的编码器自检。
-func selfTest(modelDir, lib string) error {
+// selfTest 编码器自检；probe 模式额外报告设备装配情况（用于 GPU 功能验证）。
+func selfTest(cfg embed.Config, probe bool) error {
 	ctx := context.Background()
-	enc, err := newEncoder(modelDir, lib)
+	log.Printf("请求配置：dir=%s lib=%s device=%s deviceID=%d",
+		cfg.ModelDir, cfg.LibPath, cfg.Device, cfg.DeviceID)
+
+	enc, err := embed.NewEncoder(cfg)
 	if err != nil {
+		if probe {
+			fmt.Printf("PROBE=FAIL err=%v\n", err)
+		}
 		return err
 	}
 	defer enc.Close()
 
-	for _, s := range []string{"a photo of a sunset over the sea", "a photo of a red car"} {
-		v, err := enc.EncodeText(ctx, s)
-		if err != nil {
-			return fmt.Errorf("编码 %q 失败: %w", s, err)
+	fmt.Printf("PROBE=OK provider=%s device=%s lib=%s\n", enc.Provider(), enc.Device(), enc.LibPath())
+	if !probe {
+		for _, s := range []string{"a photo of a sunset over the sea", "a photo of a red car"} {
+			v, err := enc.EncodeText(ctx, s)
+			if err != nil {
+				return fmt.Errorf("编码 %q 失败: %w", s, err)
+			}
+			fmt.Printf("text %-40q dim=%d 前3维=%.4f,%.4f,%.4f\n", s, len(v), v[0], v[1], v[2])
 		}
-		fmt.Printf("text %-40q dim=%d norm-ok=%v 前3维=%.4f,%.4f,%.4f\n",
-			s, len(v), true, v[0], v[1], v[2])
 	}
 	return nil
 }

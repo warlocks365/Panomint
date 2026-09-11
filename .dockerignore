@@ -1,0 +1,40 @@
+# Docker 构建上下文排除项（Job000010：api 镜像上下文改为仓库根）
+# 注意：**不要**排除 assets/models/clip 与 assets/lib/onnxruntime-linux-*/lib，
+# 它们是 api 镜像的运行资产。
+
+# 版本控制与本地工具
+.git
+.gitignore
+.workbuddy
+.venv
+runs
+
+# 依赖与构建产物（容器内自行安装/编译）
+node_modules
+**/node_modules
+dist
+**/dist
+dist_old
+
+# 文档与原型（与运行无关）
+文档
+工作日志
+prototypes
+overview.md
+磁盘扩容报告_2026-08-24.md
+licenses.csv
+
+# 非当前平台的原生库与调试符号（Linux 镜像只需要 .so）
+assets/lib/onnxruntime-win-x64-*
+assets/lib/onnxruntime-linux-*/include
+assets/lib/onnxruntime-*/lib/*.lib
+assets/lib/onnxruntime-*/lib/*.pdb
+assets/lib/*.zip
+assets/lib/*.tgz
+
+# 其他杂项
+*.log
+*.png
+*.jpg
+*.jpeg
+*.mp4

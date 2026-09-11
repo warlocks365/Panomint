@@ -221,18 +221,27 @@ func main() {
 }
 
 // buildRecaller 构造 Stage 4 语义召回器。
+//
+// 设备由环境变量选择（EMBED_DEVICE=cpu|cuda|auto，默认 auto）：
+// 优先 CUDA，装配失败则回落 CPU —— GPU / CPU 双接口在同一二进制中保留，
+// 由部署环境决定实际生效者，不因开发机能力而裁剪。
+//
 // CLIP 模型或 onnxruntime 原生库缺失时降级为占位实现（等价 Stage 3 行为），
-// 保证 AI 资产未就绪也不会阻断 API 启动。推理在**本地 CPU** 完成。
+// 保证 AI 资产未就绪也不会阻断 API 启动。推理在**本地** CPU / GPU 完成。
 func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) search.Recaller {
-	modelDir := embed.ModelDirFromEnv()
-	lib := os.Getenv("EMBED_LIB")
-	enc, err := embed.NewEncoder(embed.Config{ModelDir: modelDir, LibPath: lib})
+	cfg := embed.ConfigFromEnv()
+	enc, err := embed.NewEncoder(cfg)
 	if err != nil {
 		logger.Warn("语义召回未启用（CLIP 初始化失败，降级为结构化检索）",
-			zap.String("model_dir", modelDir), zap.Error(err))
+			zap.String("model_dir", cfg.ModelDir),
+			zap.String("device", string(cfg.Device)),
+			zap.Error(err))
 		return search.SemanticRecaller{}
 	}
-	logger.Info("语义召回已启用", zap.String("model_dir", modelDir))
+	logger.Info("语义召回已启用",
+		zap.String("model_dir", cfg.ModelDir),
+		zap.String("provider", enc.Provider()),
+		zap.String("device", string(enc.Device())))
 	return &search.VectorRecaller{
 		Enc:   enc,
 		Store: &embed.Store{Pool: pool},

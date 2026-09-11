@@ -10,18 +10,25 @@ package embed
 //
 // 两塔输出已投影到同一 512 维空间，可直接用余弦相似度做跨模态检索。
 //
-// 关于并发：onnxruntime 的 Session 非并发安全，这里用互斥锁串行化每个会话。
-//
-// 为什么用 CGO：另一类纯 Go 绑定（purego 系）在 Windows 上缺少 dlopen 支持，
-// 会导致本机完全无法构建/迭代；CGO 在本机（msys2 gcc）与 Linux/Docker 均可用。
+// ── 执行提供器（GPU / CPU 双接口）────────────────────────────────────────────
+// Config.Device 决定装配哪个 ONNX Runtime Execution Provider：
+//   cpu  : 仅 CPU EP（基座，任何环境可用）
+//   cuda : 追加 CUDA EP；装配失败即报错（显式配置不静默降级）
+//   auto : 先试 CUDA EP，失败则回落 CPU EP 并记录实际选择
+// 二者共用同一模型、同一预处理与同一代码路径，差异仅在 EP 装配。
+// 注意：CUDA EP 需要 CUDA 版 onnxruntime 库（onnxruntime-linux-x64-gpu_cudaXX）；
+// 使用 CPU 版库时装配必然失败——因此 auto 模式在只有 CPU 库的机器上即自动落 CPU。
+// 另：CUDA EP 已知会覆盖 Go 的信号处理器（yalue/onnxruntime_go#140），
+// 若生产启用 CUDA 需在初始化后自行恢复信号处理。
 //
 // ⚠️ 本文件仅在启用 CGO 时编译；未启用时由 clip_nocgo.go 提供占位实现。
-// 注意：onnxruntime_go 要求运行时库版本与头文件版本一致（本工程配 1.29.0）。
+// onnxruntime_go 要求运行时库版本与头文件版本一致（本工程配 1.29.0）。
 
 import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -39,11 +46,85 @@ type Encoder struct {
 	visIn   *ort.Tensor[float32]
 	visOut  *ort.Tensor[float32]
 
+	device DeviceKind // 实际生效的设备
+	lib    string     // 实际加载的原生库路径
+
 	muText   sync.Mutex
 	muVision sync.Mutex
 
 	envOnce *sync.Once
 	envErr  error
+}
+
+// Device 返回实际生效的推理设备（cpu / cuda）。
+func (e *Encoder) Device() DeviceKind { return e.device }
+
+// Provider 返回人类可读的执行提供器描述（用于日志与自检输出）。
+func (e *Encoder) Provider() string {
+	if e.device == DeviceCUDA {
+		return "CUDAExecutionProvider"
+	}
+	return "CPUExecutionProvider"
+}
+
+// LibPath 返回实际加载的原生库路径。
+func (e *Encoder) LibPath() string { return e.lib }
+
+// newSessionOptions 按配置装配执行提供器，返回会话选项与实际生效设备。
+func newSessionOptions(cfg Config) (*ort.SessionOptions, DeviceKind, error) {
+	so, err := ort.NewSessionOptions()
+	if err != nil {
+		return nil, "", fmt.Errorf("创建会话选项失败: %w", err)
+	}
+	if cfg.IntraThreads > 0 {
+		if err := so.SetIntraOpNumThreads(cfg.IntraThreads); err != nil {
+			so.Destroy()
+			return nil, "", fmt.Errorf("设置线程数失败: %w", err)
+		}
+	}
+
+	dev := cfg.Device
+	if dev == "" {
+		dev = DeviceAuto
+	}
+	switch dev {
+	case DeviceCPU:
+		return so, DeviceCPU, nil
+
+	case DeviceCUDA, DeviceAuto:
+		if err := appendCUDA(so, cfg); err == nil {
+			return so, DeviceCUDA, nil
+		} else if dev == DeviceCUDA {
+			so.Destroy()
+			return nil, "", fmt.Errorf("显式要求 CUDA 执行提供器但装配失败（请确认使用 CUDA 版 onnxruntime 库）: %w", err)
+		}
+		// auto：回落 CPU（保留 GPU 接口，仅在当前环境不可用时降级）
+		return so, DeviceCPU, nil
+	}
+	return so, DeviceCPU, nil
+}
+
+// appendCUDA 装配 CUDA 执行提供器。
+func appendCUDA(so *ort.SessionOptions, cfg Config) error {
+	opts, err := ort.NewCUDAProviderOptions()
+	if err != nil {
+		return err
+	}
+	defer opts.Destroy()
+
+	kv := map[string]string{}
+	if cfg.DeviceID > 0 {
+		kv["device_id"] = strconv.Itoa(cfg.DeviceID)
+	}
+	if cfg.GpuMemLimitMB > 0 {
+		kv["gpu_mem_limit"] = strconv.Itoa(cfg.GpuMemLimitMB * 1024 * 1024)
+	}
+	if len(kv) > 0 {
+		if err := opts.Update(kv); err != nil {
+			return err
+		}
+	}
+	return so.AppendExecutionProviderCUDA(opts)
 }
 
 // NewEncoder 初始化 ONNX Runtime 环境并加载分词器与两个推理会话。
@@ -60,7 +141,7 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		lib = defaultLibName()
 	}
 
-	enc := &Encoder{tok: tok, envOnce: &sync.Once{}}
+	enc := &Encoder{tok: tok, envOnce: &sync.Once{}, lib: lib}
 	if err := enc.initEnv(lib); err != nil {
 		return nil, fmt.Errorf("初始化 ONNX Runtime 失败（库 %s）: %w", lib, err)
 	}
@@ -75,15 +156,23 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		textIn.Destroy()
 		return nil, fmt.Errorf("创建文本输出张量失败: %w", err)
 	}
+	textOpts, dev, err := newSessionOptions(cfg)
+	if err != nil {
+		textIn.Destroy()
+		textOut.Destroy()
+		return nil, err
+	}
 	textSess, err := ort.NewAdvancedSession(
 		filepath.Join(cfg.ModelDir, "text_model_quantized.onnx"),
 		[]string{"input_ids"}, []string{"text_embeds"},
-		[]ort.Value{textIn}, []ort.Value{textOut}, nil)
+		[]ort.Value{textIn}, []ort.Value{textOut}, textOpts)
+	textOpts.Destroy()
 	if err != nil {
 		textIn.Destroy()
 		textOut.Destroy()
 		return nil, fmt.Errorf("加载文本编码器失败: %w", err)
 	}
+	enc.device = dev
 
 	// 视觉塔：输入 [1,3,224,224] float32
 	visIn, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 3, ImageSize, ImageSize))
@@ -101,10 +190,20 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		textOut.Destroy()
 		return nil, fmt.Errorf("创建图像输出张量失败: %w", err)
 	}
+	visOpts, dev2, err := newSessionOptions(cfg)
+	if err != nil {
+		visIn.Destroy()
+		visOut.Destroy()
+		textSess.Destroy()
+		textIn.Destroy()
+		textOut.Destroy()
+		return nil, err
+	}
 	visSess, err := ort.NewAdvancedSession(
 		filepath.Join(cfg.ModelDir, "vision_model_quantized.onnx"),
 		[]string{"pixel_values"}, []string{"image_embeds"},
-		[]ort.Value{visIn}, []ort.Value{visOut}, nil)
+		[]ort.Value{visIn}, []ort.Value{visOut}, visOpts)
+	visOpts.Destroy()
 	if err != nil {
 		visIn.Destroy()
 		visOut.Destroy()
@@ -112,6 +211,10 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		textIn.Destroy()
 		textOut.Destroy()
 		return nil, fmt.Errorf("加载图像编码器失败: %w", err)
+	}
+	// 两塔设备应一致（同一份配置）；不一致时取更保守的 CPU
+	if dev2 != dev {
+		enc.device = DeviceCPU
 	}
 
 	enc.text, enc.vision = textSess, visSess

@@ -64,8 +64,9 @@ services:
   # ---- API 服务（cmd/api）：经 web 反代对外，不直接暴露宿主机端口 ----
   api:
     build:
-      context: ./src/backend
-      dockerfile: ../../docker/api/Dockerfile
+      # 上下文=仓库根：镜像需打包 assets/{models,lib}（CLIP 模型 + ONNX Runtime，Job000010）
+      context: .
+      dockerfile: docker/api/Dockerfile
     container_name: pano-api
     restart: unless-stopped
     environment:
@@ -79,6 +80,11 @@ services:
       MEDIA_ROOT: /data/media
       THUMB_DIR: /data/thumbnails
       TILE_CACHE_DIR: /tile-cache # Job000009 瓦片缓存（高德 429 限流对策）
+      # Job000010 语义搜索的设备选择：cpu|cuda|auto（auto=优先 CUDA，不可用回落 CPU）
+      # GPU 部署时把 EMBED_DEVICE 设为 cuda，并把 EMBED_LIB 指向 CUDA 版 onnxruntime 库
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+      EMBED_DEVICE_ID: ${EMBED_DEVICE_ID:-0}
+      EMBED_THREADS: ${EMBED_THREADS:-0}
     volumes:
       - mediadata:/data
       - tilecache:/tile-cache
