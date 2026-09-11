@@ -31,19 +31,19 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (*SearchResult, erro
 		p.Limit = 50
 	}
 
-	// 召回管道：语义召回补充 ID（MVP 占位恒空）
-	var extraIDs []string
+	// 召回管道：语义召回命中（ID + 相似度）。既并入候选集，也参与打分。
+	var hits []RecallHit
 	if s.Recaller != nil {
-		ids, err := s.Recaller.Recall(ctx, p)
+		h, err := s.Recaller.Recall(ctx, p)
 		if err != nil {
 			return nil, err
 		}
-		extraIDs = ids
+		hits = h
 	}
 
 	// 第一轮：place 文本 trgm 匹配
-	where, scoreExpr, args := buildWhere(p, extraIDs, nil)
-	res, err := s.query(ctx, p, where, scoreExpr, args)
+	where, scoreExpr, args, whereN := buildWhere(p, hits, nil)
+	res, err := s.query(ctx, p, where, scoreExpr, args, whereN)
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +59,10 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (*SearchResult, erro
 			if err != nil {
 				// 解析器故障（如 Nominatim 网络不可达）不应 500：降级为文本检索零结果
 				log.Printf("place 地理解析失败 %q: %v（按不降级继续）", p.Place, err)
-		} else if ok {
-			center := GeoCenter{Lon: lon, Lat: lat}
-			gwhere, gscore, gargs := buildWhere(p, extraIDs, &center)
-			res, err = s.query(ctx, p, gwhere, gscore, gargs)
+			} else if ok {
+				center := GeoCenter{Lon: lon, Lat: lat}
+				gwhere, gscore, gargs, gwhereN := buildWhere(p, hits, &center)
+				res, err = s.query(ctx, p, gwhere, gscore, gargs, gwhereN)
 				if err != nil {
 					return nil, err
 				}
@@ -87,14 +87,16 @@ func (s *Store) hasGPS(ctx context.Context) (bool, error) {
 }
 
 // query 执行过滤查询：total（不含游标）+ 复合游标分页（与 timeline.go 同构）。
-// scoreExpr 非空（q 带关键词）时走相关度模式：排序 score DESC, taken_at DESC, id DESC，
+// scoreExpr 非空（q 带关键词或有语义命中）时走相关度模式：排序 score DESC, taken_at DESC, id DESC，
 // 游标为 v2 三元组 (score, taken_at, id)；否则保持原 (taken_at, id) 行为。
-func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr string, args []any) (*SearchResult, error) {
+//
+// whereN：WHERE 实际引用的参数个数。args 中位于 whereN 之后的参数只被评分表达式引用
+// （如语义召回的 ids/sims 数组），count(*) 查询不能接收它们。
+func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr string, args []any, whereN int) (*SearchResult, error) {
 	scored := scoreExpr != ""
 
 	// 游标条件独立于 where 拼装（total 统计不含游标，避免字符串剥离的脆弱性）
 	cursorWhere := ""
-	cursorArgs := 0
 	if p.Cursor != "" {
 		if scored {
 			sc, t, id, err := decodeScoredCursor(p.Cursor)
@@ -104,7 +106,6 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr stri
 			args = append(args, sc, t, id)
 			cursorWhere = fmt.Sprintf(" AND ((%s), m.taken_at, m.id) < ($%d::float8, $%d::timestamptz, $%d::uuid)",
 				scoreExpr, len(args)-2, len(args)-1, len(args))
-			cursorArgs = 3
 		} else {
 			t, id, err := decodeCursor(p.Cursor)
 			if err != nil {
@@ -112,13 +113,12 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr stri
 			}
 			args = append(args, t, id)
 			cursorWhere = fmt.Sprintf(" AND (m.taken_at, m.id) < ($%d, $%d)", len(args)-1, len(args))
-			cursorArgs = 2
 		}
 	}
 
 	var total int
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM media m WHERE `+where,
-		args[:len(args)-cursorArgs]...).Scan(&total); err != nil {
+		args[:whereN]...).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -126,7 +126,9 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr stri
 	orderBy := "m.taken_at DESC, m.id DESC"
 	if scored {
 		selectScore = "(" + scoreExpr + ")"
-		orderBy = "score DESC, m.taken_at DESC, m.id DESC"
+		// NULLS LAST：Postgres 的 DESC 默认 NULLS FIRST，若评分为 NULL 会把无关项排到最前。
+		// 评分表达式已做 COALESCE 防 NULL，这里再兜一层（Job000010 语义召回并入后实测踩到）。
+		orderBy = "score DESC NULLS LAST, m.taken_at DESC, m.id DESC"
 	}
 	args = append(args, p.Limit+1)
 	rows, err := s.Pool.Query(ctx, `

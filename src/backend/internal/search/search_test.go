@@ -17,7 +17,7 @@ import (
 
 func TestBuildWhereOrAndScore(t *testing.T) {
 	// 双 token：OR 召回（任一命中），不再逐 token AND
-	where, score, args := buildWhere(SearchParams{UserID: "u1", Q: "西湖 游船"}, nil, nil)
+	where, score, args, _ := buildWhere(SearchParams{UserID: "u1", Q: "西湖 游船"}, nil, nil)
 	if len(args) != 3 { // userID + 2 token（WHERE 与 score 复用同一占位符）
 		t.Fatalf("参数应为 3（userID+2token），实际 %d: %v", len(args), args)
 	}
@@ -29,18 +29,30 @@ func TestBuildWhereOrAndScore(t *testing.T) {
 	if !strings.Contains(where, "similarity(m.filename, $2) >= 0.15") {
 		t.Errorf("应含 trgm 补充召回条件: %s", where)
 	}
-	// 评分表达式：ILIKE 权重（::int）+ similarity 连续分
-	for _, want := range []string{"10*(m.filename ILIKE", "6*(m.place ILIKE", "2*similarity(m.filename, $2)", "max(similarity(t.name, $2))"} {
+	// 评分表达式：ILIKE 权重（::int）+ similarity 连续分。
+	// 注意 place / folder_path 必须 COALESCE 后再 ILIKE——两者可空，
+	// 否则 NULL::int 会让整个 score 变 NULL，在 ORDER BY score DESC 下
+	// 因 Postgres 默认 NULLS FIRST 被排到最前（Job000010 实测踩到）。
+	for _, want := range []string{
+		"10*(m.filename ILIKE",
+		"6*(COALESCE(m.place,'') ILIKE",
+		"4*(COALESCE(m.folder_path,'') ILIKE",
+		"2*similarity(m.filename, $2)",
+		"max(similarity(t.name, $2))",
+	} {
 		if !strings.Contains(score, want) {
 			t.Errorf("score 表达式缺少 %q: %s", want, score)
 		}
 	}
+	if strings.Contains(score, "6*(m.place ILIKE") || strings.Contains(score, "4*(m.folder_path ILIKE") {
+		t.Errorf("评分表达式对可空列必须先 COALESCE 再 ILIKE（否则 score 可能为 NULL）: %s", score)
+	}
 	// 无 q：scoreExpr 为空（调用方保持 taken_at 排序原行为）
-	if _, scoreEmpty, _ := buildWhere(SearchParams{UserID: "u1"}, nil, nil); scoreEmpty != "" {
+	if _, scoreEmpty, _, _ := buildWhere(SearchParams{UserID: "u1"}, nil, nil); scoreEmpty != "" {
 		t.Errorf("无 q 时 scoreExpr 应为空，实际 %q", scoreEmpty)
 	}
 	// 单 token 不拼 OR
-	where1, _, _ := buildWhere(SearchParams{UserID: "u1", Q: "西湖"}, nil, nil)
+	where1, _, _, _ := buildWhere(SearchParams{UserID: "u1", Q: "西湖"}, nil, nil)
 	if strings.Count(where1, "m.filename ILIKE") != 1 {
 		t.Errorf("单 token 应仅一组命中条件: %s", where1)
 	}
@@ -104,7 +116,7 @@ func TestParseParams(t *testing.T) {
 
 func TestBuildWhere(t *testing.T) {
 	// 基础：仅权限 + 软删
-	where, _, args := buildWhere(SearchParams{UserID: "u1"}, nil, nil)
+	where, _, args, _ := buildWhere(SearchParams{UserID: "u1"}, nil, nil)
 	if !strings.Contains(where, "m.deleted_at IS NULL") {
 		t.Errorf("缺软删过滤: %s", where)
 	}
@@ -124,7 +136,7 @@ func TestBuildWhere(t *testing.T) {
 		HasAfter: true, DateAfter: after, HasBefore: true, DateBefore: before,
 		Type: "photo", Favorites: true,
 	}
-	where, _, args = buildWhere(p, nil, nil)
+	where, _, args, _ = buildWhere(p, nil, nil)
 	checks := []string{
 		"m.filename ILIKE", "m.place ILIKE", "m.folder_path ILIKE", "t.name ILIKE", // q 子串匹配
 		"media_tags mt JOIN tags t",         // tag EXISTS
@@ -143,7 +155,7 @@ func TestBuildWhere(t *testing.T) {
 	}
 
 	// type=360 仅 is_360
-	where, _, _ = buildWhere(SearchParams{UserID: "u1", Type: "360"}, nil, nil)
+	where, _, _, _ = buildWhere(SearchParams{UserID: "u1", Type: "360"}, nil, nil)
 	if !strings.Contains(where, "m.is_360 = true") || strings.Contains(where, "m.type =") {
 		t.Errorf("360 过滤错误: %s", where)
 	}
@@ -152,7 +164,7 @@ func TestBuildWhere(t *testing.T) {
 func TestBuildWherePlaceGeoFallback(t *testing.T) {
 	p := SearchParams{UserID: "u1", Place: "西湖"}
 	// 文本模式：ILIKE 子串
-	where, _, _ := buildWhere(p, nil, nil)
+	where, _, _, _ := buildWhere(p, nil, nil)
 	if !strings.Contains(where, "m.place ILIKE '%' || $2 || '%'") {
 		t.Errorf("文本模式应走 place ILIKE: %s", where)
 	}
@@ -161,7 +173,7 @@ func TestBuildWherePlaceGeoFallback(t *testing.T) {
 	}
 	// 地理降级模式：ST_DWithin 5km
 	center := &GeoCenter{Lon: 120.15, Lat: 30.27}
-	where, _, args := buildWhere(p, nil, center)
+	where, _, args, _ := buildWhere(p, nil, center)
 	if !strings.Contains(where, "ST_DWithin(m.gps::geography, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography, 5000)") {
 		t.Errorf("降级模式应走 5km 半径检索: %s", where)
 	}
@@ -176,17 +188,28 @@ func TestBuildWherePlaceGeoFallback(t *testing.T) {
 func TestBuildWhereSemanticRecallSlot(t *testing.T) {
 	p := SearchParams{UserID: "u1", Q: "猫"}
 	// 无召回：纯结构化
-	where, _, _ := buildWhere(p, nil, nil)
+	where, _, _, _ := buildWhere(p, nil, nil)
 	if strings.Contains(where, "ANY(") {
 		t.Errorf("无召回时不应拼 OR 并集: %s", where)
 	}
-	// 有召回 ID：OR 并集包装
-	where, _, args := buildWhere(p, []string{"id-a", "id-b"}, nil)
-	if !strings.Contains(where, "OR m.id = ANY($3::uuid[])") {
+	// 有召回：OR 并集包装 + 相似度参与打分
+	hits := []RecallHit{{ID: "id-a", Similarity: 0.30}, {ID: "id-b", Similarity: 0.20}}
+	where, score, args, _ := buildWhere(p, hits, nil)
+	if !strings.Contains(where, "OR m.id = ANY(") {
 		t.Errorf("召回应以 OR 并集拼接: %s", where)
 	}
-	if ids, ok := args[len(args)-1].([]string); !ok || len(ids) != 2 {
-		t.Errorf("召回 ID 参数错误: %v", args)
+	if !strings.Contains(score, "array_position(") {
+		t.Errorf("语义命中应以相似度参与打分（否则会被按时间排序埋没）: %s", score)
+	}
+	// 末尾两个参数依次为 ids(uuid[]) 与 sims(float8[])
+	n := len(args)
+	ids, ok := args[n-2].([]string)
+	if !ok || len(ids) != 2 || ids[0] != "id-a" {
+		t.Errorf("召回 ID 参数错误: %v", args[n-2])
+	}
+	sims, ok := args[n-1].([]float64)
+	if !ok || len(sims) != 2 || sims[0] != 0.30 {
+		t.Errorf("召回相似度参数错误: %v", args[n-1])
 	}
 }
 

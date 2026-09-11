@@ -11,15 +11,35 @@ package search
 import (
 	"context"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 
 	"panoalbum/internal/embed"
 )
 
-// SemanticThreshold 语义召回的余弦距离上限（距离越小越相似）。
-// 超过该值视为不相关，不并入候选集——避免把无关媒体注入结果。
-// 取值由真实数据上的距离分布标定（见 Job000010 验证记录）。
-const SemanticThreshold = 0.85
+// 语义召回的余弦距离上限（距离越小越相似）；超过该值视为不相关，不并入候选集。
+//
+// 取值由真实数据标定（Job000010 验证，库内 72 条媒体、CLIP ViT-B/32 量化版）：
+//   - 明确命中的样本距离落在 0.70~0.75（如 "aurora in the night sky" → 极光-夜空 0.7026）
+//   - 无关样本密集分布在 0.77~0.85
+//   - 故 0.85 过宽（几乎注入全库），0.80 能在保留相关项的同时显著抑制噪声
+//
+// 可用环境变量 EMBED_SEMANTIC_MAX_DIST 覆盖（便于按实际库内容调优，无需重新编译）。
+const defaultSemanticThreshold = 0.80
+
+// semanticThreshold 解析阈值（0.30~1.00 之间的合法值才接受）。
+func semanticThreshold() float64 {
+	v := strings.TrimSpace(os.Getenv("EMBED_SEMANTIC_MAX_DIST"))
+	if v == "" {
+		return defaultSemanticThreshold
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0.30 || f > 1.0 {
+		return defaultSemanticThreshold
+	}
+	return f
+}
 
 // VectorRecaller 基于 CLIP + pgvector 的语义召回实现。
 type VectorRecaller struct {
@@ -27,11 +47,13 @@ type VectorRecaller struct {
 	Store  *embed.Store
 	TopK   int
 	Logger *log.Logger
+	// MaxDist 余弦距离上限；<=0 时用 env/默认值。
+	MaxDist float64
 }
 
-// Recall 查询文本 → 512 维向量 → 余弦 top-K → 媒体 ID。
+// Recall 查询文本 → 512 维向量 → 余弦 top-K → 命中（ID + 相似度）。
 // Q 为空或未启用（依赖缺失）时返回 nil，等同于不召回（保持 Stage 3 行为）。
-func (r *VectorRecaller) Recall(ctx context.Context, p SearchParams) ([]string, error) {
+func (r *VectorRecaller) Recall(ctx context.Context, p SearchParams) ([]RecallHit, error) {
 	if r == nil || r.Enc == nil || r.Store == nil {
 		return nil, nil
 	}
@@ -60,12 +82,24 @@ func (r *VectorRecaller) Recall(ctx context.Context, p SearchParams) ([]string, 
 		return nil, nil
 	}
 
-	ids := make([]string, 0, len(hits))
+	maxDist := r.MaxDist
+	if maxDist <= 0 {
+		maxDist = semanticThreshold()
+	}
+
+	out := make([]RecallHit, 0, len(hits))
 	for _, h := range hits {
-		if h.Distance > SemanticThreshold {
+		if h.Distance > maxDist {
 			break // 结果按距离升序，后续只会更不相关
 		}
-		ids = append(ids, h.ID)
+		sim := 1 - h.Distance
+		if sim < 0 {
+			sim = 0
+		}
+		out = append(out, RecallHit{ID: h.ID, Similarity: sim})
 	}
-	return ids, nil
+	if r.Logger != nil {
+		r.Logger.Printf("语义召回：q=%q 命中 %d/%d（阈值 %.2f）", q, len(out), len(hits), maxDist)
+	}
+	return out, nil
 }

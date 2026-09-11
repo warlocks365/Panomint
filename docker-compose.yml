@@ -85,6 +85,8 @@ services:
       EMBED_DEVICE: ${EMBED_DEVICE:-auto}
       EMBED_DEVICE_ID: ${EMBED_DEVICE_ID:-0}
       EMBED_THREADS: ${EMBED_THREADS:-0}
+      # 语义召回余弦距离上限（越小越严格；实测标定 0.80，可在线调优免重建）
+      EMBED_SEMANTIC_MAX_DIST: ${EMBED_SEMANTIC_MAX_DIST:-0.80}
     volumes:
       - mediadata:/data
       - tilecache:/tile-cache

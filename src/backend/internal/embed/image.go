@@ -17,6 +17,9 @@ import (
 	"os"
 
 	xdraw "golang.org/x/image/draw"
+	// 缩略图由处理管线输出为 WebP（thumbnail_sm/md/lg 均为 *_MD.webp），
+	// 标准库 image 不解码 WebP —— 缺此注册会全线报 "image: unknown format"。
+	_ "golang.org/x/image/webp"
 )
 
 // ImageSize CLIP 输入边长。

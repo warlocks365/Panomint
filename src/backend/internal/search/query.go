@@ -6,28 +6,42 @@ import (
 	"strings"
 )
 
-// Recaller 召回管道插槽（Stage 4 语义召回接入点；返回补充召回的媒体 ID，与结构化过滤取并集）。
-type Recaller interface {
-	Recall(ctx context.Context, p SearchParams) ([]string, error)
+// RecallHit 语义召回命中：媒体 ID + 相似度（0~1，越大越相似）。
+type RecallHit struct {
+	ID         string
+	Similarity float64
 }
 
-// SemanticRecaller pgvector 语义召回占位实现（本期不实现，恒返回 nil；Stage 4 替换为真实实现，
-// API 契约与调用方代码不变）。
+// Recaller 召回管道插槽（Stage 4 语义召回接入点）。
+// 返回的命中既并入候选集（WHERE 并集），也参与相关度打分（见 buildWhere 的语义项），
+// 否则纯语义命中会因得分为 0 而被按时间排序埋没。
+type Recaller interface {
+	Recall(ctx context.Context, p SearchParams) ([]RecallHit, error)
+}
+
+// SemanticRecaller 未启用语义召回时的占位实现（恒空；保持 Stage 3 行为）。
 type SemanticRecaller struct{}
 
 // Recall 占位：无语义召回。
-func (SemanticRecaller) Recall(context.Context, SearchParams) ([]string, error) { return nil, nil }
+func (SemanticRecaller) Recall(context.Context, SearchParams) ([]RecallHit, error) { return nil, nil }
+
+// semanticScoreWeight 语义相似度在总评分中的权重。
+// 取 10 与「文件名完全匹配」同量级：文本强匹配（10~17 分）仍优先，
+// 纯语义命中（相似度 0.70~0.85 → 1.5~3 分）排在其后，并按其相似度彼此排序。
+const semanticScoreWeight = 10.0
 
 // trgmRecallThreshold trgm 补充召回相似度阈值（Job000005 裁决值）。
 const trgmRecallThreshold = 0.15
 
 // buildWhere 结构化过滤器层：由 SearchParams 组装参数化 WHERE（模式复用 internal/media/timeline.go）。
-//   - extraIDs：召回管道补充的媒体 ID（语义召回并集；MVP 恒空）
+//   - hits：语义召回命中（ID + 相似度）。既并入候选集，也按相似度参与打分；空则不拼语义项
 //   - geo：非 nil 时 place 条件由文本 ILIKE 替换为 ST_DWithin 半径检索（地理降级）
 //
-// 返回 scoreExpr：q 非空时为相关度评分表达式（与 WHERE 复用同一 token 占位符，无额外参数）；
-// q 为空时返回空串（调用方保持 taken_at 排序原行为）。
-func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (where string, scoreExpr string, args []any) {
+// 返回 scoreExpr：q 非空（或存在语义命中）时为相关度评分表达式；否则为空串
+// （调用方保持 taken_at 排序原行为）。
+// 返回 whereN：WHERE 实际引用的参数个数（args 中可能还含仅被评分表达式引用的参数，
+// 例如语义召回的 ids/sims 数组；count(*) 查询必须只传 whereN 个）。
+func buildWhere(p SearchParams, hits []RecallHit, geo *GeoCenter) (where string, scoreExpr string, args []any, whereN int) {
 	conds := []string{"m.deleted_at IS NULL"}
 	add := func(cond string, v any) {
 		args = append(args, v)
@@ -57,10 +71,13 @@ func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (where string
 				WHERE mt.media_id = m.id AND (t.name ILIKE '%%%%' || $%[1]d || '%%%%'
 					OR similarity(t.name, $%[1]d) >= %[2]g)))`, n, trgmRecallThreshold))
 		// 评分：ILIKE 完全子串权重最高（文件名 10 / 地点 6 / 目录 4 / 标签 6），
-		// trgm 相似度作连续分补充（×2 缩放，与 ILIKE 同量级但严格更低）
+		// trgm 相似度作连续分补充（×2 缩放，与 ILIKE 同量级但严格更低）。
+		// ⚠️ place / folder_path 可空：必须先 COALESCE 再做 ILIKE，
+		// 否则 NULL::int 会让**整个 score 变 NULL**，在 ORDER BY score DESC 下
+		// 因 Postgres 默认 NULLS FIRST 被排到最前（Job000010 实测踩到）。
 		tokScores = append(tokScores, fmt.Sprintf(`(10*(m.filename ILIKE '%%%%' || $%[1]d || '%%%%')::int
-			+ 6*(m.place ILIKE '%%%%' || $%[1]d || '%%%%')::int
-			+ 4*(m.folder_path ILIKE '%%%%' || $%[1]d || '%%%%')::int
+			+ 6*(COALESCE(m.place,'') ILIKE '%%%%' || $%[1]d || '%%%%')::int
+			+ 4*(COALESCE(m.folder_path,'') ILIKE '%%%%' || $%[1]d || '%%%%')::int
 			+ 6*(EXISTS(SELECT 1 FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
 				WHERE mt.media_id = m.id AND t.name ILIKE '%%%%' || $%[1]d || '%%%%'))::int
 			+ 2*similarity(m.filename, $%[1]d)
@@ -105,11 +122,33 @@ func buildWhere(p SearchParams, extraIDs []string, geo *GeoCenter) (where string
 		conds = append(conds, `EXISTS(SELECT 1 FROM album_items ai JOIN albums a ON a.id = ai.album_id
 			WHERE ai.media_id = m.id AND a.type = 'favorites')`)
 	}
-	if len(extraIDs) > 0 {
-		args = append(args, extraIDs)
-		// 语义召回并集：结构化条件 OR 召回命中（Stage 4 生效；MVP extraIDs 恒空不拼接）
+	if len(hits) > 0 {
+		// 语义召回：① 并入候选集（结构化条件 OR 召回命中）；
+		// ② 以相似度参与打分——否则纯语义命中得分为 0，会被按时间排序埋没，
+		//    出现「最佳语义命中排在几十条之后」的可用性问题（Job000010 实测踩到）。
+		ids := make([]string, 0, len(hits))
+		sims := make([]float64, 0, len(hits))
+		for _, h := range hits {
+			ids = append(ids, h.ID)
+			sims = append(sims, h.Similarity)
+		}
+		args = append(args, ids)
+		idsArg := len(args)
+		args = append(args, sims)
+		simsArg := len(args)
+
+		semTerm := fmt.Sprintf(`%g*COALESCE(($%d::float8[])[array_position($%d::uuid[], m.id)], 0)`,
+			semanticScoreWeight, simsArg, idsArg)
+		if scoreExpr == "" {
+			scoreExpr = semTerm
+		} else {
+			scoreExpr = scoreExpr + "\n\t+ " + semTerm
+		}
 		base := strings.Join(conds, " AND ")
-		return fmt.Sprintf("((%s) OR m.id = ANY($%d::uuid[]))", base, len(args)), scoreExpr, args
+		// 第 4 个返回值 = WHERE 实际引用的参数个数。
+		// 语义打分用的两个数组参数（ids/sims）只被 SELECT/ORDER BY 引用，
+		// 而 count(*) 查询只接受 WHERE 参数——不做区分会报 "expected N arguments"。
+		return fmt.Sprintf("((%s) OR m.id = ANY($%d::uuid[]))", base, idsArg), scoreExpr, args, idsArg
 	}
-	return strings.Join(conds, " AND "), scoreExpr, args
+	return strings.Join(conds, " AND "), scoreExpr, args, len(args)
 }

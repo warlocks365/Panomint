@@ -19,10 +19,15 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends gcc libc6-dev; \
     rm -rf /var/lib/apt/lists/*
 COPY src/backend/go.mod src/backend/go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY src/backend/cmd ./cmd
 COPY src/backend/internal ./internal
-RUN CGO_ENABLED=1 go build -trimpath -o /out/api ./cmd/api \
+# 挂载 Go 构建缓存：CGO 全量编译较慢（4 核 VM 上首次约 20 分钟），
+# 缓存后增量重建只需编译变更部分
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 go build -trimpath -o /out/api ./cmd/api \
  && CGO_ENABLED=1 go build -trimpath -o /out/embedgen ./cmd/embedgen
 
 # ---- 阶段 2：运行时 ----
