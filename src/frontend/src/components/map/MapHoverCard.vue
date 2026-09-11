@@ -222,43 +222,38 @@ const cardStyle = computed(() => {
   display: block;
 }
 
-/* 当前主显页：居中，占满 */
+/* 当前主显页：占满，是舞台的主角（65% 视觉权重，靠中间叠影聚焦） */
 .hc-page-current {
-  left: 0;
-  right: 0;
+  left: 17.5%;
+  right: 17.5%;
   z-index: 3;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.18);
 }
 
-/* 左页（上一张）：靠左 40%，右侧渐变融入主显图 */
+/* 左页（上一张）：靠左 30%，含书页厚度+透视+边缘渐隐，叠在中页左侧 */
 .hc-page-left {
   left: 0;
-  width: 42%;
+  width: 30%;
   z-index: 2;
-  opacity: 0.9;
+  opacity: 0.95;
   transform-origin: right center;
+  transform: perspective(1200px) rotateY(18deg);
+  -webkit-mask-image: linear-gradient(to right, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to right, #000 50%, transparent 100%);
+  box-shadow: 2px 0 8px rgba(15, 23, 42, 0.15);
 }
 
-.hc-page-left::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to right, rgba(255,255,255,0.05), rgba(255,255,255,0.85));
-}
-
-/* 右页（下一张）：靠右 40%，左侧渐变融入主显图 */
+/* 右页（下一张）：靠右 30%，含书页厚度+透视+边缘渐隐，叠在中页右侧 */
 .hc-page-right {
   right: 0;
-  width: 42%;
+  width: 30%;
   z-index: 2;
-  opacity: 0.9;
+  opacity: 0.95;
   transform-origin: left center;
-}
-
-.hc-page-right::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to left, rgba(255,255,255,0.05), rgba(255,255,255,0.85));
+  transform: perspective(1200px) rotateY(-18deg);
+  -webkit-mask-image: linear-gradient(to left, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to left, #000 50%, transparent 100%);
+  box-shadow: -2px 0 8px rgba(15, 23, 42, 0.15);
 }
 
 .hc-ph {
