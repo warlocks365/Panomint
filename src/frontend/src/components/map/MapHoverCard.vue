@@ -11,32 +11,15 @@
     <template v-else-if="items.length">
       <div class="hc-place">{{ place }}</div>
 
-      <!-- 翻书区：同一行，中间当前图 + 左右渐变叠加的书页（真实翻书质感） -->
-      <div
-        class="hc-stage"
-        @pointerdown="onSwipeDown"
-        @pointerup="onSwipeUp"
-      >
-        <!-- 左页（上一张，向右渐隐） -->
-        <div v-if="mainIndex > 0" class="hc-page hc-page-left">
-          <img v-if="thumbs[items[mainIndex - 1].id]" :src="thumbs[items[mainIndex - 1].id]" :alt="items[mainIndex - 1].filename" />
-          <div v-else class="hc-ph"></div>
-        </div>
-        <!-- 右页（下一张，向左渐隐） -->
-        <div v-if="mainIndex < items.length - 1" class="hc-page hc-page-right">
-          <img v-if="thumbs[items[mainIndex + 1].id]" :src="thumbs[items[mainIndex + 1].id]" :alt="items[mainIndex + 1].filename" />
-          <div v-else class="hc-ph"></div>
-        </div>
-        <!-- 当前主显页 -->
-        <div class="hc-page hc-page-current">
-          <img v-if="thumbs[items[mainIndex].id]" :src="thumbs[items[mainIndex].id]" :alt="items[mainIndex].filename" />
-          <div v-else class="hc-ph"></div>
-          <span v-if="items[mainIndex].is_360" class="hc-badge">360</span>
-        </div>
+      <!-- 单一主显预览图（当前选中项） -->
+      <div class="hc-main">
+        <img v-if="thumbs[items[mainIndex].id]" :src="thumbs[items[mainIndex].id]" :alt="items[mainIndex].filename" />
+        <div v-else class="hc-ph"></div>
+        <span v-if="items[mainIndex].is_360" class="hc-badge">360</span>
         <span v-if="items.length > 1" class="hc-counter">{{ mainIndex + 1 }}/{{ items.length }}</span>
       </div>
 
-      <!-- 缩略图条（可点选进播放器） -->
+      <!-- 缩略图条（可点选进播放器，横向滚动条） -->
       <div class="hc-strip">
         <button
           v-for="(it, i) in items"
@@ -74,7 +57,7 @@ const emit = defineEmits(['open', 'enter', 'leave'])
 
 const mainIndex = ref(0)
 
-// 缩略图 blob URL（全部加载，供翻书和缩略图条）
+// 缩略图 blob URL（全部加载，供主显图和缩略图条）
 const thumbs = reactive({})
 const objectUrls = []
 watch(
@@ -113,26 +96,6 @@ function openItem(it) {
   emit('open', it)
 }
 
-// 翻书手势：横向滑动切换主显
-let swipeStartX = null
-function onSwipeDown(e) {
-  swipeStartX = e.clientX
-}
-function onSwipeUp(e) {
-  if (swipeStartX === null) return
-  const dx = e.clientX - swipeStartX
-  swipeStartX = null
-  if (Math.abs(dx) < 30) return // 阈值：<30px 视为点击而非滑动
-  if (dx < 0) next()
-  else prev()
-}
-function next() {
-  if (mainIndex.value < props.items.length - 1) mainIndex.value++
-}
-function prev() {
-  if (mainIndex.value > 0) mainIndex.value--
-}
-
 function onCardEnter() {
   emit('enter')
 }
@@ -146,9 +109,9 @@ function onCardTouchEnd() {
   emit('leave')
 }
 
-// 方向自适应（加大尺寸：宽 320、高约 320）
+// 方向自适应（宽 320）
 const CARD_W = 320
-const CARD_H = 340
+const CARD_H = 320
 const MARGIN = 12
 
 const cardStyle = computed(() => {
@@ -193,67 +156,21 @@ const cardStyle = computed(() => {
   margin-bottom: 10px;
 }
 
-.hc-stage {
+/* 单一主显预览图 */
+.hc-main {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 10;
   border-radius: 8px;
   overflow: hidden;
   background: #e2e8f0;
-  cursor: grab;
-  touch-action: pan-y;
-  perspective: 1200px;
 }
 
-/* 翻书三页叠加：当前页居中 z 最高，左右页各占 40% 宽度、渐变渐隐，营造翻书厚度 */
-.hc-page {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  height: 100%;
-  overflow: hidden;
-  transition: transform 0.3s ease, opacity 0.3s ease;
-}
-
-.hc-page img {
+.hc-main img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
-}
-
-/* 当前主显页：占满，是舞台的主角（65% 视觉权重，靠中间叠影聚焦） */
-.hc-page-current {
-  left: 17.5%;
-  right: 17.5%;
-  z-index: 3;
-  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.18);
-}
-
-/* 左页（上一张）：靠左 30%，含书页厚度+透视+边缘渐隐，叠在中页左侧 */
-.hc-page-left {
-  left: 0;
-  width: 30%;
-  z-index: 2;
-  opacity: 0.95;
-  transform-origin: right center;
-  transform: perspective(1200px) rotateY(18deg);
-  -webkit-mask-image: linear-gradient(to right, #000 50%, transparent 100%);
-  mask-image: linear-gradient(to right, #000 50%, transparent 100%);
-  box-shadow: 2px 0 8px rgba(15, 23, 42, 0.15);
-}
-
-/* 右页（下一张）：靠右 30%，含书页厚度+透视+边缘渐隐，叠在中页右侧 */
-.hc-page-right {
-  right: 0;
-  width: 30%;
-  z-index: 2;
-  opacity: 0.95;
-  transform-origin: left center;
-  transform: perspective(1200px) rotateY(-18deg);
-  -webkit-mask-image: linear-gradient(to left, #000 50%, transparent 100%);
-  mask-image: linear-gradient(to left, #000 50%, transparent 100%);
-  box-shadow: -2px 0 8px rgba(15, 23, 42, 0.15);
 }
 
 .hc-ph {
@@ -285,22 +202,35 @@ const cardStyle = computed(() => {
   pointer-events: none;
 }
 
+/* 缩略图条：横向滚动条 */
 .hc-strip {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   margin-top: 8px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
 }
 
 .hc-strip::-webkit-scrollbar {
-  height: 4px;
+  height: 6px;
+}
+
+.hc-strip::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.6);
+  border-radius: 3px;
+}
+
+.hc-strip::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .hc-mini {
-  flex: 0 0 40px;
-  width: 40px;
-  height: 40px;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
   border: 2px solid transparent;
   border-radius: 6px;
   padding: 0;
