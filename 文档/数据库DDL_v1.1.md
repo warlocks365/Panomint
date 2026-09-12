@@ -224,13 +224,13 @@ CREATE TABLE people (
       bbox        BOX,                           -- 人脸框
       is_pet      BOOLEAN NOT NULL DEFAULT false,
       confidence  REAL,
-      embedding   VECTOR(512),
+      embedding   VECTOR(128),
       created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX idx_faces_person ON faces(person_id);
   CREATE INDEX idx_faces_cluster ON faces(cluster_id);
   CREATE INDEX idx_faces_media ON faces(media_id);
-  CREATE INDEX idx_faces_embedding ON faces USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+  CREATE INDEX idx_faces_embedding ON faces USING hnsw (embedding vector_cosine_ops);
 
   CREATE TABLE tags (
       id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

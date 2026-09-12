@@ -39,7 +39,7 @@
 
 - 自写：API 网关、媒体索引、AI 推理编排、转码管线、分享/鉴权、前端（Web/PWA/360 播放器）。
 
-- 复用通用开源库（非产品级 fork）：Three.js（渲染）、MapLibre GL（地图）、hls.js（自适应）、ffmpeg（转码）、insightface（人脸）、PostgreSQL+pgvector（存储/向量）。
+- 复用通用开源库（非产品级 fork）：Three.js（渲染）、MapLibre GL（地图）、hls.js（自适应）、ffmpeg（转码）、OpenCV Zoo YuNet+SFace（人脸，Apache-2.0）、PostgreSQL+pgvector（存储/向量）。
 
 
 
@@ -488,7 +488,7 @@ media(id uuid pk, type enum(photo/video/360), space enum(personal/shared),
         -- 软删/回收站
         deleted_at timestamptz,          -- 非空=在回收站中
         embedding vector(512), owner_id uuid, created_at timestamptz, updated_at timestamptz);
-  faces(id, media_id, bbox box, cluster_id, person_id, is_pet bool, confidence real, embedding vector(512));
+  faces(id, media_id, bbox box, cluster_id, person_id, is_pet bool, confidence real, embedding vector(128));
   people(id, name, hidden bool, is_pet bool, cover_media_id uuid);
   tags(id, name, kind enum(user/ai), confirmed bool, color varchar(7));  -- 标签颜色
   media_tags(media_id, tag_id);

@@ -94,7 +94,7 @@
 
 ### 3.2 AI 推理服务（Python FastAPI）
 
-- 人脸：`insightface` 检测 + ArcFace 512 维向量 → pgvector 近邻聚类生成 `cluster_id` → 映射 `people`。
+- 人脸：OpenCV Zoo `YuNet`（检测）+ `SFace`（识别，128 维特征，Apache-2.0）→ pgvector 近邻聚类生成 `cluster_id` → 映射 `people`。
 
 - 宠物：复用同类模型 `is_pet=true`。
 
