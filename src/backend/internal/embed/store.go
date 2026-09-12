@@ -40,6 +40,9 @@ type VectorHit struct {
 }
 
 // ListPending 列出需要生成 embedding 的媒体；force 为真时忽略已有向量全部重算。
+//
+// 只返回**已有缩略图**的行：没有缩略图就没有图像输入，列出来只会白跑一遍
+// （缩略图由 index worker 异步生成，晚到者由下一次清扫自然补上，见 embedgen -mode watch）。
 func (s *Store) ListPending(ctx context.Context, force bool, limit int) ([]MediaThumb, error) {
 	if limit <= 0 {
 		limit = 1000
@@ -52,7 +55,7 @@ func (s *Store) ListPending(ctx context.Context, force bool, limit int) ([]Media
 		SELECT id::text, filename, COALESCE(place,''), COALESCE(thumbnail_md,''),
 		       COALESCE(is_360,false), type::text
 		FROM media
-		WHERE deleted_at IS NULL AND %s
+		WHERE deleted_at IS NULL AND COALESCE(thumbnail_md,'') <> '' AND %s
 		ORDER BY taken_at DESC NULLS LAST, id
 		LIMIT $1`, cond), limit)
 	if err != nil {

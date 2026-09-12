@@ -63,6 +63,8 @@ services:
 
   # ---- API 服务（cmd/api）：经 web 反代对外，不直接暴露宿主机端口 ----
   api:
+    # 显式镜像名：embed-worker 复用同一镜像（含 CLIP 模型与 onnxruntime），避免重复构建
+    image: panomint-app:latest
     build:
       # 上下文=仓库根：镜像需打包 assets/{models,lib}（CLIP 模型 + ONNX Runtime，Job000010）
       context: .
@@ -99,6 +101,29 @@ services:
       db:
         condition: service_healthy
       valkey:
+        condition: service_healthy
+
+  # ---- 增量向量化（Job000010）：复用 api 镜像（已含 CLIP 模型 + onnxruntime）----
+  # 清扫式补算：周期性扫描「embedding 为空且已有缩略图」的媒体并补算。
+  # 与 index-worker 解耦（不阻塞缩略图生成），天然幂等、自动重试历史失败项。
+  embed-worker:
+    image: panomint-app:latest
+    container_name: pano-embed-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/embedgen", "-mode", "watch", "-interval", "30"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+      # 与 api 保持同一模型族（换族必须全量重算，见 docker/api/Dockerfile 注释）
+      EMBED_FAMILY: ${EMBED_FAMILY:-chinese-clip}
+      EMBED_MODEL_DIR: ${EMBED_MODEL_DIR:-/opt/models/chinese-clip}
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+      EMBED_DEVICE_ID: ${EMBED_DEVICE_ID:-0}
+      EMBED_THREADS: ${EMBED_THREADS:-0}
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
         condition: service_healthy
 
   # ---- 前端静态服务 + API 同源反代（LAN 暴露 8088，供本机 cloudflared 隧道回源；服务器直连 Cloudflare 被阻断）----

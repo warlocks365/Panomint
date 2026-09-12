@@ -6,6 +6,7 @@
 //	embedgen -mode status                        # 查看已向量化进度
 //	embedgen -mode encode [-limit N] [-force]    # 批量生成（缩略图 → CLIP 图像塔 → media.embedding）
 //	embedgen -mode query -text "sunset" [-k 10]  # 语义检索自检（文本塔 → pgvector 余弦检索）
+//	embedgen -mode watch [-interval 30]          # 常驻增量：周期性补算缺失向量（新媒体自动入库）
 //	embedgen -mode selftest                      # 编码器自检（无需 DB：文本/图像各编码一次）
 //
 // 设备选择（GPU / CPU 双接口，同一二进制由配置切换）：
@@ -30,7 +31,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -53,6 +56,7 @@ type options struct {
 	deviceID int
 	threads  int
 	gpuMemMB int
+	interval int
 }
 
 func main() {
@@ -70,6 +74,7 @@ func main() {
 	flag.IntVar(&o.deviceID, "deviceID", -1, "CUDA 设备序号")
 	flag.IntVar(&o.threads, "threads", -1, "CPU 线程数")
 	flag.IntVar(&o.gpuMemMB, "gpuMemMB", -1, "CUDA 显存上限 MB")
+	flag.IntVar(&o.interval, "interval", 30, "watch 模式扫描间隔（秒）")
 	flag.Parse()
 
 	cfg, thumbDir := buildConfig(o)
@@ -82,7 +87,14 @@ func main() {
 	}
 
 	appCfg := config.Load()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// watch 为常驻服务：用信号驱动退出；其余模式限时
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if o.mode == "watch" {
+		ctx, cancel = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Minute)
+	}
 	defer cancel()
 
 	pool, err := pgxpool.New(ctx, appCfg.PGDSN)
@@ -103,6 +115,9 @@ func main() {
 
 	case "encode":
 		runEncode(ctx, st, cfg, thumbDir, o.limit, o.force)
+
+	case "watch":
+		runWatch(ctx, st, cfg, thumbDir, time.Duration(o.interval)*time.Second)
 
 	case "query":
 		if o.text == "" {
@@ -231,6 +246,66 @@ func runQuery(ctx context.Context, st *embed.Store, cfg embed.Config, text strin
 		}
 		fmt.Printf("  %2d. dist=%.4f  [%s] %s  %s\n", i+1, h.Distance, tag, h.Filename, h.Place)
 	}
+}
+
+// runWatch 周期性补算缺失向量（增量自动建库）。
+//
+// 为什么用清扫而不是队列：缩略图由 index worker 异步产出，清扫天然幂等、
+// 能自动重试历史失败项、且不触碰既有队列语义（多 kind 消费方会互相 Ack）。
+// 延迟由 -interval 控制，对本场景（家庭相册）完全够用。
+func runWatch(ctx context.Context, st *embed.Store, cfg embed.Config, thumbDir string, interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	enc, err := newEncoder(cfg)
+	if err != nil {
+		// 常驻服务无模型即无意义：直接失败并让编排层重启
+		log.Fatalf("加载编码器失败（watch 模式需要可用模型）: %v", err)
+	}
+	defer enc.Close()
+
+	log.Printf("增量向量化已启动：每 %s 扫描一次（模型族=%s，提供器=%s）", interval, enc.Family(), enc.Provider())
+	sweepOnce(ctx, st, enc, thumbDir)
+
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("收到退出信号，增量向量化停止")
+			return
+		case <-t.C:
+			sweepOnce(ctx, st, enc, thumbDir)
+		}
+	}
+}
+
+// sweepOnce 扫描并补算一轮；无待办时静默（避免刷日志）。
+func sweepOnce(ctx context.Context, st *embed.Store, enc *embed.Encoder, thumbDir string) {
+	list, err := st.ListPending(ctx, false, 200)
+	if err != nil {
+		log.Printf("扫描待向量化媒体失败: %v", err)
+		return
+	}
+	if len(list) == 0 {
+		return
+	}
+	log.Printf("发现 %d 条待向量化", len(list))
+	ok, fail := 0, 0
+	for i, m := range list {
+		path := filepath.Join(thumbDir, filepath.Base(m.ThumbMD))
+		vec, err := enc.EncodeImage(ctx, path)
+		if err == nil {
+			err = st.SaveEmbedding(ctx, m.ID, vec)
+		}
+		if err != nil {
+			fail++
+			log.Printf("[%d/%d] %s 向量化失败: %v", i+1, len(list), m.Filename, err)
+			continue
+		}
+		ok++
+	}
+	log.Printf("本轮完成：成功 %d 失败 %d", ok, fail)
 }
 
 // selfTest 编码器自检；probe 模式额外报告设备装配情况（用于 GPU 功能验证）。
