@@ -74,9 +74,13 @@ case "$PLATFORM" in
 esac
 
 if [ "$USE_GPU" = "1" ]; then
+  # ORT 1.29.0 官方同时提供 cuda12 与 cuda13 两个 GPU 构建：
+  # 选哪个取决于目标机的 CUDA 运行时版本。可用 ORT_CUDA 覆盖（默认 cuda12）。
+  # 例：目标机只有 CUDA 13（如 torch cu130）→ ORT_CUDA=cuda13 ./fetch-clip-assets.sh linux-x64 --gpu
+  CUDA_TAG="${ORT_CUDA:-cuda12}"
   case "$PLATFORM" in
-    linux-x64) ORT_ASSET="${ORT_ASSET}-gpu_cuda12" ;;
-    win-x64)   ORT_ASSET="${ORT_ASSET}-gpu_cuda12" ;;
+    linux-x64) ORT_ASSET="${ORT_ASSET}-gpu_${CUDA_TAG}" ;;
+    win-x64)   ORT_ASSET="${ORT_ASSET}-gpu_${CUDA_TAG}" ;;
     *) echo "该平台暂无 GPU 版预编译库：$PLATFORM" >&2; exit 2 ;;
   esac
 fi

@@ -76,6 +76,8 @@ src/frontend/public/maplibre-gl-*.mjs
 # ===== 模型权重与原生推理库（Job000010；不入库，按 docs 脚本下载）=====
 assets/models/
 assets/lib/
+# GPU(CUDA) 版 ORT 与用于 B 节点验证的临时产物（体积大，可再生成）
+assets/lib-ort-gpu/
 *.onnx
 *.so
 *.dll

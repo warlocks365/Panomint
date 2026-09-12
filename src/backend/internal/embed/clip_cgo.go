@@ -233,12 +233,13 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	}
 	textOut, err := ort.NewEmptyTensor[float32](ort.NewShape(1, EmbeddingDim))
 	if err != nil {
-		destroyAll(textIn, maskIn)
+		destroyI64(textIn, maskIn)
 		return nil, fmt.Errorf("创建文本输出张量失败: %w", err)
 	}
 	textOpts, dev, err := newSessionOptions(cfg)
 	if err != nil {
-		destroyAll(textIn, maskIn, textOut)
+		destroyI64(textIn, maskIn)
+		destroyF32(textOut)
 		return nil, err
 	}
 	textSess, err := ort.NewAdvancedSession(
@@ -247,7 +248,8 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		textInputs, []ort.Value{textOut}, textOpts)
 	textOpts.Destroy()
 	if err != nil {
-		destroyAll(textIn, maskIn, textOut)
+		destroyI64(textIn, maskIn)
+		destroyF32(textOut)
 		return nil, fmt.Errorf("加载文本编码器失败（%s）: %w", spec.textModel, err)
 	}
 	enc.device = dev
@@ -256,21 +258,24 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	visIn, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 3, ImageSize, ImageSize))
 	if err != nil {
 		textSess.Destroy()
-		destroyAll(textIn, maskIn, textOut)
+		destroyI64(textIn, maskIn)
+		destroyF32(textOut)
 		return nil, fmt.Errorf("创建图像输入张量失败: %w", err)
 	}
 	visOut, err := ort.NewEmptyTensor[float32](ort.NewShape(1, EmbeddingDim))
 	if err != nil {
 		visIn.Destroy()
 		textSess.Destroy()
-		destroyAll(textIn, maskIn, textOut)
+		destroyI64(textIn, maskIn)
+		destroyF32(textOut)
 		return nil, fmt.Errorf("创建图像输出张量失败: %w", err)
 	}
 	visOpts, dev2, err := newSessionOptions(cfg)
 	if err != nil {
-		destroyAll(visIn, visOut)
+		destroyF32(visIn, visOut)
 		textSess.Destroy()
-		destroyAll(textIn, maskIn, textOut)
+		destroyI64(textIn, maskIn)
+		destroyF32(textOut)
 		return nil, err
 	}
 	visSess, err := ort.NewAdvancedSession(
@@ -279,9 +284,10 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		[]ort.Value{visIn}, []ort.Value{visOut}, visOpts)
 	visOpts.Destroy()
 	if err != nil {
-		destroyAll(visIn, visOut)
+		destroyF32(visIn, visOut)
 		textSess.Destroy()
-		destroyAll(textIn, maskIn, textOut)
+		destroyI64(textIn, maskIn)
+		destroyF32(textOut)
 		return nil, fmt.Errorf("加载图像编码器失败（%s）: %w", spec.visionModel, err)
 	}
 	// 两塔设备应一致（同一份配置）；不一致时取更保守的 CPU
@@ -295,8 +301,23 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	return enc, nil
 }
 
-// destroyAll 尽力释放张量（nil 安全）。
-func destroyAll(ts ...interface{ Destroy() error }) {
+// destroyI64 / destroyF32 尽力释放张量。
+//
+// ⚠️ 必须按**具体类型**分别写，不能用 `...interface{ Destroy() error }` 收集：
+// 把 typed-nil 指针（如 CLIP 族的 maskIn 本就为 nil）装箱进接口后，接口本身**非 nil**，
+// 于是 nil 判断失效、Destroy() 解引用空指针 panic。
+// （实测症状：embedgen 每次成功跑完都在退出时 panic，退出码恒为 2，
+//
+//	并会掩盖 NewEncoder 的真实错误——先 panic 后返回错误。）
+func destroyI64(ts ...*ort.Tensor[int64]) {
+	for _, t := range ts {
+		if t != nil {
+			t.Destroy()
+		}
+	}
+}
+
+func destroyF32(ts ...*ort.Tensor[float32]) {
 	for _, t := range ts {
 		if t != nil {
 			t.Destroy()
@@ -321,7 +342,8 @@ func (e *Encoder) Close() {
 	if e.vision != nil {
 		e.vision.Destroy()
 	}
-	destroyAll(e.textIn, e.maskIn, e.textOut, e.visIn, e.visOut)
+	destroyI64(e.textIn, e.maskIn)
+	destroyF32(e.textOut, e.visIn, e.visOut)
 }
 
 // EncodeText 文本 → 512 维 L2 归一化向量。
