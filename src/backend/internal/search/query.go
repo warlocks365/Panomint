@@ -33,7 +33,8 @@ const semanticScoreWeight = 10.0
 // enStopWords 英文停用词：这些词在自然语言查询里高频出现，
 // 若参与文本匹配会以 ILIKE 子串方式宽泛命中 folder_path 等字段
 // （例如 "aurora in the night sky" 中的 in/the 把无关项顶到语义命中之前，
-//  Job000010 实测踩到）。仅对纯 ASCII token 生效，中文词不受影响。
+//
+//	Job000010 实测踩到）。仅对纯 ASCII token 生效，中文词不受影响。
 var enStopWords = map[string]bool{
 	"a": true, "an": true, "the": true, "of": true, "in": true, "on": true,
 	"at": true, "to": true, "for": true, "with": true, "and": true, "or": true,
@@ -83,7 +84,9 @@ const trgmRecallThreshold = 0.15
 // （调用方保持 taken_at 排序原行为）。
 // 返回 whereN：WHERE 实际引用的参数个数（args 中可能还含仅被评分表达式引用的参数，
 // 例如语义召回的 ids/sims 数组；count(*) 查询必须只传 whereN 个）。
-func buildWhere(p SearchParams, hits []RecallHit, geo *GeoCenter) (where string, scoreExpr string, args []any, whereN int) {
+// 返回 textMatchExpr：文本 token 命中的布尔表达式（无 token 时为空串），
+// 供调用方标记"仅语义命中"的结果。
+func buildWhere(p SearchParams, hits []RecallHit, geo *GeoCenter) (where string, scoreExpr string, textMatchExpr string, args []any, whereN int) {
 	conds := []string{"m.deleted_at IS NULL"}
 	add := func(cond string, v any) {
 		args = append(args, v)
@@ -129,8 +132,12 @@ func buildWhere(p SearchParams, hits []RecallHit, geo *GeoCenter) (where string,
 				JOIN tags t ON t.id = mt.tag_id WHERE mt.media_id = m.id), 0))`, n))
 	}
 	if len(tokConds) > 0 {
-		conds = append(conds, "("+strings.Join(tokConds, "\n\tOR ")+")")
+		joined := strings.Join(tokConds, "\n\tOR ")
+		conds = append(conds, "("+joined+")")
 		scoreExpr = strings.Join(tokScores, "\n\t+ ")
+		// 文本命中的**布尔**表达式（与 WHERE 中同一组条件），用于标记"仅语义命中"。
+		// 不能用 score>0 近似：trgm 相似度在未达阈值时仍可能为非零小值。
+		textMatchExpr = "(" + joined + ")"
 	}
 	if p.Tag != "" {
 		add(`EXISTS(SELECT 1 FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
@@ -191,7 +198,7 @@ func buildWhere(p SearchParams, hits []RecallHit, geo *GeoCenter) (where string,
 		// 第 4 个返回值 = WHERE 实际引用的参数个数。
 		// 语义打分用的两个数组参数（ids/sims）只被 SELECT/ORDER BY 引用，
 		// 而 count(*) 查询只接受 WHERE 参数——不做区分会报 "expected N arguments"。
-		return fmt.Sprintf("((%s) OR m.id = ANY($%d::uuid[]))", base, idsArg), scoreExpr, args, idsArg
+		return fmt.Sprintf("((%s) OR m.id = ANY($%d::uuid[]))", base, idsArg), scoreExpr, textMatchExpr, args, idsArg
 	}
-	return strings.Join(conds, " AND "), scoreExpr, args, len(args)
+	return strings.Join(conds, " AND "), scoreExpr, textMatchExpr, args, len(args)
 }

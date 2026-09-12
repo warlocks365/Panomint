@@ -42,8 +42,8 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (*SearchResult, erro
 	}
 
 	// 第一轮：place 文本 trgm 匹配
-	where, scoreExpr, args, whereN := buildWhere(p, hits, nil)
-	res, err := s.query(ctx, p, where, scoreExpr, args, whereN)
+	where, scoreExpr, textMatchExpr, args, whereN := buildWhere(p, hits, nil)
+	res, err := s.query(ctx, p, where, scoreExpr, textMatchExpr, args, whereN)
 	if err != nil {
 		return nil, err
 	}
@@ -61,8 +61,8 @@ func (s *Store) Search(ctx context.Context, p SearchParams) (*SearchResult, erro
 				log.Printf("place 地理解析失败 %q: %v（按不降级继续）", p.Place, err)
 			} else if ok {
 				center := GeoCenter{Lon: lon, Lat: lat}
-				gwhere, gscore, gargs, gwhereN := buildWhere(p, hits, &center)
-				res, err = s.query(ctx, p, gwhere, gscore, gargs, gwhereN)
+				gwhere, gscore, gtextMatch, gargs, gwhereN := buildWhere(p, hits, &center)
+				res, err = s.query(ctx, p, gwhere, gscore, gtextMatch, gargs, gwhereN)
 				if err != nil {
 					return nil, err
 				}
@@ -92,7 +92,9 @@ func (s *Store) hasGPS(ctx context.Context) (bool, error) {
 //
 // whereN：WHERE 实际引用的参数个数。args 中位于 whereN 之后的参数只被评分表达式引用
 // （如语义召回的 ids/sims 数组），count(*) 查询不能接收它们。
-func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr string, args []any, whereN int) (*SearchResult, error) {
+// textMatchExpr 非空时，查询会额外返回每行的"是否命中文本条件"，
+// 用于标记 SemanticOnly（仅语义召回命中）——前端据此标注"语义匹配"。
+func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr, textMatchExpr string, args []any, whereN int) (*SearchResult, error) {
 	scored := scoreExpr != ""
 
 	// 游标条件独立于 where 拼装（total 统计不含游标，避免字符串剥离的脆弱性）
@@ -123,9 +125,13 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr stri
 	}
 
 	selectScore := "NULL::float8"
+	selectTextMatch := "NULL::bool"
 	orderBy := "m.taken_at DESC, m.id DESC"
 	if scored {
 		selectScore = "(" + scoreExpr + ")"
+		if textMatchExpr != "" {
+			selectTextMatch = "(" + textMatchExpr + ")"
+		}
 		// NULLS LAST：Postgres 的 DESC 默认 NULLS FIRST，若评分为 NULL 会把无关项排到最前。
 		// 评分表达式已做 COALESCE 防 NULL，这里再兜一层（Job000010 语义召回并入后实测踩到）。
 		orderBy = "score DESC NULLS LAST, m.taken_at DESC, m.id DESC"
@@ -134,7 +140,8 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr stri
 	rows, err := s.Pool.Query(ctx, `
 		SELECT m.id, m.type, m.filename, m.folder_path, m.taken_at, m.width, m.height, m.duration,
 		       m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg,
-		       `+selectScore+` AS score
+		       `+selectScore+` AS score,
+		       `+selectTextMatch+` AS text_matched
 		FROM media m WHERE `+where+cursorWhere+`
 		ORDER BY `+orderBy+`
 		LIMIT $`+fmt.Sprint(len(args)), args...)
@@ -146,11 +153,14 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr stri
 	res := &SearchResult{Items: []media.MediaRef{}, Total: total}
 	for rows.Next() {
 		var it media.MediaRef
+		var textMatched *bool
 		if err := rows.Scan(&it.ID, &it.Type, &it.Filename, &it.FolderPath, &it.TakenAt, &it.Width, &it.Height,
 			&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG, &it.Score); err != nil {
+			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG, &it.Score, &textMatched); err != nil {
 			return nil, err
 		}
+		// text_matched 为 false 且本行确实在结果集中 → 只能是语义召回带进来的
+		it.SemanticOnly = textMatched != nil && !*textMatched
 		res.Items = append(res.Items, it)
 	}
 	if err := rows.Err(); err != nil {

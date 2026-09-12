@@ -51,6 +51,9 @@ type MediaRef struct {
 	ThumbnailMD *string    `json:"thumbnail_md,omitempty"`
 	ThumbnailLG *string    `json:"thumbnail_lg,omitempty"`
 	Score       *float64   `json:"score,omitempty"` // 搜索相关度（仅 /search 带 q 时挂载）
+	// SemanticOnly 仅由语义召回命中（未命中任何文本 token 条件）。
+	// 仅 /search 且启用语义召回时挂载；前端据此标注"语义匹配"。
+	SemanticOnly bool `json:"semantic_only,omitempty"`
 }
 
 // Bucket 时间桶（钻取计数）。

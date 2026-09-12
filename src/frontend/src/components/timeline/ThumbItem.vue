@@ -17,6 +17,19 @@
       360
     </span>
 
+    <span v-if="item.semantic_only" class="badge badge-semantic" title="由语义检索匹配（关键词未直接命中）">
+      <svg viewBox="0 0 24 24" width="11" height="11" fill="none">
+        <path
+          d="M12 3.2l1.9 4.4 4.7.5-3.5 3.2.9 4.7L12 13.7 8 16l.9-4.7L5.4 8.1l4.7-.5z"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linejoin="round"
+        />
+        <path d="M18.5 3.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" fill="currentColor" />
+      </svg>
+      语义
+    </span>
+
     <span v-if="item.type === 'video'" class="badge badge-video">
       <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor">
         <path d="M8 5.5v13l11-6.5z" />
@@ -119,6 +132,14 @@ function formatDuration(sec) {
 .badge-360 {
   top: 6px;
   right: 6px;
+}
+
+/* 语义匹配：搜索结果中由向量召回（关键词未直接命中）的条目。
+   放右下角，避开右上 360 与底部时长徽标。 */
+.badge-semantic {
+  bottom: 6px;
+  right: 6px;
+  background-color: rgba(37, 99, 235, 0.9);
 }
 
 .badge-video {

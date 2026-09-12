@@ -28,7 +28,8 @@ COPY src/backend/internal ./internal
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -trimpath -o /out/api ./cmd/api \
- && CGO_ENABLED=1 go build -trimpath -o /out/embedgen ./cmd/embedgen
+ && CGO_ENABLED=1 go build -trimpath -o /out/embedgen ./cmd/embedgen \
+ && CGO_ENABLED=0 go build -trimpath -o /out/migrateplan ./cmd/migrateplan
 
 # ---- 阶段 2：运行时 ----
 # 工作目录保持 /：config 默认 ./data/* 解析到挂载卷 /data（健康检查 DiskCheckDir=./data）
@@ -42,6 +43,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/api /usr/local/bin/api
 COPY --from=build /out/embedgen /usr/local/bin/embedgen
+COPY --from=build /out/migrateplan /usr/local/bin/migrateplan
 
 # ONNX Runtime 原生库（1.29.0，须与 Go 绑定头文件版本一致）
 COPY assets/lib/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so* /opt/onnxruntime/lib/
