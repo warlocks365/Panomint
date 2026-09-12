@@ -21,6 +21,17 @@ var thumbWidth = map[ThumbSize]int{ThumbSM: 320, ThumbMD: 640, ThumbLG: 1280}
 // ThumbnailArgs 生成单帧 WebP 缩略图参数。
 // seekUs>0 时先定位（视频取预览帧，对应 DDL media.video_preview_at）。
 func ThumbnailArgs(input, output string, size ThumbSize, seekUs int64) []string {
+	return ThumbnailArgsEdited(input, output, size, seekUs, "")
+}
+
+// ThumbnailArgsEdited 同 ThumbnailArgs，但在缩放**之前**插入 editFilter
+// （用于应用 media.edits 的旋转/裁剪，使缩略图与查看器呈现一致）。
+// editFilter 为空时与 ThumbnailArgs 完全等价。
+func ThumbnailArgsEdited(input, output string, size ThumbSize, seekUs int64, editFilter string) []string {
+	vf := fmt.Sprintf("scale=%d:-2", thumbWidth[size])
+	if editFilter != "" {
+		vf = editFilter + "," + vf
+	}
 	var args []string
 	if seekUs > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(float64(seekUs)/1e6, 'f', 3, 64))
@@ -28,10 +39,34 @@ func ThumbnailArgs(input, output string, size ThumbSize, seekUs int64) []string 
 	return append(args,
 		"-i", input,
 		"-frames:v", "1",
-		"-vf", fmt.Sprintf("scale=%d:-2", thumbWidth[size]),
+		"-vf", vf,
 		"-c:v", "libwebp", "-quality", "82",
 		"-y", output,
 	)
+}
+
+// EditFilter 由「旋转角 + 归一化裁剪框」生成 ffmpeg 滤镜链。
+//
+// ⚠️ 顺序必须与前端一致：**先裁剪（按未旋转方向）后旋转**
+// （前端是 clip-path 裁剪 + CSS rotate，见 MediaViewer.vue 的 editStyle）。
+// 顺序反过来会导致旋转后裁剪框错位。
+//
+// rotate 仅接受 0/90/180/270（其它值视为 0）；hasCrop 为 false 时忽略裁剪参数。
+func EditFilter(rotate int, hasCrop bool, cx, cy, cw, ch float64) string {
+	var parts []string
+	if hasCrop && cw > 0 && ch > 0 {
+		// 用表达式而非绝对像素：无需预先探测源分辨率
+		parts = append(parts, fmt.Sprintf("crop=iw*%g:ih*%g:iw*%g:ih*%g", cw, ch, cx, cy))
+	}
+	switch ((rotate % 360) + 360) % 360 {
+	case 90:
+		parts = append(parts, "transpose=1") // 顺时针 90°
+	case 180:
+		parts = append(parts, "transpose=2,transpose=2")
+	case 270:
+		parts = append(parts, "transpose=2") // 逆时针 90°
+	}
+	return strings.Join(parts, ",")
 }
 
 // HLSRendition 一个 ABR 码率档位。

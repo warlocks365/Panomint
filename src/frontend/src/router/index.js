@@ -68,6 +68,17 @@ const routes = [
         path: 'albums/:id',
         name: 'album-detail',
         component: () => import('../views/AlbumDetailView.vue')
+      },
+      // Job000010 Phase 4：标签管理 / 人物
+      {
+        path: 'tags',
+        name: 'tags',
+        component: () => import('../views/TagsView.vue')
+      },
+      {
+        path: 'people',
+        name: 'people',
+        component: () => import('../views/PeopleView.vue')
       }
     ]
   },

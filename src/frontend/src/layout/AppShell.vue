@@ -84,9 +84,9 @@ const navItems = [
   { label: '时间轴', to: '/timeline', ready: true, icon: icons.timeline },
   { label: '地图', to: '/map', ready: true, icon: icons.map },
   { label: '相册', ready: false, icon: icons.album },
-  { label: '人物', ready: false, icon: icons.person },
+  { label: '人物', to: '/people', ready: true, icon: icons.person },
   { label: '地点', ready: false, icon: icons.place },
-  { label: '标签', ready: false, icon: icons.tag },
+  { label: '标签', to: '/tags', ready: true, icon: icons.tag },
   { label: '文件夹', ready: false, icon: icons.folder },
   { label: '设置', ready: false, icon: icons.settings }
 ]

@@ -170,6 +170,32 @@
         <p v-if="tagError" class="tag-error">{{ tagError }}</p>
       </section>
 
+      <!-- AI 待确认：origin='ai' 且 confirmed=false 的标签，接受后才计入正式标签 -->
+      <section v-if="pendingAI.length" class="info-section">
+        <h4 class="section-title">
+          AI 标签（待确认）
+          <button class="accept-all" :disabled="aiBusy" @click="acceptAllAI">全部接受</button>
+        </h4>
+        <div class="chip-list">
+          <span v-for="t in pendingAI" :key="'ai' + t.id" class="chip chip-ai">
+            <i class="ai-mark">AI</i>
+            {{ t.name }}
+            <button class="chip-x" title="接受该标签" @click="acceptAI(t)">
+              <svg viewBox="0 0 12 12" width="9" height="9" fill="none">
+                <path d="M2.5 6.5l2.5 2.5L9.5 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+            <button class="chip-x" title="移除该标签" @click="removeTag(t)">
+              <svg viewBox="0 0 12 12" width="9" height="9" fill="none">
+                <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
+          </span>
+        </div>
+        <p class="ai-hint">AI 自动建议，点 ✓ 接受、✕ 移除或「全部接受」。</p>
+        <p v-if="tagError" class="tag-error">{{ tagError }}</p>
+      </section>
+
       <section class="info-section">
         <h4 class="section-title">评分</h4>
         <div class="stars">
@@ -424,6 +450,37 @@ async function removeTag(t) {
     if (i >= 0) tags.value.splice(i, 1)
   } catch (e) {
     tagError.value = e.response?.data?.error?.message || '移除标签失败'
+  }
+}
+
+/* ---------- AI 待确认（Phase 4） ---------- */
+// 待确认 = 关联 origin='ai' 且 confirmed=false（detail.tags 现返回逐图态）
+const pendingAI = computed(() => tags.value.filter((t) => t.origin === 'ai' && !t.confirmed))
+const aiBusy = ref(false)
+
+async function acceptAI(t) {
+  if (!props.detail || t?.id == null) return
+  aiBusy.value = true
+  try {
+    await http.post(`/media/${props.mediaId}/tags/confirm`, { tag_ids: [t.id] })
+    t.confirmed = true
+  } catch (e) {
+    tagError.value = e.response?.data?.error?.message || '接受失败'
+  } finally {
+    aiBusy.value = false
+  }
+}
+
+async function acceptAllAI() {
+  if (!props.detail || !pendingAI.value.length) return
+  aiBusy.value = true
+  try {
+    await http.post(`/media/${props.mediaId}/tags/confirm`, {})
+    await refreshTags()
+  } catch (e) {
+    tagError.value = e.response?.data?.error?.message || '接受失败'
+  } finally {
+    aiBusy.value = false
   }
 }
 
@@ -758,6 +815,28 @@ function formatSize(bytes) {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--color-danger);
+}
+
+.accept-all {
+  margin-left: auto;
+  border: 1px solid var(--color-warning-text);
+  background: transparent;
+  color: var(--color-warning-text);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.accept-all:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-text-disabled);
 }
 
 /* 评分 */

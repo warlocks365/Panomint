@@ -1,0 +1,182 @@
+// Package tags 标签体系（Phase 4）：AI 零样本自动打标 + EXIF/GPS 启发式兜底。
+//
+// 设计要点：
+//   - AI 打标复用既有 CLIP 向量基础设施（internal/embed）：**不复算图像向量**，
+//     只把候选词表编码为 512 维文本向量并缓存，再与 media.embedding 做余弦相似度；
+//   - 词表按「场景 / 物体 / 事件」三类组织，同组互斥（如时段、天气、动物），
+//     避免一张图被同义标签刷屏；
+//   - CLIP 建议以 origin='ai' + confirmed=false 落库，必须经人工确认才计入正式标签；
+//   - 启发式（GPS→城市、is_360→全景）来自可信元数据，直接 confirmed=true、origin='heuristic'。
+//
+// 本文件只定义词表数据，不含推理与 DB 逻辑。
+package tags
+
+// TagDef 单个候选标签。
+type TagDef struct {
+	Label string // 中文标签名（落库名，chinese-clip 族使用）
+	EN    string // 英文对照（clip 族使用；英文族的文本塔不认中文提示词）
+	Group string // 互斥组名（同组只保留相似度最高者）；空 = 不互斥
+}
+
+// Class 词表分类（仅用于组织与展示，不参与阈值判定）。
+type Class struct {
+	Name string // 场景 | 物体 | 事件
+	Tags []TagDef
+}
+
+// Vocab 完整词表。
+type Vocab struct {
+	Classes []Class
+}
+
+// DefaultVocab 返回内置中文标签种子词表（约 110 个，分三类 + 互斥分组）。
+//
+// 互斥组说明：
+//
+//	时段   日出/日落/黄昏/夜晚/清晨
+//	天气   晴天/多云/阴天/雨天/雪天/雾天/彩虹
+//	季节   春天/夏天/秋天/冬天
+//	室内外 室内/室外
+//	动物   猫/狗/鸟/鱼/马/羊/熊猫/蝴蝶
+//	交通   汽车/火车/飞机/船/自行车/摩托车/公交车
+//	人物   人像/合影/儿童/老人
+//	食饮   美食/咖啡/蛋糕/水果
+//
+// 词表可增删：新增项建议给出 Group，避免与既有标签语义重叠。
+func DefaultVocab() *Vocab {
+	return &Vocab{Classes: []Class{
+		{Name: "场景", Tags: []TagDef{
+			{Label: "日出", EN: "sunrise", Group: "时段"},
+			{Label: "日落", EN: "sunset", Group: "时段"},
+			{Label: "黄昏", EN: "dusk", Group: "时段"},
+			{Label: "夜晚", EN: "night", Group: "时段"},
+			{Label: "清晨", EN: "early morning", Group: "时段"},
+			{Label: "晴天", EN: "clear sky", Group: "天气"},
+			{Label: "多云", EN: "cloudy sky", Group: "天气"},
+			{Label: "阴天", EN: "overcast", Group: "天气"},
+			{Label: "雨天", EN: "rain", Group: "天气"},
+			{Label: "雪天", EN: "snowfall", Group: "天气"},
+			{Label: "雾天", EN: "fog", Group: "天气"},
+			{Label: "彩虹", EN: "rainbow", Group: "天气"},
+			{Label: "春天", EN: "spring season", Group: "季节"},
+			{Label: "夏天", EN: "summer season", Group: "季节"},
+			{Label: "秋天", EN: "autumn season", Group: "季节"},
+			{Label: "冬天", EN: "winter season", Group: "季节"},
+			{Label: "室内", EN: "indoor scene", Group: "室内外"},
+			{Label: "室外", EN: "outdoor scene", Group: "室内外"},
+			{Label: "天空", EN: "sky", Group: ""},
+			{Label: "云海", EN: "sea of clouds", Group: ""},
+			{Label: "星空", EN: "starry night sky", Group: ""},
+			{Label: "极光", EN: "aurora", Group: ""},
+			{Label: "城市", EN: "city", Group: "地貌"},
+			{Label: "乡村", EN: "countryside", Group: "地貌"},
+			{Label: "山地", EN: "mountain", Group: "地貌"},
+			{Label: "森林", EN: "forest", Group: "地貌"},
+			{Label: "湖", EN: "lake", Group: "地貌"},
+			{Label: "海滩", EN: "beach", Group: "地貌"},
+			{Label: "沙漠", EN: "desert", Group: "地貌"},
+			{Label: "草原", EN: "grassland", Group: "地貌"},
+			{Label: "雪原", EN: "snowfield", Group: "地貌"},
+			{Label: "冰川", EN: "glacier", Group: "地貌"},
+			{Label: "河流", EN: "river", Group: "地貌"},
+			{Label: "瀑布", EN: "waterfall", Group: ""},
+			{Label: "峡谷", EN: "canyon", Group: ""},
+			{Label: "田野", EN: "farm field", Group: ""},
+			{Label: "花园", EN: "garden", Group: ""},
+			{Label: "街景", EN: "street scene", Group: ""},
+			{Label: "天际线", EN: "city skyline", Group: ""},
+			{Label: "建筑", EN: "architecture", Group: ""},
+			{Label: "古镇", EN: "old town", Group: ""},
+			{Label: "寺庙", EN: "temple", Group: ""},
+			{Label: "教堂", EN: "church", Group: ""},
+			{Label: "城堡", EN: "castle", Group: ""},
+			{Label: "桥梁", EN: "bridge", Group: ""},
+			{Label: "公园", EN: "park", Group: ""},
+			{Label: "港口", EN: "harbor", Group: ""},
+			{Label: "夜景", EN: "night scene", Group: ""},
+		}},
+		{Name: "物体", Tags: []TagDef{
+			{Label: "猫", EN: "cat", Group: "动物"},
+			{Label: "狗", EN: "dog", Group: "动物"},
+			{Label: "鸟", EN: "bird", Group: "动物"},
+			{Label: "鱼", EN: "fish", Group: "动物"},
+			{Label: "马", EN: "horse", Group: "动物"},
+			{Label: "羊", EN: "sheep", Group: "动物"},
+			{Label: "熊猫", EN: "giant panda", Group: "动物"},
+			{Label: "蝴蝶", EN: "butterfly", Group: "动物"},
+			{Label: "汽车", EN: "car", Group: "交通"},
+			{Label: "火车", EN: "train", Group: "交通"},
+			{Label: "飞机", EN: "airplane", Group: "交通"},
+			{Label: "船", EN: "boat", Group: "交通"},
+			{Label: "自行车", EN: "bicycle", Group: "交通"},
+			{Label: "摩托车", EN: "motorcycle", Group: "交通"},
+			{Label: "公交车", EN: "bus", Group: "交通"},
+			{Label: "人像", EN: "portrait of a person", Group: "人物"},
+			{Label: "合影", EN: "group photo", Group: "人物"},
+			{Label: "儿童", EN: "child", Group: "人物"},
+			{Label: "老人", EN: "elderly person", Group: "人物"},
+			{Label: "美食", EN: "food dish", Group: "食饮"},
+			{Label: "咖啡", EN: "coffee", Group: "食饮"},
+			{Label: "蛋糕", EN: "cake", Group: "食饮"},
+			{Label: "水果", EN: "fruit", Group: "食饮"},
+			{Label: "花", EN: "flower", Group: ""},
+			{Label: "树", EN: "tree", Group: ""},
+			{Label: "雪", EN: "snow", Group: ""},
+			{Label: "烟花", EN: "fireworks", Group: ""},
+			{Label: "雕塑", EN: "statue", Group: ""},
+			{Label: "壁画", EN: "mural", Group: ""},
+			{Label: "书本", EN: "book", Group: ""},
+			{Label: "电脑", EN: "computer", Group: ""},
+			{Label: "手机", EN: "smartphone", Group: ""},
+			{Label: "乐器", EN: "musical instrument", Group: ""},
+			{Label: "吉他", EN: "guitar", Group: ""},
+			{Label: "帐篷", EN: "tent", Group: ""},
+			{Label: "篝火", EN: "campfire", Group: ""},
+			{Label: "旗帜", EN: "flag", Group: ""},
+			{Label: "灯笼", EN: "lantern", Group: ""},
+			{Label: "礼物", EN: "gift", Group: ""},
+			{Label: "气球", EN: "balloon", Group: ""},
+			{Label: "长椅", EN: "bench", Group: ""},
+			{Label: "楼梯", EN: "staircase", Group: ""},
+			{Label: "喷泉", EN: "fountain", Group: ""},
+			{Label: "摩天轮", EN: "ferris wheel", Group: ""},
+			{Label: "霓虹灯", EN: "neon lights", Group: ""},
+			{Label: "路牌", EN: "street sign", Group: ""},
+		}},
+		{Name: "事件", Tags: []TagDef{
+			{Label: "婚礼", EN: "wedding", Group: ""},
+			{Label: "生日", EN: "birthday party", Group: ""},
+			{Label: "聚会", EN: "party gathering", Group: ""},
+			{Label: "毕业", EN: "graduation", Group: ""},
+			{Label: "音乐会", EN: "concert", Group: ""},
+			{Label: "展览", EN: "art exhibition", Group: ""},
+			{Label: "运动", EN: "sports", Group: ""},
+			{Label: "登山", EN: "hiking", Group: ""},
+			{Label: "露营", EN: "camping", Group: ""},
+			{Label: "野餐", EN: "picnic", Group: ""},
+			{Label: "旅行", EN: "travel trip", Group: ""},
+			{Label: "会议", EN: "meeting", Group: ""},
+			{Label: "演出", EN: "stage performance", Group: ""},
+			{Label: "烟花秀", EN: "fireworks show", Group: ""},
+			{Label: "滑雪", EN: "skiing", Group: ""},
+			{Label: "冲浪", EN: "surfing", Group: ""},
+			{Label: "潜水", EN: "diving", Group: ""},
+			{Label: "垂钓", EN: "fishing", Group: ""},
+			{Label: "骑行", EN: "cycling", Group: ""},
+			{Label: "节日", EN: "festival", Group: ""},
+			{Label: "自拍", EN: "selfie", Group: ""},
+			{Label: "宠物", EN: "pet", Group: ""},
+			{Label: "全景", EN: "360 panoramic", Group: ""}, // 亦由启发式（is_360）直接产出
+			{Label: "视频", EN: "video frame", Group: ""},   // 亦由启发式（type=video）直接产出
+		}},
+	}}
+}
+
+// LabelCount 词表标签总数（含各类）。
+func (v *Vocab) LabelCount() int {
+	n := 0
+	for _, c := range v.Classes {
+		n += len(c.Tags)
+	}
+	return n
+}

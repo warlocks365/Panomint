@@ -3,9 +3,12 @@ package media
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/queue"
 )
 
 // 媒体写操作 HTTP 处理器（详情/收藏/评级/软删/回收站）。
@@ -94,33 +97,142 @@ func (h *Handler) Rate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id, "rating": req.Rating})
 }
 
-// Patch PATCH /media/:id {notes}（Job000005：仅允许更新 notes 字段，其他字段拒收 400）
+// Patch PATCH /media/:id {notes?, edits?}
+// Job000005：仅允许更新 notes / edits 字段，其他字段拒收 400。
 func (h *Handler) Patch(c *gin.Context) {
 	var req struct {
-		Notes *string `json:"notes"`
+		Notes *string         `json:"notes"`
+		Edits json.RawMessage `json:"edits"`
 	}
 	dec := json.NewDecoder(c.Request.Body)
-	dec.DisallowUnknownFields() // 设计裁决：非 notes 字段一律拒收（显式优于静默忽略）
+	dec.DisallowUnknownFields() // 设计裁决：非白名单字段一律拒收（显式优于静默忽略）
 	if err := dec.Decode(&req); err != nil {
-		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "仅支持更新 notes 字段，请求体需为 {\"notes\": \"...\"}")
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "仅支持更新 notes / edits 字段")
 		return
 	}
-	if req.Notes == nil {
-		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "缺少 notes 字段")
+	if req.Notes == nil && req.Edits == nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "缺少 notes 或 edits 字段")
 		return
 	}
 	id := c.Param("id")
 	if _, ok := h.checkAccess(c, id); !ok {
 		return
 	}
-	if err := h.Store.SetNotes(c.Request.Context(), id, *req.Notes); errors.Is(err, ErrNotFound) {
+	resp := gin.H{"id": id}
+	if req.Notes != nil {
+		if err := h.Store.SetNotes(c.Request.Context(), id, *req.Notes); errors.Is(err, ErrNotFound) {
+			errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
+			return
+		} else if err != nil {
+			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+			return
+		}
+		resp["notes"] = *req.Notes
+	}
+	if req.Edits != nil {
+		// 显式 null → 清空编辑（重置）
+		var edits *Edits
+		if string(req.Edits) != "null" {
+			e, err := NormalizeEdits(req.Edits)
+			if err != nil {
+				errResp(c, http.StatusBadRequest, "BAD_REQUEST", "edits 非法：rotate 需 0/90/180/270，crop 需归一化 {x,y,w,h}")
+				return
+			}
+			edits = e
+		}
+		if err := h.Store.SetEdits(c.Request.Context(), id, edits); errors.Is(err, ErrNotFound) {
+			errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
+			return
+		} else if err != nil {
+			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+			return
+		}
+		if edits != nil {
+			resp["edits"] = edits
+		} else {
+			resp["edits"] = nil
+		}
+		h.enqueueThumbRegen(c, id)
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// Rotate POST /media/:id/rotate {op:"rotate|crop|auto", angle?, rect?}（契约 §3，非破坏 sidecar）
+func (h *Handler) Rotate(c *gin.Context) {
+	id := c.Param("id")
+	if _, ok := h.checkAccess(c, id); !ok {
+		return
+	}
+	var req struct {
+		Op    string    `json:"op"`
+		Angle int       `json:"angle"`
+		Rect  *CropRect `json:"rect"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需为 {op, angle?, rect?}")
+		return
+	}
+
+	var edits *Edits
+	switch req.Op {
+	case "rotate":
+		switch req.Angle {
+		case 90, 180, 270:
+		default:
+			errResp(c, http.StatusBadRequest, "BAD_REQUEST", "angle 需为 90/180/270")
+			return
+		}
+		edits = &Edits{Rotate: req.Angle}
+	case "crop":
+		if req.Rect == nil {
+			errResp(c, http.StatusBadRequest, "BAD_REQUEST", "缺少 rect")
+			return
+		}
+		raw, _ := json.Marshal(Edits{Crop: req.Rect})
+		e, err := NormalizeEdits(raw)
+		if err != nil {
+			errResp(c, http.StatusBadRequest, "BAD_REQUEST", "rect 需为归一化 {x,y,w,h} 且不越界")
+			return
+		}
+		edits = e
+	case "auto":
+		// 本实现不含自动增强算法：按"重置编辑参数"处理（原文件始终不变）
+		edits = nil
+	default:
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "op 需为 rotate|crop|auto")
+		return
+	}
+
+	if err := h.Store.SetEdits(c.Request.Context(), id, edits); errors.Is(err, ErrNotFound) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
 		return
 	} else if err != nil {
 		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": id, "notes": *req.Notes})
+	h.enqueueThumbRegen(c, id)
+	c.JSON(http.StatusOK, gin.H{"id": id, "edits": edits})
+}
+
+// enqueueThumbRegen 尽力而为：编辑变更后重排缩略图任务。
+// ⚠️ worker 侧按 edits 参数出图属后续集成（本次不含 worker 改动）；
+// 此处仅复用既有 "thumbnail" 任务类型，失败不影响参数已持久化。
+func (h *Handler) enqueueThumbRegen(c *gin.Context, id string) {
+	if h.Q == nil {
+		return
+	}
+	d, err := h.Store.GetDetail(c.Request.Context(), id)
+	if err != nil || d == nil {
+		return
+	}
+	abs, ok := h.ResolvePath(d.Path)
+	if !ok {
+		return
+	}
+	payload := map[string]string{"media_id": id, "path": abs, "kind": d.Type}
+	if _, err := h.Q.Enqueue(c.Request.Context(), queue.Job{Kind: "thumbnail", Payload: payload}); err != nil {
+		fmt.Printf("缩略图重排失败 media=%s: %v\n", id, err)
+	}
 }
 
 // Delete DELETE /media/:id（软删入回收站）

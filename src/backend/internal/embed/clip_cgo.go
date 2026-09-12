@@ -12,8 +12,8 @@ package embed
 //
 // 关于并发：onnxruntime 的 Session 非并发安全，这里用互斥锁串行化每个会话。
 //
-// 关于执行提供器（GPU / CPU 双接口）：见 newSessionOptions —— 同一二进制由配置切换，
-// 不因开发环境不具备 CUDA 而裁剪接口。
+// 关于执行提供器（GPU / CPU 双接口）：见 internal/ortx.NewSessionOptions ——
+// 同一二进制由配置切换，不因开发环境不具备 CUDA 而裁剪接口。
 //
 // ⚠️ 本文件仅在启用 CGO 时编译；未启用时由 clip_nocgo.go 提供占位实现。
 // onnxruntime_go 要求运行时库版本与头文件版本一致（本工程配 1.29.0）。
@@ -23,10 +23,11 @@ import (
 	"fmt"
 	"image"
 	"path/filepath"
-	"strconv"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
+
+	"panoalbum/internal/ortx"
 )
 
 // modelSpec 描述一个模型族的文件与接口差异。
@@ -97,9 +98,6 @@ type Encoder struct {
 
 	muText   sync.Mutex
 	muVision sync.Mutex
-
-	envOnce *sync.Once
-	envErr  error
 }
 
 // Device 返回实际生效的推理设备（cpu / cuda）。
@@ -109,12 +107,7 @@ func (e *Encoder) Device() DeviceKind { return e.device }
 func (e *Encoder) Family() ModelFamily { return e.family }
 
 // Provider 返回人类可读的执行提供器描述（用于日志与自检输出）。
-func (e *Encoder) Provider() string {
-	if e.device == DeviceCUDA {
-		return "CUDAExecutionProvider"
-	}
-	return "CPUExecutionProvider"
-}
+func (e *Encoder) Provider() string { return ortx.ProviderName(e.device) }
 
 // LibPath 返回实际加载的原生库路径。
 func (e *Encoder) LibPath() string { return e.lib }
@@ -122,61 +115,15 @@ func (e *Encoder) LibPath() string { return e.lib }
 // ContextLen 返回文本序列长度（便于诊断）。
 func (e *Encoder) ContextLen() int { return e.spec.contextLen }
 
-// newSessionOptions 按配置装配执行提供器，返回会话选项与实际生效设备。
-func newSessionOptions(cfg Config) (*ort.SessionOptions, DeviceKind, error) {
-	so, err := ort.NewSessionOptions()
-	if err != nil {
-		return nil, "", fmt.Errorf("创建会话选项失败: %w", err)
+// ortConfig 把 embed 配置投影为 ortx 运行时配置（含设备/线程/显存）。
+func (c Config) ortConfig() ortx.Config {
+	return ortx.Config{
+		LibPath:       c.LibPath,
+		Device:        c.Device,
+		DeviceID:      c.DeviceID,
+		IntraThreads:  c.IntraThreads,
+		GpuMemLimitMB: c.GpuMemLimitMB,
 	}
-	if cfg.IntraThreads > 0 {
-		if err := so.SetIntraOpNumThreads(cfg.IntraThreads); err != nil {
-			so.Destroy()
-			return nil, "", fmt.Errorf("设置线程数失败: %w", err)
-		}
-	}
-
-	dev := cfg.Device
-	if dev == "" {
-		dev = DeviceAuto
-	}
-	switch dev {
-	case DeviceCPU:
-		return so, DeviceCPU, nil
-
-	case DeviceCUDA, DeviceAuto:
-		if err := appendCUDA(so, cfg); err == nil {
-			return so, DeviceCUDA, nil
-		} else if dev == DeviceCUDA {
-			so.Destroy()
-			return nil, "", fmt.Errorf("显式要求 CUDA 执行提供器但装配失败（请确认使用 CUDA 版 onnxruntime 库）: %w", err)
-		}
-		// auto：回落 CPU（保留 GPU 接口，仅在当前环境不可用时降级）
-		return so, DeviceCPU, nil
-	}
-	return so, DeviceCPU, nil
-}
-
-// appendCUDA 装配 CUDA 执行提供器。
-func appendCUDA(so *ort.SessionOptions, cfg Config) error {
-	opts, err := ort.NewCUDAProviderOptions()
-	if err != nil {
-		return err
-	}
-	defer opts.Destroy()
-
-	kv := map[string]string{}
-	if cfg.DeviceID > 0 {
-		kv["device_id"] = strconv.Itoa(cfg.DeviceID)
-	}
-	if cfg.GpuMemLimitMB > 0 {
-		kv["gpu_mem_limit"] = strconv.Itoa(cfg.GpuMemLimitMB * 1024 * 1024)
-	}
-	if len(kv) > 0 {
-		if err := opts.Update(kv); err != nil {
-			return err
-		}
-	}
-	return so.AppendExecutionProviderCUDA(opts)
 }
 
 // NewEncoder 初始化 ONNX Runtime 环境并加载分词器与两个推理会话。
@@ -211,8 +158,8 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	if lib == "" {
 		lib = defaultLibName()
 	}
-	enc := &Encoder{spec: spec, family: family, tok: tok, envOnce: &sync.Once{}, lib: lib}
-	if err := enc.initEnv(lib); err != nil {
+	enc := &Encoder{spec: spec, family: family, tok: tok, lib: lib}
+	if err := ortx.EnsureEnv(lib); err != nil {
 		return nil, fmt.Errorf("初始化 ONNX Runtime 失败（库 %s）: %w", lib, err)
 	}
 
@@ -233,13 +180,13 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	}
 	textOut, err := ort.NewEmptyTensor[float32](ort.NewShape(1, EmbeddingDim))
 	if err != nil {
-		destroyI64(textIn, maskIn)
+		ortx.DestroyI64(textIn, maskIn)
 		return nil, fmt.Errorf("创建文本输出张量失败: %w", err)
 	}
-	textOpts, dev, err := newSessionOptions(cfg)
+	textOpts, dev, err := ortx.NewSessionOptions(cfg.ortConfig())
 	if err != nil {
-		destroyI64(textIn, maskIn)
-		destroyF32(textOut)
+		ortx.DestroyI64(textIn, maskIn)
+		ortx.DestroyF32(textOut)
 		return nil, err
 	}
 	textSess, err := ort.NewAdvancedSession(
@@ -248,8 +195,8 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		textInputs, []ort.Value{textOut}, textOpts)
 	textOpts.Destroy()
 	if err != nil {
-		destroyI64(textIn, maskIn)
-		destroyF32(textOut)
+		ortx.DestroyI64(textIn, maskIn)
+		ortx.DestroyF32(textOut)
 		return nil, fmt.Errorf("加载文本编码器失败（%s）: %w", spec.textModel, err)
 	}
 	enc.device = dev
@@ -258,24 +205,24 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	visIn, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 3, ImageSize, ImageSize))
 	if err != nil {
 		textSess.Destroy()
-		destroyI64(textIn, maskIn)
-		destroyF32(textOut)
+		ortx.DestroyI64(textIn, maskIn)
+		ortx.DestroyF32(textOut)
 		return nil, fmt.Errorf("创建图像输入张量失败: %w", err)
 	}
 	visOut, err := ort.NewEmptyTensor[float32](ort.NewShape(1, EmbeddingDim))
 	if err != nil {
 		visIn.Destroy()
 		textSess.Destroy()
-		destroyI64(textIn, maskIn)
-		destroyF32(textOut)
+		ortx.DestroyI64(textIn, maskIn)
+		ortx.DestroyF32(textOut)
 		return nil, fmt.Errorf("创建图像输出张量失败: %w", err)
 	}
-	visOpts, dev2, err := newSessionOptions(cfg)
+	visOpts, dev2, err := ortx.NewSessionOptions(cfg.ortConfig())
 	if err != nil {
-		destroyF32(visIn, visOut)
+		ortx.DestroyF32(visIn, visOut)
 		textSess.Destroy()
-		destroyI64(textIn, maskIn)
-		destroyF32(textOut)
+		ortx.DestroyI64(textIn, maskIn)
+		ortx.DestroyF32(textOut)
 		return nil, err
 	}
 	visSess, err := ort.NewAdvancedSession(
@@ -284,10 +231,10 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 		[]ort.Value{visIn}, []ort.Value{visOut}, visOpts)
 	visOpts.Destroy()
 	if err != nil {
-		destroyF32(visIn, visOut)
+		ortx.DestroyF32(visIn, visOut)
 		textSess.Destroy()
-		destroyI64(textIn, maskIn)
-		destroyF32(textOut)
+		ortx.DestroyI64(textIn, maskIn)
+		ortx.DestroyF32(textOut)
 		return nil, fmt.Errorf("加载图像编码器失败（%s）: %w", spec.visionModel, err)
 	}
 	// 两塔设备应一致（同一份配置）；不一致时取更保守的 CPU
@@ -301,40 +248,10 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	return enc, nil
 }
 
-// destroyI64 / destroyF32 尽力释放张量。
-//
-// ⚠️ 必须按**具体类型**分别写，不能用 `...interface{ Destroy() error }` 收集：
-// 把 typed-nil 指针（如 CLIP 族的 maskIn 本就为 nil）装箱进接口后，接口本身**非 nil**，
-// 于是 nil 判断失效、Destroy() 解引用空指针 panic。
-// （实测症状：embedgen 每次成功跑完都在退出时 panic，退出码恒为 2，
-//
-//	并会掩盖 NewEncoder 的真实错误——先 panic 后返回错误。）
-func destroyI64(ts ...*ort.Tensor[int64]) {
-	for _, t := range ts {
-		if t != nil {
-			t.Destroy()
-		}
-	}
-}
-
-func destroyF32(ts ...*ort.Tensor[float32]) {
-	for _, t := range ts {
-		if t != nil {
-			t.Destroy()
-		}
-	}
-}
-
-// initEnv 进程内只初始化一次 ONNX Runtime 环境（全局单例）。
-func (e *Encoder) initEnv(lib string) error {
-	e.envOnce.Do(func() {
-		ort.SetSharedLibraryPath(lib)
-		e.envErr = ort.InitializeEnvironment()
-	})
-	return e.envErr
-}
-
 // Close 释放会话与张量（不销毁全局环境，进程退出时由 ORT 自行回收）。
+//
+// 张量释放一律走 ortx 的**具型**辅助函数（DestroyI64 / DestroyF32）——
+// 不能用接口版判空：typed-nil 装箱后接口非 nil，会解引用空指针 panic。
 func (e *Encoder) Close() {
 	if e.text != nil {
 		e.text.Destroy()
@@ -342,8 +259,8 @@ func (e *Encoder) Close() {
 	if e.vision != nil {
 		e.vision.Destroy()
 	}
-	destroyI64(e.textIn, e.maskIn)
-	destroyF32(e.textOut, e.visIn, e.visOut)
+	ortx.DestroyI64(e.textIn, e.maskIn)
+	ortx.DestroyF32(e.textOut, e.visIn, e.visOut)
 }
 
 // EncodeText 文本 → 512 维 L2 归一化向量。

@@ -19,6 +19,7 @@ import (
 	"panoalbum/internal/auth"
 	"panoalbum/internal/config"
 	"panoalbum/internal/embed"
+	"panoalbum/internal/faces"
 	"panoalbum/internal/folders"
 	"panoalbum/internal/geo"
 	"panoalbum/internal/health"
@@ -28,6 +29,7 @@ import (
 	"panoalbum/internal/search"
 	"panoalbum/internal/shares"
 	"panoalbum/internal/spaces"
+	"panoalbum/internal/tags"
 	"panoalbum/internal/transcode"
 )
 
@@ -120,11 +122,34 @@ func main() {
 	authed.POST("/media/:id/rate", permWrite, mediaH.Rate)
 	authed.DELETE("/media/:id", permWrite, mediaH.Delete)
 	authed.GET("/media/:id/360", permRead, mediaH.Pano360)
+	// Job000010 Phase 4：图片旋转。写 media.edits（旋转角），缩略图由 index worker 按编辑参数重生成。
+	authed.POST("/media/:id/rotate", permWrite, mediaH.Rotate)
 
 	// Job000005 手工标签（读 media:read；写 media:write + 归属校验）
 	authed.GET("/tags", permRead, mediaH.ListTags)
 	authed.POST("/media/:id/tags", permWrite, mediaH.AddTag)
 	authed.DELETE("/media/:id/tags/:tag_id", permWrite, mediaH.RemoveTag)
+
+	// Job000010 Phase 4：标签管理 + AI 自动打标（零样本分类，复用 CLIP 文本塔 × 已缓存 media.embedding）。
+	// 权限沿用 media:read / media:write（种子权限无独立 tag:*，与既有手工标签一致）。
+	// mediaH.Tagger 为 nil 时（CLIP 不可用）读接口仍可用，预览仅返回已落库结果，触发返回 503。
+	authed.POST("/tags", permWrite, mediaH.CreateTag)
+	authed.PATCH("/tags/:id", permWrite, mediaH.PatchTag)
+	authed.DELETE("/tags/:id", permWrite, mediaH.DeleteTag)
+	authed.GET("/tags/:id/media", permRead, mediaH.ListTagMedia)
+	authed.POST("/tags/:id/confirm", permWrite, mediaH.ConfirmTag)
+	authed.POST("/media/:id/tags/confirm", permWrite, mediaH.ConfirmMediaTags)
+	authed.GET("/ai/tags", permRead, mediaH.AITagsPreview)
+	authed.POST("/ai/tags", permWrite, mediaH.AITagsTrigger)
+
+	// Job000010 Phase 4：人物。只依赖纯 SQL 的 faces.Store，故非 CGO 构建下读接口亦可提供；
+	// 实际的检测/聚类由 facesgen 清扫循环承担，此处 POST /ai/faces 仅复位扫描标记。
+	facesH := &faces.Handler{Store: &faces.Store{Pool: pool}}
+	authed.GET("/people", permRead, facesH.ListPeople)
+	authed.POST("/people", permWrite, facesH.CreatePerson)
+	authed.PATCH("/people/:id", permWrite, facesH.PatchPerson)
+	authed.GET("/people/:id/media", permRead, facesH.PersonMedia)
+	authed.POST("/ai/faces", permWrite, facesH.TriggerScan)
 
 	// Phase 3 空间 / 文件夹 / 转码
 	spacesH := &spaces.Handler{Pool: pool}
@@ -161,7 +186,8 @@ func main() {
 	// place 降级经 geo_cache 缓存的 Nominatim resolver。
 	// 语义召回依赖 CLIP 模型与 onnxruntime 原生库：任一缺失则降级为占位实现（Stage 3 行为），
 	// 绝不因 AI 资产缺失导致 API 无法启动。
-	recaller := buildRecaller(pool, log)
+	recaller, tagger := buildRecaller(pool, log)
+	mediaH.Tagger = tagger // Phase 4 零样本打标器；nil 表示降级（标签读接口仍可用）
 	searchH := &search.Handler{Store: &search.Store{
 		Pool:     pool,
 		Recaller: recaller,
@@ -220,7 +246,7 @@ func main() {
 	log.Info("已停机")
 }
 
-// buildRecaller 构造 Stage 4 语义召回器。
+// buildRecaller 构造 Stage 4 语义召回器，并顺带构造 Phase 4 零样本打标器。
 //
 // 设备由环境变量选择（EMBED_DEVICE=cpu|cuda|auto，默认 auto）：
 // 优先 CUDA，装配失败则回落 CPU —— GPU / CPU 双接口在同一二进制中保留，
@@ -228,7 +254,11 @@ func main() {
 //
 // CLIP 模型或 onnxruntime 原生库缺失时降级为占位实现（等价 Stage 3 行为），
 // 保证 AI 资产未就绪也不会阻断 API 启动。推理在**本地** CPU / GPU 完成。
-func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) search.Recaller {
+//
+// 打标器复用同一文本塔把词表编码成文本向量（启动时一次成本），
+// 之后对每张图直接用已缓存的 media.embedding 算余弦相似度，无需再跑视觉塔。
+// 词表编码失败同样只降级、不阻断启动。
+func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) (search.Recaller, *tags.Classifier) {
 	cfg := embed.ConfigFromEnv()
 	enc, err := embed.NewEncoder(cfg)
 	if err != nil {
@@ -236,7 +266,7 @@ func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) search.Recaller {
 			zap.String("model_dir", cfg.ModelDir),
 			zap.String("device", string(cfg.Device)),
 			zap.Error(err))
-		return search.SemanticRecaller{}
+		return search.SemanticRecaller{}, nil
 	}
 	logger.Info("语义召回已启用",
 		zap.String("model_dir", cfg.ModelDir),
@@ -244,11 +274,28 @@ func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) search.Recaller {
 		zap.String("provider", enc.Provider()),
 		zap.String("device", string(enc.Device())),
 		zap.Int("context_len", enc.ContextLen()))
+
+	// 阈值按模型族解析（chinese-clip 0.35 / clip 0.24），可用 TAG_MIN_SIM 等环境变量覆盖；
+	// 最终应以 `taggen -mode calibrate` 在真实库上标定后固化。
+	var clf *tags.Classifier
+	if c, cerr := tags.NewClassifier(context.Background(), enc, nil, tags.ClassifyConfig{}); cerr != nil {
+		logger.Warn("AI 打标未启用（词表编码失败）", zap.Error(cerr))
+	} else {
+		minSim, topRatio, maxTags, family := c.Params()
+		logger.Info("AI 打标已启用",
+			zap.String("family", family),
+			zap.Int("labels", c.LabelCount()),
+			zap.Float64("min_sim", minSim),
+			zap.Float64("top_ratio", topRatio),
+			zap.Int("max_tags", maxTags))
+		clf = c
+	}
+
 	return &search.VectorRecaller{
 		Enc:   enc,
 		Store: &embed.Store{Pool: pool},
 		// TopK 同时是语义注入的上限：过大会让 total 被无关项撑高
 		// （实测 72 条库上取 50 + 阈值 0.80 时 total 常达 30~50）。
 		TopK: 25,
-	}
+	}, clf
 }

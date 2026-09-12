@@ -59,6 +59,19 @@ server {
         proxy_send_timeout 300s;
     }
 
+    # PWA：Service Worker 必须 no-cache（否则旧 SW 长期驻留，升级不生效）
+    location = /sw.js {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files $uri =404;
+    }
+
+    # PWA：Web App Manifest 需正确 MIME（application/manifest+json）
+    location = /manifest.webmanifest {
+        types { }
+        default_type application/manifest+json;
+        try_files $uri =404;
+    }
+
     # maplibre worker（.mjs 必须可执行 MIME，否则 module worker 被浏览器拒绝 → GeoJSON 图层静默不渲染）
     location ~ \.mjs$ {
         types { }

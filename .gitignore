@@ -29,6 +29,9 @@ __pycache__/
 # ===== Env & secrets =====
 .env
 .env.local
+# 运维侧凭据（SMTP 告警等，Job000011）：只存服务器本地，绝不入库
+.env.ops
+*.env.ops
 *.pem
 !prototypes/**/*.pem
 # TLS 证书与私钥（Job000008 内网 HTTPS）

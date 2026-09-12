@@ -12,39 +12,32 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
+
+	"panoalbum/internal/ortx"
 )
 
 // EmbeddingDim CLIP ViT-B/32 投影维度（与 media.embedding VECTOR(512) 对齐）。
 const EmbeddingDim = 512
 
 // DeviceKind 推理设备类型（保留 CPU / GPU 双接口，由配置选择而非编译期裁剪）。
-type DeviceKind string
+//
+// 实现在 internal/ortx（与其他人脸等推理能力共用）；此处以类型别名与常量别名
+// 保持 embed 对外 API 不变。
+type DeviceKind = ortx.DeviceKind
 
 const (
 	// DeviceCPU 强制使用 CPU 执行提供器（默认基座，任何环境可用）。
-	DeviceCPU DeviceKind = "cpu"
+	DeviceCPU = ortx.DeviceCPU
 	// DeviceCUDA 强制使用 CUDA 执行提供器；不可用时**报错**（显式配置不应静默降级）。
-	DeviceCUDA DeviceKind = "cuda"
+	DeviceCUDA = ortx.DeviceCUDA
 	// DeviceAuto 优先 CUDA，不可用则回落 CPU 并记录实际选择（一套配置适配异构部署）。
-	DeviceAuto DeviceKind = "auto"
+	DeviceAuto = ortx.DeviceAuto
 )
 
 // ParseDevice 解析设备配置字符串（大小写不敏感），未知值回落到 auto。
-func ParseDevice(s string) DeviceKind {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "cpu":
-		return DeviceCPU
-	case "cuda", "gpu":
-		return DeviceCUDA
-	case "auto", "":
-		return DeviceAuto
-	default:
-		return DeviceAuto
-	}
-}
+func ParseDevice(s string) DeviceKind { return ortx.ParseDevice(s) }
 
 // ModelFamily 模型族：决定 tokenizer、ONNX 文件名/输入签名、预处理与文本长度。
 //
@@ -116,17 +109,8 @@ func ConfigFromEnv() Config {
 	return c
 }
 
-// defaultLibName 各平台的原生库文件名。
-func defaultLibName() string {
-	switch runtime.GOOS {
-	case "windows":
-		return "onnxruntime.dll"
-	case "darwin":
-		return "libonnxruntime.dylib"
-	default:
-		return "libonnxruntime.so"
-	}
-}
+// defaultLibName 各平台的原生库文件名（实现见 internal/ortx）。
+func defaultLibName() string { return ortx.DefaultLibName() }
 
 // LibPathAuto 返回当前平台的原生库文件名（供调用方拼路径）。
 func LibPathAuto() string { return defaultLibName() }

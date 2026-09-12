@@ -1,0 +1,20 @@
+{
+  "name": "全景相册",
+  "short_name": "全景相册",
+  "description": "自托管全景相册：时间轴 / 360 播放 / 前台增量备份",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#14181d",
+  "theme_color": "#14181d",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

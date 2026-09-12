@@ -126,6 +126,34 @@ services:
       db:
         condition: service_healthy
 
+  # ---- 增量 AI 打标（Phase 4）：复用 api 镜像（含 CLIP 文本塔 + onnxruntime）----
+  # 清扫式补打标：周期性扫描「已向量化但未 AI 打标」的媒体并零样本打标。
+  # ⚠️ 必须与 api/embed-worker 同一模型族，否则标签向量与媒体向量不在同一空间。
+  tag-worker:
+    image: panomint-app:latest
+    container_name: pano-tag-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/taggen", "-mode", "watch", "-interval", "60"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+      # 与 api 保持同一模型族（换族必须全量重算，见 docker/api/Dockerfile 注释）
+      EMBED_FAMILY: ${EMBED_FAMILY:-chinese-clip}
+      EMBED_MODEL_DIR: ${EMBED_MODEL_DIR:-/opt/models/chinese-clip}
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+      EMBED_DEVICE_ID: ${EMBED_DEVICE_ID:-0}
+      EMBED_THREADS: ${EMBED_THREADS:-0}
+      # 零样本打标阈值（见 internal/tags/zeroshot.go）；标定后固化
+      # TAG_MIN_SIM 留空=按族自动（chinese-clip 0.35 / clip 0.24）；TAG_TOP_RATIO 默认 0.88；TAG_MAX_PER_MEDIA 默认 3
+      TAG_MIN_SIM: ${TAG_MIN_SIM:-}
+      TAG_TOP_RATIO: ${TAG_TOP_RATIO:-0.88}
+      TAG_MAX_PER_MEDIA: ${TAG_MAX_PER_MEDIA:-3}
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
   # ---- 前端静态服务 + API 同源反代（LAN 暴露 8088，供本机 cloudflared 隧道回源；服务器直连 Cloudflare 被阻断）----
   web:
     build:

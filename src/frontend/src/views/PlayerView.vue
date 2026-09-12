@@ -63,6 +63,21 @@
           <circle cx="12" cy="7.8" r="1.1" fill="currentColor" />
         </svg>
       </button>
+
+      <!-- 播放集导航：上一张 / 下一张（← / →），计数器 -->
+      <template v-if="playset.length > 1">
+        <button class="nav-arrow prev" :disabled="!hasPrev" title="上一张（←）" @click="go(-1)">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+            <path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button class="nav-arrow next" :disabled="!hasNext" title="下一张（→）" @click="go(1)">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+            <path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="nav-counter">{{ idx + 1 }} / {{ playset.length }}</div>
+      </template>
     </div>
 
     <!-- 桌面端：右侧信息窗格平铺 -->
@@ -99,11 +114,37 @@ import { getAccessToken } from '../utils/tokenStore'
 import { useResponsive } from '../composables/useResponsive'
 import Player360 from '../components/player/360Player.vue'
 import MediaInfoPanel from '../components/player/MediaInfoPanel.vue'
+import { useViewerStore } from '../stores/viewer'
+import { useSearchStore } from '../stores/search'
 
 const route = useRoute()
 const router = useRouter()
 const { isDesktop } = useResponsive()
+const viewerStore = useViewerStore()
+const searchStore = useSearchStore()
 const mediaId = computed(() => String(route.params.id || ''))
+
+// 播放集来源：?source=search 用搜索结果集，否则用查看器 store 中镜像的播放集
+const source = computed(() => String(route.query.source || viewerStore.source || 'timeline'))
+const playset = computed(() => {
+  if (source.value === 'search' && searchStore.results?.length) return searchStore.results
+  if (viewerStore.items?.length) return viewerStore.items
+  // 兜底：直接链接进入且搜索结果集恰好包含该媒体时，仍支持连续播放
+  if (searchStore.results?.length) return searchStore.results
+  return []
+})
+const idx = computed(() => playset.value.findIndex((m) => String(m.id) === mediaId.value))
+const hasPrev = computed(() => idx.value > 0)
+const hasNext = computed(() => idx.value >= 0 && idx.value < playset.value.length - 1)
+
+function go(delta) {
+  const i = idx.value + delta
+  if (i < 0 || i >= playset.value.length) return
+  const next = playset.value[i]
+  if (!next) return
+  viewerStore.setIndex(i)
+  router.push({ name: 'player', params: { id: next.id }, query: route.query })
+}
 
 const loading = ref(true)
 const error = ref('')
@@ -254,14 +295,31 @@ function exit() {
 }
 
 function onKeydown(e) {
-  if (e.key !== 'Escape') return
-  // 输入框/文本域内的 Esc 留给控件自身（如关闭标签补全）
   const tag = e.target?.tagName
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return
-  exit()
+  if (e.key === 'Escape') {
+    // 输入框/文本域内的 Esc 留给控件自身（如关闭标签补全）
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    exit()
+    return
+  }
+  // 视频原生控件聚焦时不劫持方向键（避免妨碍进度调整）
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'VIDEO' || tag === 'SELECT') return
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    go(-1)
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    go(1)
+  }
 }
 
-watch(mediaId, (id) => { if (id) load() }, { immediate: true })
+watch(mediaId, (id) => {
+  if (!id) return
+  load()
+  // 保持播放集索引与当前媒体一致（供返回/切换时定位）
+  const i = playset.value.findIndex((m) => String(m.id) === id)
+  if (i >= 0) viewerStore.setIndex(i)
+}, { immediate: true })
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
@@ -349,6 +407,57 @@ onBeforeUnmount(() => {
 .info-btn {
   top: 10px;
   right: 56px;
+}
+
+/* 播放集导航箭头 + 计数器 */
+.nav-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 25;
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20, 24, 29, 0.5);
+  color: #e6ebf0;
+  backdrop-filter: blur(6px);
+}
+
+.nav-arrow:hover:not(:disabled) {
+  background: rgba(20, 24, 29, 0.85);
+  color: #fff;
+}
+
+.nav-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.nav-arrow.prev {
+  left: 14px;
+}
+
+.nav-arrow.next {
+  right: 14px;
+}
+
+.nav-counter {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 25;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(20, 24, 29, 0.6);
+  color: #e6ebf0;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(6px);
 }
 
 /* 移动端信息抽屉：底部上滑面板 */

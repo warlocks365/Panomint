@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -44,44 +45,49 @@ type NamedRef struct {
 }
 
 // DetailTagRef 详情页标签引用（含 kind/color，供前端区分 user/ai 并着色）。
+// Origin/Confirmed 为 Phase 4 逐图态：origin=ai 且 confirmed=false 即「AI 待确认」。
 type DetailTagRef struct {
-	ID    string  `json:"id"`
-	Name  string  `json:"name"`
-	Kind  string  `json:"kind"`
-	Color *string `json:"color,omitempty"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Kind       string   `json:"kind"`
+	Color      *string  `json:"color,omitempty"`
+	Origin     string   `json:"origin,omitempty"`
+	Confirmed  bool     `json:"confirmed"`
+	Confidence *float64 `json:"confidence,omitempty"`
 }
 
 // Detail 媒体详情响应。
 type Detail struct {
-	ID             string     `json:"id"`
-	Type           string     `json:"type"`
-	Space          string     `json:"space"`
-	OwnerID        string     `json:"owner_id"`
-	Path           string     `json:"path"`
-	FolderPath     *string    `json:"folder_path,omitempty"`
-	Filename       *string    `json:"filename,omitempty"`
-	TakenAt        *time.Time `json:"taken_at,omitempty"`
-	Width          *int       `json:"width,omitempty"`
-	Height         *int       `json:"height,omitempty"`
-	Codec          *string    `json:"codec,omitempty"`
-	GPS            *Geo       `json:"gps,omitempty"`
-	Place          *string    `json:"place,omitempty"`
-	Is360          bool       `json:"is_360"`
-	Projection     *string    `json:"projection,omitempty"`
-	ThumbnailSM    *string    `json:"thumbnail_sm,omitempty"`
-	ThumbnailMD    *string    `json:"thumbnail_md,omitempty"`
-	ThumbnailLG    *string    `json:"thumbnail_lg,omitempty"`
-	HLSMaster      *string    `json:"hls_master,omitempty"`
-	Filesize       *int64     `json:"filesize,omitempty"`
-	Rating         int        `json:"rating"`
-	Favorite       bool       `json:"favorite"`
-	Notes          *string    `json:"notes,omitempty"`
-	LivePhotoPair  *string    `json:"live_photo_pair_id,omitempty"`
-	Tags           []DetailTagRef `json:"tags"`
-	People         []NamedRef `json:"people"`
-	Albums         []NamedRef `json:"albums"`
-	Exif           Exif       `json:"exif"`
-	Video          *VideoMeta `json:"video,omitempty"`
+	ID            string         `json:"id"`
+	Type          string         `json:"type"`
+	Space         string         `json:"space"`
+	OwnerID       string         `json:"owner_id"`
+	Path          string         `json:"path"`
+	FolderPath    *string        `json:"folder_path,omitempty"`
+	Filename      *string        `json:"filename,omitempty"`
+	TakenAt       *time.Time     `json:"taken_at,omitempty"`
+	Width         *int           `json:"width,omitempty"`
+	Height        *int           `json:"height,omitempty"`
+	Codec         *string        `json:"codec,omitempty"`
+	GPS           *Geo           `json:"gps,omitempty"`
+	Place         *string        `json:"place,omitempty"`
+	Is360         bool           `json:"is_360"`
+	Projection    *string        `json:"projection,omitempty"`
+	ThumbnailSM   *string        `json:"thumbnail_sm,omitempty"`
+	ThumbnailMD   *string        `json:"thumbnail_md,omitempty"`
+	ThumbnailLG   *string        `json:"thumbnail_lg,omitempty"`
+	HLSMaster     *string        `json:"hls_master,omitempty"`
+	Filesize      *int64         `json:"filesize,omitempty"`
+	Rating        int            `json:"rating"`
+	Favorite      bool           `json:"favorite"`
+	Notes         *string        `json:"notes,omitempty"`
+	Edits         *Edits         `json:"edits,omitempty"`
+	LivePhotoPair *string        `json:"live_photo_pair_id,omitempty"`
+	Tags          []DetailTagRef `json:"tags"`
+	People        []NamedRef     `json:"people"`
+	Albums        []NamedRef     `json:"albums"`
+	Exif          Exif           `json:"exif"`
+	Video         *VideoMeta     `json:"video,omitempty"`
 }
 
 // ErrNotFound 媒体不存在或无权限。
@@ -97,6 +103,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 	var d Detail
 	var lat, lng *float64
 	var vm VideoMeta
+	var editsRaw []byte
 	err := s.Pool.QueryRow(ctx, `
 		SELECT m.id, m.type::text, m.space::text, m.owner_id, m.path, m.folder_path, m.filename,
 		       m.taken_at, m.width, m.height, m.codec,
@@ -104,7 +111,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 		       CASE WHEN m.gps IS NOT NULL THEN ST_X(m.gps) END,
 		       m.place, m.is_360, m.projection,
 		       m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg, m.hls_master,
-		       m.filesize, m.rating, m.live_photo_pair_id, m.notes,
+		       m.filesize, m.rating, m.live_photo_pair_id, m.notes, m.edits,
 		       m.camera_make, m.camera_model, m.lens_model, m.focal_length, m.aperture,
 		       m.iso, m.shutter_speed, m.exposure_bias,
 		       m.fps, m.bitrate, m.duration, m.hdr, m.color_space,
@@ -115,7 +122,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 		&d.TakenAt, &d.Width, &d.Height, &d.Codec, &lat, &lng,
 		&d.Place, &d.Is360, &d.Projection,
 		&d.ThumbnailSM, &d.ThumbnailMD, &d.ThumbnailLG, &d.HLSMaster,
-		&d.Filesize, &d.Rating, &d.LivePhotoPair, &d.Notes,
+		&d.Filesize, &d.Rating, &d.LivePhotoPair, &d.Notes, &editsRaw,
 		&d.Exif.CameraMake, &d.Exif.CameraModel, &d.Exif.LensModel, &d.Exif.FocalLength,
 		&d.Exif.Aperture, &d.Exif.ISO, &d.Exif.ShutterSpeed, &d.Exif.ExposureBias,
 		&vm.FPS, &vm.Bitrate, &vm.Duration, &vm.HDR, &vm.ColorSpace,
@@ -125,6 +132,13 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	// 非破坏式编辑参数（JSONB，可为空）
+	if len(editsRaw) > 0 {
+		var e Edits
+		if err := json.Unmarshal(editsRaw, &e); err == nil {
+			d.Edits = &e
+		}
 	}
 	if lat != nil && lng != nil {
 		d.GPS = &Geo{Lat: *lat, Lng: *lng}
@@ -148,14 +162,15 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 func (s *Store) loadRefs(ctx context.Context, d *Detail) error {
 	// 标签：JOIN tags 表取 kind/color（前端信息窗格按 kind 区分 user/ai 并着色）
 	tagRows, err := s.Pool.Query(ctx, `
-		SELECT t.id, t.name, t.kind, t.color FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
+		SELECT t.id, t.name, t.kind, t.color, COALESCE(mt.origin,''), mt.confirmed, mt.confidence
+		FROM media_tags mt JOIN tags t ON t.id = mt.tag_id
 		WHERE mt.media_id = $1 ORDER BY t.name`, d.ID)
 	if err != nil {
 		return err
 	}
 	for tagRows.Next() {
 		var t DetailTagRef
-		if err := tagRows.Scan(&t.ID, &t.Name, &t.Kind, &t.Color); err != nil {
+		if err := tagRows.Scan(&t.ID, &t.Name, &t.Kind, &t.Color, &t.Origin, &t.Confirmed, &t.Confidence); err != nil {
 			tagRows.Close()
 			return err
 		}

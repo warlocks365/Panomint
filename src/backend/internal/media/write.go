@@ -1,7 +1,9 @@
 package media
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -61,6 +63,84 @@ func (s *Store) SetRating(ctx context.Context, id string, rating int) error {
 func (s *Store) SetNotes(ctx context.Context, id string, notes string) error {
 	ct, err := s.Pool.Exec(ctx,
 		`UPDATE media SET notes = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`, notes, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CropRect 归一化裁剪框（相对原图，0..1）。
+type CropRect struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+	H float64 `json:"h"`
+}
+
+// Edits 非破坏式基本编辑参数（存 media.edits JSONB；原文件不变）。
+// Rotate ∈ {0,90,180,270}；Crop 为 nil 表示未裁剪。
+type Edits struct {
+	Rotate int       `json:"rotate"`
+	Crop   *CropRect `json:"crop,omitempty"`
+}
+
+// ErrBadEdits 编辑参数非法。
+var ErrBadEdits = errors.New("编辑参数非法")
+
+// NormalizeEdits 校验并规范化编辑参数（拒绝未知字段）。
+// rotate 需为 0/90/180/270；crop 归一化且不得越界。
+func NormalizeEdits(raw []byte) (*Edits, error) {
+	var e Edits
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&e); err != nil {
+		return nil, ErrBadEdits
+	}
+	switch e.Rotate {
+	case 0, 90, 180, 270:
+	default:
+		return nil, ErrBadEdits
+	}
+	if e.Crop != nil {
+		c := e.Crop
+		if c.W <= 0 || c.H <= 0 || c.X < 0 || c.Y < 0 {
+			return nil, ErrBadEdits
+		}
+		if c.X+c.W > 1.0001 || c.Y+c.H > 1.0001 {
+			return nil, ErrBadEdits
+		}
+		// 规整到 [0,1]，消除浮点边界误差
+		if c.X < 0 {
+			c.X = 0
+		}
+		if c.Y < 0 {
+			c.Y = 0
+		}
+		if c.X+c.W > 1 {
+			c.W = 1 - c.X
+		}
+		if c.Y+c.H > 1 {
+			c.H = 1 - c.Y
+		}
+	}
+	return &e, nil
+}
+
+// SetEdits 写入非破坏式编辑参数（JSONB）；edits 为 nil 即清空（重置）。
+func (s *Store) SetEdits(ctx context.Context, id string, edits *Edits) error {
+	var raw any
+	if edits != nil {
+		b, err := json.Marshal(edits)
+		if err != nil {
+			return err
+		}
+		raw = b
+	}
+	ct, err := s.Pool.Exec(ctx,
+		`UPDATE media SET edits = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL`, raw, id)
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -32,6 +33,34 @@ func (w *ThumbWorker) thumbPath(mediaID string, size ffmpeg.ThumbSize) string {
 	return filepath.Join(w.thumbDir, fmt.Sprintf("%s_%s.webp", mediaID, size))
 }
 
+// editFilter 读取 media.edits 并生成 ffmpeg 滤镜链；无编辑时返回空串。
+//
+// 顺序与前端一致：**先裁剪（按未旋转方向）后旋转**（详见 ffmpeg.EditFilter）。
+// 解析失败**不视为任务失败**——缩略图仍按原图生成，编辑参数异常不应阻断索引。
+func (w *ThumbWorker) editFilter(ctx context.Context, mediaID string) string {
+	var raw []byte
+	if err := w.db.QueryRow(ctx, `SELECT edits FROM media WHERE id = $1`, mediaID).Scan(&raw); err != nil || len(raw) == 0 {
+		return ""
+	}
+	var ed struct {
+		Rotate int `json:"rotate"`
+		Crop   *struct {
+			X float64 `json:"x"`
+			Y float64 `json:"y"`
+			W float64 `json:"w"`
+			H float64 `json:"h"`
+		} `json:"crop"`
+	}
+	if err := json.Unmarshal(raw, &ed); err != nil {
+		log.Printf("media.edits 解析失败 media=%s: %v（按原图生成缩略图）", mediaID, err)
+		return ""
+	}
+	if ed.Crop != nil {
+		return ffmpeg.EditFilter(ed.Rotate, true, ed.Crop.X, ed.Crop.Y, ed.Crop.W, ed.Crop.H)
+	}
+	return ffmpeg.EditFilter(ed.Rotate, false, 0, 0, 0, 0)
+}
+
 // Handle 处理一个缩略图任务（queue.Handler 签名）。
 func (w *ThumbWorker) Handle(ctx context.Context, job queue.Job) error {
 	if job.Kind != "thumbnail" {
@@ -57,9 +86,13 @@ func (w *ThumbWorker) Handle(ctx context.Context, job queue.Job) error {
 		}
 	}
 
+	// 非破坏式编辑（media.edits）：缩略图必须与查看器呈现一致，
+	// 否则用户旋转/裁剪后缩略图不变，看起来像"没保存"。
+	editFilter := w.editFilter(ctx, mediaID)
+
 	for _, size := range []ffmpeg.ThumbSize{ffmpeg.ThumbSM, ffmpeg.ThumbMD, ffmpeg.ThumbLG} {
 		out := w.thumbPath(mediaID, size)
-		args := ffmpeg.ThumbnailArgs(input, out, size, seekUs)
+		args := ffmpeg.ThumbnailArgsEdited(input, out, size, seekUs, editFilter)
 		if _, err := ffmpeg.New(args).Run(ctx); err != nil {
 			return fmt.Errorf("生成 %s 档缩略图: %w", size, err) // 普通错误走退避重试
 		}

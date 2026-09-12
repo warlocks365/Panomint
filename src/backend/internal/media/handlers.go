@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"panoalbum/internal/queue"
+	"panoalbum/internal/tags"
 )
 
 // Handler 媒体端点。
@@ -16,6 +17,8 @@ type Handler struct {
 	UploadDir string       // 上传文件存储根目录（./data/media）
 	UploadTmp string       // 分块上传临时目录（./data/uploads）
 	MediaRoot string       // 既有索引媒体根目录（media.path 相对它解析）
+	// Tagger 可空：AI 零样本分类器（Phase 4）。未接线时 /ai/tags 预览仅返回已落库结果。
+	Tagger *tags.Classifier
 }
 
 // List GET /media（API v1.1 §3：时间轴分页 + 筛选 + 时间桶）。
