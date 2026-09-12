@@ -215,8 +215,9 @@ func (h *Handler) Rotate(c *gin.Context) {
 }
 
 // enqueueThumbRegen 尽力而为：编辑变更后重排缩略图任务。
-// ⚠️ worker 侧按 edits 参数出图属后续集成（本次不含 worker 改动）；
-// 此处仅复用既有 "thumbnail" 任务类型，失败不影响参数已持久化。
+// worker 侧（internal/index/worker.go 的 editFilter）会读取 media.edits 并套用
+// 「先裁剪后旋转」滤镜链，使缩略图与查看器呈现一致；此处仅负责投递 "thumbnail" 任务，
+// 投递失败不影响编辑参数已持久化。
 func (h *Handler) enqueueThumbRegen(c *gin.Context, id string) {
 	if h.Q == nil {
 		return
