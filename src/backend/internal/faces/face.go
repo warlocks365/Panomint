@@ -37,8 +37,14 @@ const FaceSize = 112
 const (
 	// DefaultInputSize 检测输入边长兜底值（模型未声明静态形状时使用）。
 	DefaultInputSize = 640
-	// DefaultConfThreshold 检测置信度阈值（对齐 OpenCV 演示默认）。
-	DefaultConfThreshold = 0.9
+	// DefaultConfThreshold 检测置信度阈值。
+	//
+	// 不沿用 OpenCV 演示默认的 0.9 —— Job000011 在真实肖像语料上实测 0.9 偏严：
+	// 7 张清晰正面肖像中有 2 张被丢弃（victoria-2 得 0.883、einstein-2 得 0.8996，
+	// 后者仅差 0.0004 卡在阈值下），即理想输入下漏检率 29%，对「人物」功能不可接受。
+	// 取 0.85 后 7/7 命中；同时 72 张风景/建筑/全景媒体在 0.9 下为 0 误检，
+	// 0.85 需保持该结论（部署后 A/B 复验，若出现误检则应回调）。可用 FACE_CONF 覆盖。
+	DefaultConfThreshold = 0.85
 	// DefaultNMSThreshold 检测 NMS IoU 阈值（对齐 OpenCV 演示默认）。
 	DefaultNMSThreshold = 0.3
 	// DefaultMinFacePx 最小人脸边长（像素）：过小的人脸特征不可靠，直接丢弃。
