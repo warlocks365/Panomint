@@ -143,11 +143,52 @@ services:
       EMBED_DEVICE: ${EMBED_DEVICE:-auto}
       EMBED_DEVICE_ID: ${EMBED_DEVICE_ID:-0}
       EMBED_THREADS: ${EMBED_THREADS:-0}
-      # 零样本打标阈值（见 internal/tags/zeroshot.go）；标定后固化
-      # TAG_MIN_SIM 留空=按族自动（chinese-clip 0.35 / clip 0.24）；TAG_TOP_RATIO 默认 0.88；TAG_MAX_PER_MEDIA 默认 3
+      # 零样本打标阈值（见 internal/tags/zeroshot.go）
+      # TAG_MIN_SIM 留空 = 按族默认（chinese-clip 0.40 / clip 0.24，均经真实库标定）
+      # TAG_TOP_RATIO 默认 0.88；TAG_MAX_PER_MEDIA 默认 3
+      # ⚠️ api 服务不读 TAG_*：它靠代码内的同族默认值保持一致。若在此覆盖阈值，
+      #    必须同步改 zeroshot.go 的默认值（或给 api 也加同名 env），
+      #    否则 /ai/tags 的实时预览与 tag-worker 的落库结果会不一致。
       TAG_MIN_SIM: ${TAG_MIN_SIM:-}
       TAG_TOP_RATIO: ${TAG_TOP_RATIO:-0.88}
       TAG_MAX_PER_MEDIA: ${TAG_MAX_PER_MEDIA:-3}
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ---- 人脸检测 / 聚类（Job000011）：复用 api 镜像（含 ONNX Runtime + YuNet/SFace 模型）----
+  # 清扫式增量：周期性扫描「已有 LG 缩略图且 media.faces_scanned_at 为空」的媒体 →
+  # YuNet 检出人脸 → SFace 出 128 维特征 → 与既有簇质心比余弦相似度，
+  # ≥ FACE_MERGE_SIM 归入该簇，否则新建簇。
+  # 与 embed/tag worker 同理不接队列：POST /ai/faces 复位 faces_scanned_at 即等价入队。
+  # ⚠️ 模型缺失会直接 log.Fatalf 退出，restart: unless-stopped 下形成崩溃循环，
+  #    故模型必须随镜像固化（见 docker/api/Dockerfile 的 COPY assets/models/faces）。
+  faces-worker:
+    image: panomint-app:latest
+    container_name: pano-faces-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/facesgen", "-mode", "watch", "-interval", "30"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+      # 人脸只吃 LG 缩略图（宽 1280），**不读 media.embedding**，故无需 EMBED_MODEL_DIR
+      FACE_MODEL_DIR: /opt/models/faces
+      # 设备与原生库：FACE_DEVICE 缺省回落 EMBED_DEVICE；FACE_LIB 缺省回落 EMBED_LIB（= 镜像内 ORT）
+      # GPU / CPU 双接口保留，由部署环境选择，不因开发机能力裁剪
+      FACE_DEVICE: ${FACE_DEVICE:-}
+      FACE_DEVICE_ID: ${FACE_DEVICE_ID:-0}
+      FACE_THREADS: ${FACE_THREADS:-0}
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+      EMBED_THREADS: ${EMBED_THREADS:-0}
+      # 聚类合并余弦阈值：SFace 官方同人判定为 0.363，这里默认取 0.33 换更高召回
+      # （偏低 = 倾向多分簇，宁少合不错合），待真实素材标定后固化
+      FACE_MERGE_SIM: ${FACE_MERGE_SIM:-0.33}
+      # 检测参数留空即用代码默认：inputSize 640 / conf 0.9 / nms 0.3 / minFacePx 24
+      FACE_CONF: ${FACE_CONF:-}
+      FACE_NMS: ${FACE_NMS:-}
+      FACE_MIN_PX: ${FACE_MIN_PX:-}
     volumes:
       - mediadata:/data
     depends_on:

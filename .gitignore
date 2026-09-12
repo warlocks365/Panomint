@@ -78,6 +78,8 @@ src/frontend/public/maplibre-gl-*.mjs
 
 # ===== 模型权重与原生推理库（Job000010；不入库，按 docs 脚本下载）=====
 assets/models/
+# 人脸链路模型（OpenCV Zoo，Apache-2.0；由 scripts/fetch-face-assets.sh 下载，不入库）
+assets/models/faces/
 assets/lib/
 # GPU(CUDA) 版 ORT 与用于 B 节点验证的临时产物（体积大，可再生成）
 assets/lib-ort-gpu/

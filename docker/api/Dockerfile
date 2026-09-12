@@ -57,13 +57,20 @@ COPY assets/models/clip /opt/models/clip
 # Chinese-CLIP（Xenova/chinese-clip-vit-base-patch16 量化版，512 维，中文 BERT 分词）
 # 镜像内只保留切分后的单塔模型；未切分的 model_quantized.onnx 由 .dockerignore 排除
 COPY assets/models/chinese-clip /opt/models/chinese-clip
+# 人脸模型（OpenCV Zoo 的 YuNet 检测 + SFace 识别，均 Apache-2.0 —— 刻意避开 insightface 的商用许可风险）
+# 由 scripts/fetch-face-assets.sh 下载到 assets/models/faces/（约 37MB，不入库）
+# ⚠️ 文件名必须精确命中 internal/faces/face.go 的候选列表，否则启动即报「未找到模型文件」
+COPY assets/models/faces /opt/models/faces
 
 # 向量能力的默认路径/设备/模型族（均可在 compose 或 .env 覆盖）
 #   EMBED_FAMILY=chinese-clip 面向中文检索（默认）；=clip 则用 OpenAI CLIP（英文更强）
+# ⚠️ FACE_MODEL_DIR 必须显式设置：运行阶段无 WORKDIR（工作目录为 /），
+#    而 internal/faces 的缺省值是相对路径 assets/models/faces，会解析成不存在的 /assets/models/faces。
 ENV EMBED_LIB=/opt/onnxruntime/lib/libonnxruntime.so \
     EMBED_MODEL_DIR=/opt/models/chinese-clip \
     EMBED_FAMILY=chinese-clip \
-    EMBED_DEVICE=auto
+    EMBED_DEVICE=auto \
+    FACE_MODEL_DIR=/opt/models/faces
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/api"]
