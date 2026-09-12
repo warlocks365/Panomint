@@ -32,6 +32,10 @@ assets/lib/onnxruntime-*/lib/*.pdb
 assets/lib/*.zip
 assets/lib/*.tgz
 
+# Chinese-CLIP 未切分的合并模型（190MB）：镜像只需切分后的单塔模型
+assets/models/chinese-clip/model_quantized.onnx
+assets/models/chinese-clip/*.onnx.tmp
+
 # 其他杂项
 *.log
 *.png

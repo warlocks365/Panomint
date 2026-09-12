@@ -11,14 +11,14 @@ import (
 
 func TestParseDevice(t *testing.T) {
 	cases := map[string]DeviceKind{
-		"cpu":   DeviceCPU,
-		"CPU":   DeviceCPU,
+		"cpu":    DeviceCPU,
+		"CPU":    DeviceCPU,
 		" cuda ": DeviceCUDA,
-		"cuda":  DeviceCUDA,
-		"gpu":   DeviceCUDA,
-		"auto":  DeviceAuto,
-		"":      DeviceAuto,
-		"weird": DeviceAuto,
+		"cuda":   DeviceCUDA,
+		"gpu":    DeviceCUDA,
+		"auto":   DeviceAuto,
+		"":       DeviceAuto,
+		"weird":  DeviceAuto,
 	}
 	for in, want := range cases {
 		if got := ParseDevice(in); got != want {

@@ -2,24 +2,18 @@
 
 package embed
 
-// CLIP 双塔编码器（ONNX Runtime，CGO 绑定 github.com/yalue/onnxruntime_go）。
+// CLIP / Chinese-CLIP 双塔编码器（ONNX Runtime，CGO 绑定 github.com/yalue/onnxruntime_go）。
 //
-// 模型：Xenova/clip-vit-base-patch32 导出的 ONNX（基于 openai/clip-vit-base-patch32，MIT）。
-//   - text_model_quantized.onnx   : input_ids[1,77] int64      → text_embeds[1,512]  float32
-//   - vision_model_quantized.onnx : pixel_values[1,3,224,224]  → image_embeds[1,512] float32
+// 支持的模型族见 ModelFamily：两族投影维度均为 512（对齐 media.embedding），
+// 但 tokenizer、ONNX 文件、输入签名、预处理与文本长度不同，由 modelSpec 描述差异。
 //
-// 两塔输出已投影到同一 512 维空间，可直接用余弦相似度做跨模态检索。
+//	clip         : text_model_quantized.onnx [input_ids]           + vision_model_quantized.onnx [pixel_values]
+//	chinese-clip : text_only.onnx           [input_ids, attention_mask] + vision_only.onnx       [pixel_values]
 //
-// ── 执行提供器（GPU / CPU 双接口）────────────────────────────────────────────
-// Config.Device 决定装配哪个 ONNX Runtime Execution Provider：
-//   cpu  : 仅 CPU EP（基座，任何环境可用）
-//   cuda : 追加 CUDA EP；装配失败即报错（显式配置不静默降级）
-//   auto : 先试 CUDA EP，失败则回落 CPU EP 并记录实际选择
-// 二者共用同一模型、同一预处理与同一代码路径，差异仅在 EP 装配。
-// 注意：CUDA EP 需要 CUDA 版 onnxruntime 库（onnxruntime-linux-x64-gpu_cudaXX）；
-// 使用 CPU 版库时装配必然失败——因此 auto 模式在只有 CPU 库的机器上即自动落 CPU。
-// 另：CUDA EP 已知会覆盖 Go 的信号处理器（yalue/onnxruntime_go#140），
-// 若生产启用 CUDA 需在初始化后自行恢复信号处理。
+// 关于并发：onnxruntime 的 Session 非并发安全，这里用互斥锁串行化每个会话。
+//
+// 关于执行提供器（GPU / CPU 双接口）：见 newSessionOptions —— 同一二进制由配置切换，
+// 不因开发环境不具备 CUDA 而裁剪接口。
 //
 // ⚠️ 本文件仅在启用 CGO 时编译；未启用时由 clip_nocgo.go 提供占位实现。
 // onnxruntime_go 要求运行时库版本与头文件版本一致（本工程配 1.29.0）。
@@ -27,6 +21,7 @@ package embed
 import (
 	"context"
 	"fmt"
+	"image"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -34,20 +29,71 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-// Encoder CLIP 编码器（文本 + 图像）。
+// modelSpec 描述一个模型族的文件与接口差异。
+type modelSpec struct {
+	textModel    string
+	textInputs   []string
+	textOutput   string
+	visionModel  string
+	visionInputs []string
+	visionOutput string
+	contextLen   int  // 文本序列长度
+	useMask      bool // 是否需要 attention_mask 输入
+	resizeOnly   bool // 图像预处理：直接缩放 224（true）还是最短边缩放+中心裁剪（false）
+}
+
+// specFor 按模型族选择规格。
+func specFor(family ModelFamily) modelSpec {
+	if family == FamilyChineseCLIP {
+		return modelSpec{
+			textModel:    "text_only.onnx",
+			textInputs:   []string{"input_ids", "attention_mask"},
+			textOutput:   "text_embeds",
+			visionModel:  "vision_only.onnx",
+			visionInputs: []string{"pixel_values"},
+			visionOutput: "image_embeds",
+			contextLen:   BertContextLength,
+			useMask:      true,
+			resizeOnly:   true, // preprocessor_config: do_center_crop=false
+		}
+	}
+	return modelSpec{
+		textModel:    "text_model_quantized.onnx",
+		textInputs:   []string{"input_ids"},
+		textOutput:   "text_embeds",
+		visionModel:  "vision_model_quantized.onnx",
+		visionInputs: []string{"pixel_values"},
+		visionOutput: "image_embeds",
+		contextLen:   ContextLength,
+		useMask:      false,
+		resizeOnly:   false,
+	}
+}
+
+// textTokenizer 两族分词器的共同接口。
+type textTokenizer interface {
+	Encode(text string) []int32
+	PadID() int32
+}
+
+// Encoder 双塔编码器（按模型族装配）。
 type Encoder struct {
-	tok    *Tokenizer
+	spec   modelSpec
+	family ModelFamily
+	tok    textTokenizer
+
 	text   *ort.AdvancedSession
 	vision *ort.AdvancedSession
 
-	// 每会话复用的输入/输出张量（会话锁定期间独占使用，避免反复分配）
+	// 每会话复用的张量（会话锁定期间独占使用，避免反复分配）
 	textIn  *ort.Tensor[int64]
+	maskIn  *ort.Tensor[int64] // 仅 useMask 时非 nil
 	textOut *ort.Tensor[float32]
 	visIn   *ort.Tensor[float32]
 	visOut  *ort.Tensor[float32]
 
-	device DeviceKind // 实际生效的设备
-	lib    string     // 实际加载的原生库路径
+	device DeviceKind
+	lib    string
 
 	muText   sync.Mutex
 	muVision sync.Mutex
@@ -59,6 +105,9 @@ type Encoder struct {
 // Device 返回实际生效的推理设备（cpu / cuda）。
 func (e *Encoder) Device() DeviceKind { return e.device }
 
+// Family 返回实际使用的模型族。
+func (e *Encoder) Family() ModelFamily { return e.family }
+
 // Provider 返回人类可读的执行提供器描述（用于日志与自检输出）。
 func (e *Encoder) Provider() string {
 	if e.device == DeviceCUDA {
@@ -69,6 +118,9 @@ func (e *Encoder) Provider() string {
 
 // LibPath 返回实际加载的原生库路径。
 func (e *Encoder) LibPath() string { return e.lib }
+
+// ContextLen 返回文本序列长度（便于诊断）。
+func (e *Encoder) ContextLen() int { return e.spec.contextLen }
 
 // newSessionOptions 按配置装配执行提供器，返回会话选项与实际生效设备。
 func newSessionOptions(cfg Config) (*ort.SessionOptions, DeviceKind, error) {
@@ -132,85 +184,105 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	if cfg.ModelDir == "" {
 		return nil, fmt.Errorf("ModelDir 不能为空")
 	}
-	tok, err := LoadTokenizer(filepath.Join(cfg.ModelDir, "tokenizer.json"))
-	if err != nil {
-		return nil, err
+	family := cfg.Family
+	if family == "" {
+		family = FamilyCLIP
 	}
+	spec := specFor(family)
+
+	// 分词器按族选择（CLIP:BPE / Chinese-CLIP:BERT WordPiece）
+	var tok textTokenizer
+	switch family {
+	case FamilyChineseCLIP:
+		bt, err := LoadBertTokenizer(filepath.Join(cfg.ModelDir, "tokenizer.json"))
+		if err != nil {
+			return nil, err
+		}
+		tok = bt
+	default:
+		ct, err := LoadTokenizer(filepath.Join(cfg.ModelDir, "tokenizer.json"))
+		if err != nil {
+			return nil, err
+		}
+		tok = ct
+	}
+
 	lib := cfg.LibPath
 	if lib == "" {
 		lib = defaultLibName()
 	}
-
-	enc := &Encoder{tok: tok, envOnce: &sync.Once{}, lib: lib}
+	enc := &Encoder{spec: spec, family: family, tok: tok, envOnce: &sync.Once{}, lib: lib}
 	if err := enc.initEnv(lib); err != nil {
 		return nil, fmt.Errorf("初始化 ONNX Runtime 失败（库 %s）: %w", lib, err)
 	}
 
-	// 文本塔：输入 [1,77] int64
-	textIn, err := ort.NewEmptyTensor[int64](ort.NewShape(1, ContextLength))
+	// ---- 文本塔 ----
+	textIn, err := ort.NewEmptyTensor[int64](ort.NewShape(1, int64(spec.contextLen)))
 	if err != nil {
 		return nil, fmt.Errorf("创建文本输入张量失败: %w", err)
 	}
+	textInputs := []ort.Value{textIn}
+	var maskIn *ort.Tensor[int64]
+	if spec.useMask {
+		maskIn, err = ort.NewEmptyTensor[int64](ort.NewShape(1, int64(spec.contextLen)))
+		if err != nil {
+			textIn.Destroy()
+			return nil, fmt.Errorf("创建 attention_mask 张量失败: %w", err)
+		}
+		textInputs = append(textInputs, maskIn)
+	}
 	textOut, err := ort.NewEmptyTensor[float32](ort.NewShape(1, EmbeddingDim))
 	if err != nil {
-		textIn.Destroy()
+		destroyAll(textIn, maskIn)
 		return nil, fmt.Errorf("创建文本输出张量失败: %w", err)
 	}
 	textOpts, dev, err := newSessionOptions(cfg)
 	if err != nil {
-		textIn.Destroy()
-		textOut.Destroy()
+		destroyAll(textIn, maskIn, textOut)
 		return nil, err
 	}
 	textSess, err := ort.NewAdvancedSession(
-		filepath.Join(cfg.ModelDir, "text_model_quantized.onnx"),
-		[]string{"input_ids"}, []string{"text_embeds"},
-		[]ort.Value{textIn}, []ort.Value{textOut}, textOpts)
+		filepath.Join(cfg.ModelDir, spec.textModel),
+		spec.textInputs, []string{spec.textOutput},
+		textInputs, []ort.Value{textOut}, textOpts)
 	textOpts.Destroy()
 	if err != nil {
-		textIn.Destroy()
-		textOut.Destroy()
-		return nil, fmt.Errorf("加载文本编码器失败: %w", err)
+		destroyAll(textIn, maskIn, textOut)
+		return nil, fmt.Errorf("加载文本编码器失败（%s）: %w", spec.textModel, err)
 	}
 	enc.device = dev
 
-	// 视觉塔：输入 [1,3,224,224] float32
+	// ---- 视觉塔 ----
 	visIn, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 3, ImageSize, ImageSize))
 	if err != nil {
 		textSess.Destroy()
-		textIn.Destroy()
-		textOut.Destroy()
+		destroyAll(textIn, maskIn, textOut)
 		return nil, fmt.Errorf("创建图像输入张量失败: %w", err)
 	}
 	visOut, err := ort.NewEmptyTensor[float32](ort.NewShape(1, EmbeddingDim))
 	if err != nil {
 		visIn.Destroy()
 		textSess.Destroy()
-		textIn.Destroy()
-		textOut.Destroy()
+		destroyAll(textIn, maskIn, textOut)
 		return nil, fmt.Errorf("创建图像输出张量失败: %w", err)
 	}
 	visOpts, dev2, err := newSessionOptions(cfg)
 	if err != nil {
-		visIn.Destroy()
-		visOut.Destroy()
+		destroyAll(visIn, visOut)
 		textSess.Destroy()
-		textIn.Destroy()
-		textOut.Destroy()
+		destroyAll(textIn, maskIn, textOut)
 		return nil, err
 	}
 	visSess, err := ort.NewAdvancedSession(
-		filepath.Join(cfg.ModelDir, "vision_model_quantized.onnx"),
-		[]string{"pixel_values"}, []string{"image_embeds"},
+		filepath.Join(cfg.ModelDir, spec.visionModel),
+		spec.visionInputs, []string{spec.visionOutput},
 		[]ort.Value{visIn}, []ort.Value{visOut}, visOpts)
 	visOpts.Destroy()
 	if err != nil {
-		visIn.Destroy()
-		visOut.Destroy()
+		destroyAll(visIn, visOut)
 		textSess.Destroy()
-		textIn.Destroy()
-		textOut.Destroy()
-		return nil, fmt.Errorf("加载图像编码器失败: %w", err)
+		destroyAll(textIn, maskIn, textOut)
+		return nil, fmt.Errorf("加载图像编码器失败（%s）: %w", spec.visionModel, err)
 	}
 	// 两塔设备应一致（同一份配置）；不一致时取更保守的 CPU
 	if dev2 != dev {
@@ -218,9 +290,18 @@ func NewEncoder(cfg Config) (*Encoder, error) {
 	}
 
 	enc.text, enc.vision = textSess, visSess
-	enc.textIn, enc.textOut = textIn, textOut
+	enc.textIn, enc.maskIn, enc.textOut = textIn, maskIn, textOut
 	enc.visIn, enc.visOut = visIn, visOut
 	return enc, nil
+}
+
+// destroyAll 尽力释放张量（nil 安全）。
+func destroyAll(ts ...interface{ Destroy() error }) {
+	for _, t := range ts {
+		if t != nil {
+			t.Destroy()
+		}
+	}
 }
 
 // initEnv 进程内只初始化一次 ONNX Runtime 环境（全局单例）。
@@ -240,18 +321,7 @@ func (e *Encoder) Close() {
 	if e.vision != nil {
 		e.vision.Destroy()
 	}
-	if e.textIn != nil {
-		e.textIn.Destroy()
-	}
-	if e.textOut != nil {
-		e.textOut.Destroy()
-	}
-	if e.visIn != nil {
-		e.visIn.Destroy()
-	}
-	if e.visOut != nil {
-		e.visOut.Destroy()
-	}
+	destroyAll(e.textIn, e.maskIn, e.textOut, e.visIn, e.visOut)
 }
 
 // EncodeText 文本 → 512 维 L2 归一化向量。
@@ -263,6 +333,17 @@ func (e *Encoder) EncodeText(ctx context.Context, text string) ([]float32, error
 	}
 	for i, id := range ids {
 		dst[i] = int64(id)
+	}
+	if e.maskIn != nil {
+		md := e.maskIn.GetData()
+		pad := e.tok.PadID()
+		for i, id := range ids {
+			if id == pad {
+				md[i] = 0
+			} else {
+				md[i] = 1
+			}
+		}
 	}
 
 	e.muText.Lock()
@@ -282,9 +363,20 @@ func (e *Encoder) EncodeText(ctx context.Context, text string) ([]float32, error
 
 // EncodeImage 图像文件 → 512 维 L2 归一化向量。
 func (e *Encoder) EncodeImage(ctx context.Context, path string) ([]float32, error) {
-	px, err := PreprocessImage(path)
+	img, err := DecodeImageFile(path)
 	if err != nil {
 		return nil, err
+	}
+	return e.EncodeImageData(ctx, img)
+}
+
+// EncodeImageData 已解码图像 → 512 维 L2 归一化向量（按族选择预处理）。
+func (e *Encoder) EncodeImageData(ctx context.Context, img image.Image) ([]float32, error) {
+	var px []float32
+	if e.spec.resizeOnly {
+		px = PreprocessImageDataResize(img)
+	} else {
+		px = PreprocessImageData(img)
 	}
 	return e.EncodePixels(ctx, px)
 }

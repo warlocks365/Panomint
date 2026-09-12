@@ -224,6 +224,9 @@ func (t *Tokenizer) bpe(piece string) []int32 {
 // vocabSize 便于测试/诊断。
 func (t *Tokenizer) vocabSize() int { return len(t.vocab) }
 
+// PadID 补齐用的 token（CLIP 以 <|endoftext|> 同时充当 pad）。
+func (t *Tokenizer) PadID() int32 { return t.sepID }
+
 // sortedRanksDebug 仅测试用：返回前 n 个合并规则的稳定视图。
 func (t *Tokenizer) sortedRanksDebug(n int) []string {
 	out := make([]string, 0, len(t.ranks))

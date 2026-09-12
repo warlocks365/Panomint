@@ -49,6 +49,7 @@ type options struct {
 	lib      string
 	thumbDir string
 	device   string
+	family   string
 	deviceID int
 	threads  int
 	gpuMemMB int
@@ -65,6 +66,7 @@ func main() {
 	flag.StringVar(&o.lib, "lib", "", "onnxruntime 原生库路径")
 	flag.StringVar(&o.thumbDir, "thumbdir", "", "缩略图目录")
 	flag.StringVar(&o.device, "device", "", "推理设备 cpu|cuda|auto")
+	flag.StringVar(&o.family, "family", "", "模型族 clip|chinese-clip")
 	flag.IntVar(&o.deviceID, "deviceID", -1, "CUDA 设备序号")
 	flag.IntVar(&o.threads, "threads", -1, "CPU 线程数")
 	flag.IntVar(&o.gpuMemMB, "gpuMemMB", -1, "CUDA 显存上限 MB")
@@ -125,6 +127,9 @@ func buildConfig(o options) (embed.Config, string) {
 	if o.device != "" {
 		cfg.Device = embed.ParseDevice(o.device)
 	}
+	if o.family != "" {
+		cfg.Family = embed.ParseFamily(o.family)
+	}
 	if o.deviceID >= 0 {
 		cfg.DeviceID = o.deviceID
 	}
@@ -145,12 +150,12 @@ func buildConfig(o options) (embed.Config, string) {
 }
 
 func newEncoder(cfg embed.Config) (*embed.Encoder, error) {
-	log.Printf("加载 CLIP：dir=%s lib=%s 请求设备=%s", cfg.ModelDir, cfg.LibPath, cfg.Device)
+	log.Printf("加载模型：family=%s dir=%s lib=%s 请求设备=%s", cfg.Family, cfg.ModelDir, cfg.LibPath, cfg.Device)
 	enc, err := embed.NewEncoder(cfg)
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("执行提供器：%s（设备=%s）", enc.Provider(), enc.Device())
+	log.Printf("执行提供器：%s（设备=%s，模型族=%s，文本长度=%d）", enc.Provider(), enc.Device(), enc.Family(), enc.ContextLen())
 	return enc, nil
 }
 
@@ -243,7 +248,7 @@ func selfTest(cfg embed.Config, probe bool) error {
 	}
 	defer enc.Close()
 
-	fmt.Printf("PROBE=OK provider=%s device=%s lib=%s\n", enc.Provider(), enc.Device(), enc.LibPath())
+	fmt.Printf("PROBE=OK provider=%s device=%s family=%s ctx=%d lib=%s\n", enc.Provider(), enc.Device(), enc.Family(), enc.ContextLen(), enc.LibPath())
 	if !probe {
 		for _, s := range []string{"a photo of a sunset over the sea", "a photo of a red car"} {
 			v, err := enc.EncodeText(ctx, s)

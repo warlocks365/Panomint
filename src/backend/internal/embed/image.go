@@ -33,6 +33,15 @@ var (
 
 // PreprocessImage 读图 → CLIP 输入张量（NCHW，长度 3*224*224）。
 func PreprocessImage(path string) ([]float32, error) {
+	img, err := DecodeImageFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return PreprocessImageData(img), nil
+}
+
+// DecodeImageFile 解码图片文件（供按模型族选择不同预处理时复用）。
+func DecodeImageFile(path string) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("打开图片失败: %w", err)
@@ -42,7 +51,7 @@ func PreprocessImage(path string) ([]float32, error) {
 	if err != nil {
 		return nil, fmt.Errorf("解码图片失败: %w", err)
 	}
-	return PreprocessImageData(img), nil
+	return img, nil
 }
 
 // PreprocessImageData 对已解码图像做预处理。
@@ -70,16 +79,30 @@ func PreprocessImageData(img image.Image) []float32 {
 	// CatmullRom 近似 PIL 的 BICUBIC
 	xdraw.CatmullRom.Scale(resized, resized.Bounds(), img, b, xdraw.Over, nil)
 
-	// 2) 中心裁剪 ImageSize×ImageSize
+	// 2) 中心裁剪 ImageSize×ImageSize 后归一化
 	offX := (rw - ImageSize) / 2
 	offY := (rh - ImageSize) / 2
+	return toNCHW(resized, offX, offY)
+}
 
-	// 3) 归一化并按 NCHW 排布
+// PreprocessImageDataResize 直接缩放到 ImageSize×ImageSize（**不裁剪**）。
+//
+// Chinese-CLIP 的 preprocessor_config 为 do_center_crop=false + size=224×224，
+// 即整幅图直接缩放成方形（宽高比会被改变），与 OpenAI CLIP 的
+// 「最短边缩放 + 中心裁剪」不同，故单独提供该变体。
+func PreprocessImageDataResize(img image.Image) []float32 {
+	resized := image.NewRGBA(image.Rect(0, 0, ImageSize, ImageSize))
+	xdraw.CatmullRom.Scale(resized, resized.Bounds(), img, img.Bounds(), xdraw.Over, nil)
+	return toNCHW(resized, 0, 0)
+}
+
+// toNCHW 从 (offX, offY) 起取 ImageSize×ImageSize，归一化并按 NCHW 排布。
+func toNCHW(src *image.RGBA, offX, offY int) []float32 {
 	out := make([]float32, 3*ImageSize*ImageSize)
 	const plane = ImageSize * ImageSize
 	for y := 0; y < ImageSize; y++ {
 		for x := 0; x < ImageSize; x++ {
-			c := color.NRGBAModel.Convert(resized.At(offX+x, offY+y)).(color.NRGBA)
+			c := color.NRGBAModel.Convert(src.At(offX+x, offY+y)).(color.NRGBA)
 			idx := y*ImageSize + x
 			out[0*plane+idx] = (float32(c.R)/255.0 - clipMean[0]) / clipStd[0]
 			out[1*plane+idx] = (float32(c.G)/255.0 - clipMean[1]) / clipStd[1]

@@ -45,12 +45,17 @@ COPY --from=build /out/embedgen /usr/local/bin/embedgen
 
 # ONNX Runtime 原生库（1.29.0，须与 Go 绑定头文件版本一致）
 COPY assets/lib/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so* /opt/onnxruntime/lib/
-# CLIP 模型（Xenova/clip-vit-base-patch32 量化版，512 维）
+# CLIP 模型（Xenova/clip-vit-base-patch32 量化版，512 维，英文 BPE 分词）
 COPY assets/models/clip /opt/models/clip
+# Chinese-CLIP（Xenova/chinese-clip-vit-base-patch16 量化版，512 维，中文 BERT 分词）
+# 镜像内只保留切分后的单塔模型；未切分的 model_quantized.onnx 由 .dockerignore 排除
+COPY assets/models/chinese-clip /opt/models/chinese-clip
 
-# 向量能力的默认路径与设备（EMBED_DEVICE 可在 compose/.env 覆盖：cpu|cuda|auto）
+# 向量能力的默认路径/设备/模型族（均可在 compose 或 .env 覆盖）
+#   EMBED_FAMILY=chinese-clip 面向中文检索（默认）；=clip 则用 OpenAI CLIP（英文更强）
 ENV EMBED_LIB=/opt/onnxruntime/lib/libonnxruntime.so \
-    EMBED_MODEL_DIR=/opt/models/clip \
+    EMBED_MODEL_DIR=/opt/models/chinese-clip \
+    EMBED_FAMILY=chinese-clip \
     EMBED_DEVICE=auto
 
 EXPOSE 8080

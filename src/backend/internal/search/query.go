@@ -30,6 +30,48 @@ func (SemanticRecaller) Recall(context.Context, SearchParams) ([]RecallHit, erro
 // 纯语义命中（相似度 0.70~0.85 → 1.5~3 分）排在其后，并按其相似度彼此排序。
 const semanticScoreWeight = 10.0
 
+// enStopWords 英文停用词：这些词在自然语言查询里高频出现，
+// 若参与文本匹配会以 ILIKE 子串方式宽泛命中 folder_path 等字段
+// （例如 "aurora in the night sky" 中的 in/the 把无关项顶到语义命中之前，
+//  Job000010 实测踩到）。仅对纯 ASCII token 生效，中文词不受影响。
+var enStopWords = map[string]bool{
+	"a": true, "an": true, "the": true, "of": true, "in": true, "on": true,
+	"at": true, "to": true, "for": true, "with": true, "and": true, "or": true,
+	"is": true, "are": true, "was": true, "were": true, "be": true, "by": true,
+	"from": true, "that": true, "this": true, "it": true, "as": true,
+}
+
+// isASCII 判定是否纯 ASCII（中文/日文等一律不当作停用词）。
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// queryTokens 拆出用于**文本匹配**的 token：剔除英文停用词。
+// 若剔除后为空（如 q 全是停用词），回退保留原 token 以免检索退化为无条件。
+// 注意：语义编码仍使用完整原始查询串，不做剔除（自然语言语义依赖完整上下文）。
+func queryTokens(q string) []string {
+	all := strings.Fields(q)
+	if len(all) == 0 {
+		return nil
+	}
+	kept := make([]string, 0, len(all))
+	for _, t := range all {
+		if isASCII(t) && enStopWords[strings.ToLower(t)] {
+			continue
+		}
+		kept = append(kept, t)
+	}
+	if len(kept) == 0 {
+		return all
+	}
+	return kept
+}
+
 // trgmRecallThreshold trgm 补充召回相似度阈值（Job000005 裁决值）。
 const trgmRecallThreshold = 0.15
 
@@ -58,8 +100,9 @@ func buildWhere(p SearchParams, hits []RecallHit, geo *GeoCenter) (where string,
 	// q 关键词（Job000005）：多 token OR 召回（任一命中即中），单 token 命中条件 =
 	// ILIKE 完全子串（文件名/地点/目录/标签）OR trgm similarity >= 0.15（文件名/地点/标签）。
 	// 每个 token 只追加一次参数，WHERE 与 scoreExpr 复用同一占位符。
+	// 英文停用词在文本匹配中被剔除（queryTokens），避免 in/the 之类宽泛命中目录名。
 	var tokConds, tokScores []string
-	for _, tok := range strings.Fields(p.Q) {
+	for _, tok := range queryTokens(p.Q) {
 		args = append(args, tok)
 		n := len(args)
 		tokConds = append(tokConds, fmt.Sprintf(`(m.filename ILIKE '%%%%' || $%[1]d || '%%%%'

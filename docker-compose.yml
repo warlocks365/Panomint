@@ -85,8 +85,13 @@ services:
       EMBED_DEVICE: ${EMBED_DEVICE:-auto}
       EMBED_DEVICE_ID: ${EMBED_DEVICE_ID:-0}
       EMBED_THREADS: ${EMBED_THREADS:-0}
-      # 语义召回余弦距离上限（越小越严格；实测标定 0.80，可在线调优免重建）
-      EMBED_SEMANTIC_MAX_DIST: ${EMBED_SEMANTIC_MAX_DIST:-0.80}
+      # 模型族：chinese-clip（默认，中文检索）/ clip（OpenAI CLIP，英文更强）
+      # ⚠️ 两族向量空间不同，切换模型族必须重跑 embedgen -mode encode -force 全量重算
+      EMBED_FAMILY: ${EMBED_FAMILY:-chinese-clip}
+      EMBED_MODEL_DIR: ${EMBED_MODEL_DIR:-/opt/models/chinese-clip}
+      # 语义召回余弦距离上限。**留空即按模型族自动取值**
+      # （chinese-clip→0.63 / clip→0.78，实测标定）；如需微调再显式设置。
+      EMBED_SEMANTIC_MAX_DIST: ${EMBED_SEMANTIC_MAX_DIST:-}
     volumes:
       - mediadata:/data
       - tilecache:/tile-cache

@@ -46,15 +46,40 @@ func ParseDevice(s string) DeviceKind {
 	}
 }
 
+// ModelFamily 模型族：决定 tokenizer、ONNX 文件名/输入签名、预处理与文本长度。
+//
+//	clip         : OpenAI CLIP ViT-B/32（BPE 分词；最短边缩放 + 中心裁剪）
+//	chinese-clip : Chinese-CLIP ViT-B/16（BERT WordPiece；直接缩放 224，不裁剪）
+//
+// 两者投影维度均为 512，共用 media.embedding 列与余弦索引；
+// 但**向量空间不同，不可混用**——换族必须整体重算 embedding。
+type ModelFamily string
+
+const (
+	FamilyCLIP        ModelFamily = "clip"
+	FamilyChineseCLIP ModelFamily = "chinese-clip"
+)
+
+// ParseFamily 解析模型族配置（大小写不敏感），未知值回落 clip。
+func ParseFamily(s string) ModelFamily {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "chinese-clip", "chineseclip", "zh":
+		return FamilyChineseCLIP
+	default:
+		return FamilyCLIP
+	}
+}
+
 // Config 编码器配置。
 //
 // 关于 GPU / CPU 双接口：Device 决定执行提供器，二者共用同一套模型与代码路径，
 // 差异仅在 ONNX Runtime 的 Execution Provider 装配上。开发机不具备某项能力
 // （例如无 CUDA 运行时）不影响部署环境启用的可能，故此处不因环境裁剪接口。
 type Config struct {
-	ModelDir string     // 含 *.onnx 与 tokenizer.json 的目录
-	LibPath  string     // libonnxruntime 路径；空则按平台名走系统搜索
-	Device   DeviceKind // cpu | cuda | auto（空 = auto）
+	ModelDir string      // 含 *.onnx 与 tokenizer.json 的目录
+	LibPath  string      // libonnxruntime 路径；空则按平台名走系统搜索
+	Device   DeviceKind  // cpu | cuda | auto（空 = auto）
+	Family   ModelFamily // clip | chinese-clip（空 = clip）
 
 	DeviceID     int // CUDA 设备序号（默认 0）
 	IntraThreads int // CPU 算子内并行线程数（0 = 交给 ORT 默认）
@@ -77,6 +102,7 @@ func ConfigFromEnv() Config {
 		ModelDir: ModelDirFromEnv(),
 		LibPath:  os.Getenv("EMBED_LIB"),
 		Device:   ParseDevice(os.Getenv("EMBED_DEVICE")),
+		Family:   ParseFamily(os.Getenv("EMBED_FAMILY")),
 	}
 	if v, err := strconv.Atoi(os.Getenv("EMBED_DEVICE_ID")); err == nil {
 		c.DeviceID = v

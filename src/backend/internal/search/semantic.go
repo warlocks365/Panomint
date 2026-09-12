@@ -20,25 +20,35 @@ import (
 
 // 语义召回的余弦距离上限（距离越小越相似）；超过该值视为不相关，不并入候选集。
 //
-// 取值由真实数据标定（Job000010 验证，库内 72 条媒体、CLIP ViT-B/32 量化版）：
-//   - 明确命中的样本距离落在 0.70~0.75（如 "aurora in the night sky" → 极光-夜空 0.7026）
-//   - 无关样本密集分布在 0.77~0.85
-//   - 故 0.85 过宽（几乎注入全库），0.80 能在保留相关项的同时显著抑制噪声
+// 语义召回的余弦距离上限（距离越小越相似）；超过该值视为不相关，不并入候选集。
+//
+// ⚠️ 该值与**模型族强相关**，必须按族标定（两族的距离尺度不同）：
+//
+//	chinese-clip（中文，ViT-B/16）：相关命中 0.55~0.60，全库分布 0.55~0.71
+//	  → 0.63 兼顾召回与抑制噪声（实测 "极光"→极光-夜空 0.5487、"夜景天际线"→帝国大厦-夜景 0.5931）
+//	clip（英文，ViT-B/32）：相关命中 0.70~0.78，全库分布 0.70~0.85
+//	  → 0.78（实测 "aurora"→极光-夜空 0.7026、"city skyline at night"→帝国大厦-夜景 0.7429）
 //
 // 可用环境变量 EMBED_SEMANTIC_MAX_DIST 覆盖（便于按实际库内容调优，无需重新编译）。
-const defaultSemanticThreshold = 0.80
+const (
+	defaultThresholdChineseCLIP = 0.63
+	defaultThresholdCLIP        = 0.78
+)
 
-// semanticThreshold 解析阈值（0.30~1.00 之间的合法值才接受）。
-func semanticThreshold() float64 {
-	v := strings.TrimSpace(os.Getenv("EMBED_SEMANTIC_MAX_DIST"))
-	if v == "" {
-		return defaultSemanticThreshold
+// threshold 解析阈值：显式配置 > 环境变量 > 按模型族默认值。
+func (r *VectorRecaller) threshold() float64 {
+	if r.MaxDist > 0 {
+		return r.MaxDist
 	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f <= 0.30 || f > 1.0 {
-		return defaultSemanticThreshold
+	if v := strings.TrimSpace(os.Getenv("EMBED_SEMANTIC_MAX_DIST")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0.30 && f <= 1.0 {
+			return f
+		}
 	}
-	return f
+	if r.Enc != nil && r.Enc.Family() == embed.FamilyChineseCLIP {
+		return defaultThresholdChineseCLIP
+	}
+	return defaultThresholdCLIP
 }
 
 // VectorRecaller 基于 CLIP + pgvector 的语义召回实现。
@@ -82,10 +92,7 @@ func (r *VectorRecaller) Recall(ctx context.Context, p SearchParams) ([]RecallHi
 		return nil, nil
 	}
 
-	maxDist := r.MaxDist
-	if maxDist <= 0 {
-		maxDist = semanticThreshold()
-	}
+	maxDist := r.threshold()
 
 	out := make([]RecallHit, 0, len(hits))
 	for _, h := range hits {

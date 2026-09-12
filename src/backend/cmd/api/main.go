@@ -178,9 +178,9 @@ func main() {
 	authed.GET("/geo/clusters", permRead, geoH.Clusters)
 	authed.GET("/geo/items", permRead, geoH.Items)
 	authed.GET("/geo/histogram", permRead, geoH.Histogram)
-	authed.GET("/geo/places", permRead, geoH.Places) // Job000009 优化：地理位置罗列
+	authed.GET("/geo/places", permRead, geoH.Places)               // Job000009 优化：地理位置罗列
 	authed.GET("/tiles/amap/:z/:x/:y", permRead, geoH.Tiles.Serve) // Key 服务端注入，前端不持 Key
-	authed.GET("/preferences/map", permRead, geoH.GetMapIconPref)    // Job000009 图标配置（账户级）
+	authed.GET("/preferences/map", permRead, geoH.GetMapIconPref)  // Job000009 图标配置（账户级）
 	authed.PUT("/preferences/map", permRead, geoH.PutMapIconPref)
 
 	// Stage 2 公开端点（无鉴权，token 即凭证；不提供原文件下载）
@@ -240,11 +240,15 @@ func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) search.Recaller {
 	}
 	logger.Info("语义召回已启用",
 		zap.String("model_dir", cfg.ModelDir),
+		zap.String("family", string(enc.Family())),
 		zap.String("provider", enc.Provider()),
-		zap.String("device", string(enc.Device())))
+		zap.String("device", string(enc.Device())),
+		zap.Int("context_len", enc.ContextLen()))
 	return &search.VectorRecaller{
 		Enc:   enc,
 		Store: &embed.Store{Pool: pool},
-		TopK:  50,
+		// TopK 同时是语义注入的上限：过大会让 total 被无关项撑高
+		// （实测 72 条库上取 50 + 阈值 0.80 时 total 常达 30~50）。
+		TopK: 25,
 	}
 }
