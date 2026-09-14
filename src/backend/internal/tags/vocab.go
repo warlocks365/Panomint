@@ -29,7 +29,7 @@ type Vocab struct {
 	Classes []Class
 }
 
-// DefaultVocab 返回内置中文标签种子词表（114 个，分三类 + 互斥分组）。
+// DefaultVocab 返回内置中文标签种子词表（108 个，分三类 + 互斥分组）。
 //
 // 互斥组说明（Group 非空 = 同组只保留相似度最高者）：
 //
@@ -41,7 +41,28 @@ type Vocab struct {
 //	交通   汽车/火车/飞机/船/自行车/摩托车/公交车
 //	人物   人像/合影/儿童/老人
 //	食饮   美食/咖啡/蛋糕/水果
-//	地貌   城市/乡村/山地/森林/湖/海滩/沙漠/草原/雪原/冰川/河流
+//	地貌   城市/乡村/山地/森林/湖/海滩/沙漠/草原/雪原/雪山/河流
+//
+// 词表治理记录（114 → 108）：依据是**逐张打开图片目视核对**的实测准确率（准确率 = 判「确实有该事物」/ 核对张数），
+// 不是相似度阈值推断。删除 6 个低精度标签（准确率 ≤29%），改名 3 个「名实不符」的标签：
+//
+//	彩虹   0/12   12 张全是彩条/渐变合成测试图，无一真实彩虹。
+//	旗帜   0/14   合成图 ×10、足球场俯拍、林肯肖像、南北战争士兵照，均非旗帜。
+//	霓虹灯 0/10   合成图 ×7、会安夜市灯串、帝国大厦夜景、锈蚀老爷车；模型把「夜景灯光」当霓虹。
+//	展览   1/11   人群、街景、瀑布、肖像、天际线；唯一命中是店铺陈列内景。
+//	潜水   0/2    海浪特写、栈道俯拍。
+//	天际线 2/7    误命中集中在人群密集图（游行、矿山/栈桥人群）；真命中仅曼哈顿、巴黎。
+//
+// 一个 10 次里有 7 次错的标签对用户是负价值，故整条删除而非调阈值：
+//
+//	冰川 → 雪山   EN glacier → snow mountain
+//	      被误标「冰川」的 3 张画面里确实有雪山（极光+雪山、雪山湖泊倒影），改名为「雪山」后 0% → 准确。
+//	云海 → 云雾   EN sea of clouds → mist
+//	      存疑样本实质是「山间云雾/浓雾」，「云海」这个说法过窄。
+//	冲浪 → 海浪   EN surfing → ocean waves
+//	      命中样本全是**海浪**特写，模型从不识别冲浪者，改名后才与模型实际能识别的东西对齐。
+//
+// ⚠️ Label 是落库名：删除/改名会让同名旧标签成为无引用的孤儿行，需在部署后清理（见发布说明）。
 //
 // 词表治理记录（118 → 114）：删除项均为**非画面语义**或**同义重复**，不是画面概念，删掉只减误命中：
 //
@@ -72,8 +93,6 @@ func DefaultVocab() *Vocab {
 			{Label: "雨天", EN: "rain", Group: "天气"},
 			{Label: "雪天", EN: "snowfall", Group: "天气"},
 			{Label: "雾天", EN: "fog", Group: "天气"},
-			// 彩虹是光学现象，与晴天/多云可同时存在，故不设互斥组（否则会抢走正确天气标签的槽位）。
-			{Label: "彩虹", EN: "rainbow", Group: ""},
 			{Label: "春天", EN: "spring season", Group: "季节"},
 			{Label: "夏天", EN: "summer season", Group: "季节"},
 			{Label: "秋天", EN: "autumn season", Group: "季节"},
@@ -81,7 +100,7 @@ func DefaultVocab() *Vocab {
 			{Label: "室内", EN: "indoor scene", Group: "室内外"},
 			{Label: "室外", EN: "outdoor scene", Group: "室内外"},
 			{Label: "天空", EN: "sky", Group: ""},
-			{Label: "云海", EN: "sea of clouds", Group: ""},
+			{Label: "云雾", EN: "mist", Group: ""},
 			{Label: "星空", EN: "starry night sky", Group: ""},
 			{Label: "极光", EN: "aurora", Group: ""},
 			{Label: "城市", EN: "city", Group: "地貌"},
@@ -93,14 +112,13 @@ func DefaultVocab() *Vocab {
 			{Label: "沙漠", EN: "desert", Group: "地貌"},
 			{Label: "草原", EN: "grassland", Group: "地貌"},
 			{Label: "雪原", EN: "snowfield", Group: "地貌"},
-			{Label: "冰川", EN: "glacier", Group: "地貌"},
+			{Label: "雪山", EN: "snow mountain", Group: "地貌"},
 			{Label: "河流", EN: "river", Group: "地貌"},
 			{Label: "瀑布", EN: "waterfall", Group: ""},
 			{Label: "峡谷", EN: "canyon", Group: ""},
 			{Label: "田野", EN: "farm field", Group: ""},
 			{Label: "花园", EN: "garden", Group: ""},
 			{Label: "街景", EN: "street scene", Group: ""},
-			{Label: "天际线", EN: "city skyline", Group: ""},
 			{Label: "建筑", EN: "architecture", Group: ""},
 			{Label: "古镇", EN: "old town", Group: ""},
 			{Label: "寺庙", EN: "temple", Group: ""},
@@ -149,7 +167,6 @@ func DefaultVocab() *Vocab {
 			{Label: "吉他", EN: "guitar", Group: ""},
 			{Label: "帐篷", EN: "tent", Group: ""},
 			{Label: "篝火", EN: "campfire", Group: ""},
-			{Label: "旗帜", EN: "flag", Group: ""},
 			{Label: "灯笼", EN: "lantern", Group: ""},
 			{Label: "礼物", EN: "gift", Group: ""},
 			{Label: "气球", EN: "balloon", Group: ""},
@@ -157,7 +174,6 @@ func DefaultVocab() *Vocab {
 			{Label: "楼梯", EN: "staircase", Group: ""},
 			{Label: "喷泉", EN: "fountain", Group: ""},
 			{Label: "摩天轮", EN: "ferris wheel", Group: ""},
-			{Label: "霓虹灯", EN: "neon lights", Group: ""},
 			{Label: "路牌", EN: "street sign", Group: ""},
 		}},
 		{Name: "事件", Tags: []TagDef{
@@ -166,7 +182,6 @@ func DefaultVocab() *Vocab {
 			{Label: "聚会", EN: "party gathering", Group: ""},
 			{Label: "毕业", EN: "graduation", Group: ""},
 			{Label: "音乐会", EN: "concert", Group: ""},
-			{Label: "展览", EN: "art exhibition", Group: ""},
 			{Label: "运动", EN: "sports", Group: ""},
 			{Label: "登山", EN: "hiking", Group: ""},
 			{Label: "露营", EN: "camping", Group: ""},
@@ -175,8 +190,7 @@ func DefaultVocab() *Vocab {
 			{Label: "会议", EN: "meeting", Group: ""},
 			{Label: "演出", EN: "stage performance", Group: ""},
 			{Label: "滑雪", EN: "skiing", Group: ""},
-			{Label: "冲浪", EN: "surfing", Group: ""},
-			{Label: "潜水", EN: "diving", Group: ""},
+			{Label: "海浪", EN: "ocean waves", Group: ""},
 			{Label: "垂钓", EN: "fishing", Group: ""},
 			{Label: "骑行", EN: "cycling", Group: ""},
 			{Label: "节日", EN: "festival", Group: ""},
