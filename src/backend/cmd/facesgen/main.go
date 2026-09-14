@@ -67,7 +67,7 @@ func main() {
 	var o options
 	flag.StringVar(&o.mode, "mode", "status", "probe|status|scan|watch")
 	flag.IntVar(&o.limit, "limit", 200, "scan 模式最多处理条数")
-	flag.BoolVar(&o.force, "force", false, "scan 模式重算已扫描过的媒体")
+	flag.BoolVar(&o.force, "force", false, "scan 模式忽略扫描标记、重算全部媒体（单张媒体是否重扫不影响幂等：无 force 也是整体替换）")
 	flag.StringVar(&o.modelDir, "modeldir", "", "人脸模型目录（YuNet + SFace）")
 	flag.StringVar(&o.lib, "lib", "", "onnxruntime 原生库路径")
 	flag.StringVar(&o.thumbDir, "thumbdir", "", "缩略图目录")
@@ -218,7 +218,7 @@ func runScan(ctx context.Context, opts faces.Options, thumbDir string, limit int
 	ok, fail, faceTotal, newClusters := 0, 0, 0, 0
 	start := time.Now()
 	for i, m := range list {
-		n, nc, err := scanOne(ctx, opts, det, rec, thumbDir, m, force)
+		n, nc, err := scanOne(ctx, opts, det, rec, thumbDir, m)
 		if err != nil {
 			fail++
 			log.Printf("[%d/%d] %s 扫描失败: %v", i+1, len(list), m.Filename, err)
@@ -238,10 +238,29 @@ func runScan(ctx context.Context, opts faces.Options, thumbDir string, limit int
 
 // scanOne 处理单个媒体：检测 → 逐脸对齐/特征/聚类/入库 → 回填扫描标记。
 //
+// **幂等（本函数的核心契约）**：写入前**无条件**删除该媒体已入库的 faces 行，
+// 即「某媒体的人脸 = 该媒体最新一次检出的完整替换」，而不是追加。
+//
+// 为什么必须无条件删：POST /ai/faces 只是把 media.faces_scanned_at 复位为 NULL
+// （见 faces.Store.ResetScanned），让该媒体重新进入待扫队列；若此时不删旧行，
+// 同一张脸会被再插一次 —— 实测一次 scope=all 就让人脸数从 56 涨到 67。
+// 也就是说「复位标记」与「重扫幂等」必须成对存在，缺一就会重复累积。
+// （曾有的写法是只在 -force 下删，导致 -scan/-watch 走的非 force 分支会堆积。）
+//
+// **用户命名不丢**：删除前先读出旧脸，用框重叠（IoU ≥ faces.MatchMinIoU）把
+// faces.person_id / is_pet 迁移到新检出上——重扫只刷新几何与特征，不牺牲命名劳动。
+// 已命名的人脸**连同其簇 ID 一起保留**：用户既然认可了这条聚类，重扫就不该把它拆散
+// （增量聚类对扫描上下文敏感，实测同一批 embedding 在不同上下文下簇划分可差 ±2~3；
+// 若连簇一起重算，已命名的人会被拆到不同簇，甚至混进未命名簇被后续命名覆盖）。
+// 未命名人脸一律重算簇——这正是「重扫=按最新模型/参数重新聚类」的意义所在。
+//
+// **不拿失败换数据**：特征提取在删除旧行**之前**全部算完；若检出到人脸却一张特征都
+// 没算出来（ORT 会话级失败），直接报错返回、保留旧数据且不回填标记，留待下轮重试。
+//
 // 返回 (人脸数, 新建聚类数, error)。**只有成功走完全流程才回填 faces_scanned_at**——
-// 失败项留待下一轮清扫自动重试。
+// 失败项留待下一轮清扫自动重试（重试时会再次整体替换，故中途失败也不会产生半份残留）。
 func scanOne(ctx context.Context, opts faces.Options, det *faces.Detector, rec *faces.Recognizer,
-	thumbDir string, m faces.MediaItem, force bool) (int, int, error) {
+	thumbDir string, m faces.MediaItem) (int, int, error) {
 
 	path := filepath.Join(thumbDir, filepath.Base(m.ThumbLG))
 	img, err := faces.DecodeImage(path)
@@ -253,35 +272,71 @@ func scanOne(ctx context.Context, opts faces.Options, det *faces.Detector, rec *
 		return 0, 0, err
 	}
 
-	// 重算：先清掉该媒体旧人脸，避免残留过期框（非 force 时 faces_scanned_at IS NULL 已保证无旧数据）
-	if force {
-		if err := opts.Store.DeleteFacesByMedia(ctx, m.ID); err != nil {
-			return 0, 0, fmt.Errorf("清理旧人脸失败: %w", err)
-		}
+	// 旧脸必须在删除前读出：删掉之后就再也找不回用户的命名关联了。
+	olds, err := opts.Store.FacesByMedia(ctx, m.ID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("读取旧人脸失败: %w", err)
 	}
 
-	newClusters := 0
-	saved := 0
-	for _, d := range dets {
+	// 先把全部特征算完再动数据库。EmbedFace 的失败是**会话级**的（ORT 推理出错时
+	// 本媒体每张脸都会失败），若先删后算，一次整体失败就会把该媒体已入库的人脸
+	// 连同用户命名一起清空，还会因回填标记而永不重试。
+	embs := make([][]float32, len(dets))
+	embedded := 0
+	for i, d := range dets {
 		emb, err := rec.EmbedFace(img, d.Landmarks)
 		if err != nil {
 			log.Printf("  %s 人脸特征失败（跳过该脸）: %v", m.Filename, err)
 			continue
 		}
-		// 与已有簇质心比较：命中则归入，否则新建簇（增量聚类）。
-		// NearestClusters 会排除「本媒体已有脸所属的簇」，保证同媒体内最多一张脸进同一簇。
-		refs, err := opts.Store.NearestClusters(ctx, m.ID, emb, 5)
-		if err != nil {
-			return saved, newClusters, fmt.Errorf("查询相似簇失败: %w", err)
+		embs[i] = emb
+		embedded++
+	}
+	// 检出有脸却一张特征都没算出来 = 本轮整体失败：保留旧数据、不回填扫描标记，
+	// 让下一轮清扫重试。（注意区分「本就不该有脸」：dets 为空时正常清空并回填。）
+	if len(dets) > 0 && embedded == 0 {
+		return 0, 0, fmt.Errorf("%d 张检出人脸全部特征提取失败，保留旧数据待下轮重试", len(dets))
+	}
+
+	if err := opts.Store.DeleteFacesByMedia(ctx, m.ID); err != nil {
+		return 0, 0, fmt.Errorf("清理旧人脸失败: %w", err)
+	}
+
+	newClusters := 0
+	saved := 0
+	for i, d := range dets {
+		emb := embs[i]
+		if emb == nil {
+			continue // 本张脸特征提取失败：连同行一起丢弃（旧行已在上一步删除）
 		}
-		clusterID, sim := faces.PickCluster(emb, refs, opts.MergeSim)
-		if clusterID == "" {
-			clusterID = faces.NewClusterID()
-			newClusters++
-			// 打印最近相似度，便于按自有语料标定 FACE_MERGE_SIM
-			log.Printf("  %s 新建聚类 %s（最近簇相似度 %.3f）", m.Filename, clusterID, sim)
+		// 命名迁移：同一张脸重扫前后框几乎重合，取重叠度最高的旧脸即可；
+		// 旧脸未命中或旧脸本身未命名时 personID 为空串，等价于不迁移。
+		old, matched := faces.BestFaceMatch(olds, d)
+		personID, isPet := "", false
+		if matched {
+			personID, isPet = old.PersonID, old.IsPet
 		}
-		if err := opts.Store.SaveFace(ctx, m.ID, d, emb, clusterID); err != nil {
+
+		clusterID := ""
+		if personID != "" && old.ClusterID != "" {
+			clusterID = old.ClusterID // 已命名：簇与命名一起保留，见函数注释
+		} else {
+			// 与已有簇质心比较：命中则归入，否则新建簇（增量聚类）。
+			// NearestClusters 会排除「本媒体已有脸所属的簇」，保证同媒体内最多一张脸进同一簇。
+			refs, err := opts.Store.NearestClusters(ctx, m.ID, emb, 5)
+			if err != nil {
+				return saved, newClusters, fmt.Errorf("查询相似簇失败: %w", err)
+			}
+			var sim float64
+			clusterID, sim = faces.PickCluster(emb, refs, opts.MergeSim)
+			if clusterID == "" {
+				clusterID = faces.NewClusterID()
+				newClusters++
+				// 打印最近相似度，便于按自有语料标定 FACE_MERGE_SIM
+				log.Printf("  %s 新建聚类 %s（最近簇相似度 %.3f）", m.Filename, clusterID, sim)
+			}
+		}
+		if err := opts.Store.SaveFace(ctx, m.ID, d, emb, clusterID, personID, isPet); err != nil {
 			return saved, newClusters, fmt.Errorf("写入人脸失败: %w", err)
 		}
 		saved++
@@ -335,7 +390,7 @@ func sweepOnce(ctx context.Context, opts faces.Options, det *faces.Detector, rec
 	log.Printf("发现 %d 条待扫描媒体", len(list))
 	ok, fail, faceTotal := 0, 0, 0
 	for i, m := range list {
-		n, _, err := scanOne(ctx, opts, det, rec, thumbDir, m, false)
+		n, _, err := scanOne(ctx, opts, det, rec, thumbDir, m)
 		if err != nil {
 			fail++
 			log.Printf("[%d/%d] %s 扫描失败: %v", i+1, len(list), m.Filename, err)

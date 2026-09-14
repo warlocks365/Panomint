@@ -99,6 +99,8 @@ func (h *Handler) Rate(c *gin.Context) {
 
 // Patch PATCH /media/:id {notes?, edits?}
 // Job000005：仅允许更新 notes / edits 字段，其他字段拒收 400。
+// 注意语义差异：PATCH 的 edits 是**整体提交**（整对象替换；显式 null 即清空），
+// 不做 MergeRotateEdit/MergeCropEdit 的单维度合并——前端整体提交契约不变。
 func (h *Handler) Patch(c *gin.Context) {
 	var req struct {
 		Notes *string         `json:"notes"`
@@ -158,6 +160,13 @@ func (h *Handler) Patch(c *gin.Context) {
 }
 
 // Rotate POST /media/:id/rotate {op:"rotate|crop|auto", angle?, rect?}（契约 §3，非破坏 sidecar）
+//
+// Phase 4 修复：rotate/crop 改为「读-改-写」合并语义——原实现是整对象覆盖，
+// 先 PATCH 写入 {rotate,crop} 后再 POST op=rotate 会抹掉 crop，再 POST op=crop 会把 rotate 重置为 0。
+// op:"auto" 维持「清空编辑参数」的既有语义（本实现不含自动增强算法，原文件始终不变）。
+//
+// 注意：PATCH /media/:id 走的是整体提交（"{edits:{...}}" 或显式 null 清空），
+// 语义与这里不同，源码见下方 Patch，未做改动。
 func (h *Handler) Rotate(c *gin.Context) {
 	id := c.Param("id")
 	if _, ok := h.checkAccess(c, id); !ok {
@@ -173,7 +182,8 @@ func (h *Handler) Rotate(c *gin.Context) {
 		return
 	}
 
-	var edits *Edits
+	// 1) 入参校验（不触库，先失败先返回）
+	var crop *CropRect
 	switch req.Op {
 	case "rotate":
 		switch req.Angle {
@@ -182,7 +192,6 @@ func (h *Handler) Rotate(c *gin.Context) {
 			errResp(c, http.StatusBadRequest, "BAD_REQUEST", "angle 需为 90/180/270")
 			return
 		}
-		edits = &Edits{Rotate: req.Angle}
 	case "crop":
 		if req.Rect == nil {
 			errResp(c, http.StatusBadRequest, "BAD_REQUEST", "缺少 rect")
@@ -194,15 +203,36 @@ func (h *Handler) Rotate(c *gin.Context) {
 			errResp(c, http.StatusBadRequest, "BAD_REQUEST", "rect 需为归一化 {x,y,w,h} 且不越界")
 			return
 		}
-		edits = e
+		crop = e.Crop
 	case "auto":
-		// 本实现不含自动增强算法：按"重置编辑参数"处理（原文件始终不变）
-		edits = nil
+		// 无自动增强算法：按「重置编辑参数」处理（rotate 与 crop 一并清空）
 	default:
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "op 需为 rotate|crop|auto")
 		return
 	}
 
+	// 2) 读现有编辑参数
+	cur, err := h.Store.GetEdits(c.Request.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
+		return
+	} else if err != nil {
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		return
+	}
+
+	// 3) 合并：单维度 op 只改自己那一段，保留另一段
+	var edits *Edits
+	switch req.Op {
+	case "rotate":
+		edits = MergeRotateEdit(cur, req.Angle)
+	case "crop":
+		edits = MergeCropEdit(cur, crop)
+	case "auto":
+		edits = nil // 清空编辑参数
+	}
+
+	// 4) 落库
 	if err := h.Store.SetEdits(c.Request.Context(), id, edits); errors.Is(err, ErrNotFound) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
 		return

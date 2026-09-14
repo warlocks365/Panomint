@@ -3,8 +3,12 @@ package tags
 // 零样本分类（CLIP 文本塔 × 已缓存图像向量）：
 //
 //   - 启动时把词表逐标签编码为 512 维文本向量并缓存（一次成本，之后复用）；
+//     每个标签用**多提示词模板集成**编码（中/英两族各 5 条，逐条 L2 归一化后取平均再归一化），
+//     目的是抑制单一措辞带来的偏差，提升标签向量的语义指向性与相似度的区分度；
 //   - 对每张媒体直接用 **已存在的 media.embedding**（无需再跑视觉塔）算余弦相似度；
-//   - 阈值判定：sim ≥ max(绝对下限, top1 × TopRatio)，每图至多 MaxTags 个，同组只留最高。
+//   - 阈值判定：sim ≥ max(绝对下限, top1 × TopRatio)，每图至多 MaxTags 个，同组只留最高；
+//   - 可选的「入选门槛」MinTop1：top1 本身不达标时直接返回空结果，使
+//     「这张图不属于任何标签」成为合法结论（默认关闭，见 defaultMinTop1）。
 //
 // ⚠️ 绝对下限与**模型族强相关**（见 internal/search/semantic.go 的同类结论）：
 //
@@ -18,6 +22,7 @@ package tags
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -58,11 +63,25 @@ const defaultTopRatio = 0.88
 // 默认每图最多产出的 AI 标签数（防标签泛滥）。
 const defaultMaxTags = 3
 
+// 默认「入选门槛」（top1 绝对下限）：0 = 关闭。
+//
+// 动机：min_sim 与 top_ratio 都无法表达「这张图不属于任何标签」这一结论 ——
+// 当全库相似度分布被压缩时（chinese-clip 实测 top1 仅 0.395~0.464，跨度 0.069），
+// 相对判据 0.88 × top1 ≈ 0.38 低于绝对下限 0.40（等于不生效），而绝对下限 0.40
+// 又几乎人人可达，于是每张图都能凑满 3 个标签。MinTop1 直接约束 top1 本身：
+// 一旦 top1 不达标，该图返回空结果，「无标签」成为合法输出。
+//
+// ⚠️ 本轮**不启用**（保持 0，即现有生产行为不变）：门槛值必须在部署后用
+// `taggen -mode calibrate` 拿到**全量未过滤**的 top1 分布，标定后固化。
+// 凭现有 media_tags 里「已通过阈值」的样本回算会系统性高估，直接启用有整库饥饿风险。
+const defaultMinTop1 = 0
+
 // ClassifyConfig 阈值与上限配置（零值 = 使用族感知默认）。
 type ClassifyConfig struct {
 	MinSim   float64 // 绝对相似度下限；<=0 时按族默认/env
 	TopRatio float64 // 相对 top1 比例；<=0 时默认 0.88
 	MaxTags  int     // 每图上限；<=0 时默认 3
+	MinTop1  float64 // 入选门槛：top1 低于该值即判为「不属于任何标签」；<=0 时按 TAG_MIN_TOP1/env，默认 0（关闭）
 }
 
 // Suggestion 单条 AI 打标建议。
@@ -88,6 +107,7 @@ type Classifier struct {
 	minSim  float64
 	topR    float64
 	maxTags int
+	minTop1 float64 // 入选门槛（0 = 关闭）
 }
 
 // NewClassifier 用已初始化的文本塔编码词表并缓存；v 为 nil 时用 DefaultVocab()。
@@ -105,6 +125,7 @@ func NewClassifier(ctx context.Context, enc TextEncoder, v *Vocab, cfg ClassifyC
 		minSim:  resolveMinSim(cfg.MinSim, fam),
 		topR:    resolveTopRatio(cfg.TopRatio),
 		maxTags: resolveMaxTags(cfg.MaxTags),
+		minTop1: resolveMinTop1(cfg.MinTop1),
 	}
 	if enc == nil {
 		return c, nil // 无编码器：仅用于启发式路径/测试
@@ -121,43 +142,102 @@ func NewClassifier(ctx context.Context, enc TextEncoder, v *Vocab, cfg ClassifyC
 	return c, nil
 }
 
-// encodeLabel 按族构造提示词并编码：多提示词取平均后 L2 归一化（稳健性更好）。
-func encodeLabel(ctx context.Context, enc TextEncoder, fam embed.ModelFamily, td TagDef) ([]float32, error) {
-	var prompts []string
+// chineseCLIPTemplates 中文族提示词模板（%s = 中文标签名）。
+//
+// 多模板集成依据：CLIP 文本塔对措辞高度敏感，单一模板会把某个句式的偏差固化进标签向量。
+// 用多条语义等价、指向同一概念的句式分别编码，可以看成在文本嵌入空间里对该概念做
+// 「多视角采样」，天然抑制单个措辞的噪声方向，从而让标签向量更贴近概念本身。
+// 原实现只有 2 条（「一张{标签}的照片」+ 裸标签），其中裸标签过于抽象，是误命中的主要来源；
+// 扩到 5 条后裸标签权重从 1/2 降到 1/5，抽象标签的误命中被显著稀释。
+var chineseCLIPTemplates = []string{
+	"一张关于%s的照片",
+	"%s的照片",
+	"画面中有%s",
+	"这是一张%s的照片",
+	"%s",
+}
+
+// clipCLIPTemplates 英文族提示词模板（%s = 英文名），与中文族一一对应。
+var clipCLIPTemplates = []string{
+	"a photo of %s",
+	"a photo about %s",
+	"a picture of %s",
+	"this is a photo of %s",
+	"%s",
+}
+
+// labelPrompts 按模型族把标签展开为提示词列表（顺序固定，便于测试与复现）。
+//
+// 两族模板**不得交叉**：chinese-clip 的文本塔不认英文提示词，clip 的文本塔不认中文，
+// 混用会让该标签的向量彻底失去意义。英文名为空时回退中文标签（词表自洽性由单测守住，
+// 正常不应发生；真发生了说明词表缺 EN，应修词表而不是在这里兜底）。
+func labelPrompts(td TagDef, fam embed.ModelFamily) []string {
+	var tmpls []string
+	name := td.Label
 	if fam == embed.FamilyCLIP {
-		en := td.EN
-		if en == "" {
-			en = td.Label
+		tmpls = clipCLIPTemplates
+		if td.EN != "" {
+			name = td.EN
 		}
-		prompts = []string{"a photo of " + en, en}
 	} else {
-		prompts = []string{"一张" + td.Label + "的照片", td.Label}
+		tmpls = chineseCLIPTemplates
 	}
-	sum := make([]float32, 0, embed.EmbeddingDim)
-	for i, p := range prompts {
+	out := make([]string, 0, len(tmpls))
+	for _, tmpl := range tmpls {
+		out = append(out, fmt.Sprintf(tmpl, name))
+	}
+	return out
+}
+
+// encodeLabel 把一个标签编码为文本向量：**每条提示词先独立 L2 归一化**，再取平均，
+// 最后整体 L2 归一化。
+//
+// 为什么必须先逐条归一化：不同模板编码出的向量模长并不一致（取决于文本塔原始输出），
+// 先求和再归一化会让模长大的模板支配平均值，多模板集成就退化回单模板。
+// 归一化后取平均 = 各模板在单位球面上的质心方向，语义指向更稳定。
+func encodeLabel(ctx context.Context, enc TextEncoder, fam embed.ModelFamily, td TagDef) ([]float32, error) {
+	prompts := labelPrompts(td, fam)
+	var sum []float32
+	n := 0
+	for _, p := range prompts {
 		v, err := enc.EncodeText(ctx, p)
 		if err != nil {
 			return nil, err
 		}
-		if i == 0 {
-			sum = append(sum, v...)
+		if len(v) == 0 {
 			continue
 		}
-		for j := range sum {
-			if j < len(v) {
-				sum[j] += v[j]
-			}
+		if sum == nil {
+			sum = make([]float32, len(v))
 		}
+		if len(v) != len(sum) {
+			continue // 维度不一致的模板跳过（正常不会发生）
+		}
+		u := embed.L2Normalize(append([]float32(nil), v...)) // 拷贝后再归一化，避免污染调用方数据
+		for j := range sum {
+			sum[j] += u[j]
+		}
+		n++
 	}
-	n := float32(len(prompts))
+	if n == 0 {
+		// 与改动前一致的失败行为：无可编码模板时不报错，该标签因维度不符在 Suggest 中被跳过。
+		return nil, nil
+	}
 	for i := range sum {
-		sum[i] /= n
+		sum[i] /= float32(n)
 	}
 	return embed.L2Normalize(sum), nil
 }
 
 // Suggest 对一张媒体的图像向量产出建议（不落库）。
 // vec 为 media.embedding（已 L2 归一化）；为空或维度不符时返回 nil。
+//
+// 判决顺序：
+//  1. 入选门槛 minTop1：top1 不达标 → 直接返回空（「这张图不属于任何标签」）；
+//  2. 计算统一 floor = max(min_sim 绝对下限, top_ratio × top1 相对下限)；
+//  3. 按分数降序扫描：低于 floor 即 break（后续只会更低）；
+//  4. 同组互斥（Group 非空时只保留该组首个 = 最高分者）；
+//  5. 累计到 max_tags 即停。
 func (c *Classifier) Suggest(vec []float32) []Suggestion {
 	if c == nil || len(vec) == 0 || len(c.labels) == 0 {
 		return nil
@@ -180,6 +260,15 @@ func (c *Classifier) Suggest(vec []float32) []Suggestion {
 	sort.SliceStable(scored, func(i, j int) bool { return scored[i].Confidence > scored[j].Confidence })
 
 	top1 := scored[0].Confidence
+
+	// 入选门槛：top1 本身不达标 → 判为「这张图不属于任何标签」。
+	// 这是唯一能让「无标签」自然发生的判据：绝对下限/相对下限都是在**已入选**的候选里
+	// 做取舍，只要 top1 越过下限就必然产出至少 1 个标签。
+	// 默认 0（关闭），保持既有生产行为；启用后需重新标定 min_sim / top_ratio。
+	if c.minTop1 > 0 && top1 < c.minTop1 {
+		return nil
+	}
+
 	floor := c.minSim
 	if r := top1 * c.topR; r > floor {
 		floor = r
@@ -227,6 +316,7 @@ func (c *Classifier) AllScores(vec []float32) []Suggestion {
 }
 
 // WithThresholds 以相同标签向量派生一个不同阈值的分类器（标定扫描用，不重新编码）。
+// 入选门槛 minTop1 原样保留（结构体拷贝），避免标定扫描时静默改变判决行为。
 func (c *Classifier) WithThresholds(minSim, topRatio float64, maxTags int) *Classifier {
 	if c == nil {
 		return nil
@@ -260,6 +350,15 @@ func (c *Classifier) Family() embed.ModelFamily {
 		return ""
 	}
 	return c.family
+}
+
+// MinTop1 返回生效的入选门槛（0 = 关闭）。
+// 独立 getter：Params() 的签名被 cmd/taggen 依赖，不扩参以免影响调用方。
+func (c *Classifier) MinTop1() float64 {
+	if c == nil {
+		return 0
+	}
+	return c.minTop1
 }
 
 func resolveMinSim(v float64, fam embed.ModelFamily) float64 {
@@ -299,4 +398,18 @@ func resolveMaxTags(v int) int {
 		}
 	}
 	return defaultMaxTags
+}
+
+// resolveMinTop1 解析入选门槛：显式值优先 → TAG_MIN_TOP1 环境变量 → 默认 0（关闭）。
+// 环境变量取值需落在 (0.05, 1.0]，与 resolveMinSim 的合法性区间保持一致。
+func resolveMinTop1(v float64) float64 {
+	if v > 0 {
+		return v
+	}
+	if s := strings.TrimSpace(os.Getenv("TAG_MIN_TOP1")); s != "" {
+		if f, err := strconv.ParseFloat(s, 64); err == nil && f > 0.05 && f <= 1.0 {
+			return f
+		}
+	}
+	return defaultMinTop1
 }

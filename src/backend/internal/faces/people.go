@@ -247,6 +247,17 @@ func (s *Store) PersonMedia(ctx context.Context, personID string, limit int) ([]
 // （见 facesgen -mode watch），这里不做入队，而是复位标记——等价且不会产生
 // 「队列消费者不认识的消息类型」问题。
 //
+// **本函数只复位标记，不删 faces 行——这是刻意的**：
+//   - 替换旧人脸是**扫描方**的职责，scanOne 已经是「先删后整体重写」的幂等操作
+//     （见 cmd/facesgen/main.go）。若这里也删一次，等于把同一件事做两遍。
+//   - 复位是**可逆**的（下一轮清扫会把数据算回来），删除是**不可逆**的。若在此处删，
+//     一旦 faces-worker 未在运行或模型加载失败，用户会立刻看到人脸全空且长期不恢复；
+//     而只复位标记时，读接口在整个窗口期内仍返回上一轮结果，不会出现"空档"。
+//   - 只在这里删也修不掉重复累积：重复的根因是插入方没有先删，删在触发方不改变插入语义。
+//
+// 返回值 = 被复位的**媒体条数**（scope=all 时为"有 LG 缩略图且未删除"的媒体数），
+// 注意它既不是人脸数、也不是本次重扫会产出的人脸数（见 api.go TriggerScan 的字段命名说明）。
+//
 // mediaID 为空或 "all" 表示全量。
 func (s *Store) ResetScanned(ctx context.Context, mediaID string) (int64, error) {
 	mediaID = strings.TrimSpace(mediaID)

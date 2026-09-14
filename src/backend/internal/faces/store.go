@@ -6,7 +6,11 @@ package faces
 //   faces.embedding  VECTOR(128)（SFace 输出维度），索引 idx_faces_embedding 为 HNSW + vector_cosine_ops
 //   faces.bbox       BOX        人脸框
 //   faces.cluster_id VARCHAR    临时聚类 ID（用户命名后落 people 行并回填 person_id）
+//   faces.person_id  UUID       用户命名的人物（非空=已命名）；重扫时按框重叠迁移，见 match.go
 //   media.faces_scanned_at TIMESTAMPTZ  人脸扫描标记（非空=已扫过，即使 0 张脸）
+//
+// 写入约定：某媒体的人脸是**整体替换**（先 DeleteFacesByMedia 再逐张 SaveFace），
+// 不做逐行 upsert——这样重扫天然幂等，不会因人脸重复插入而堆积。
 
 import (
 	"context"
@@ -80,8 +84,50 @@ func (s *Store) DeleteFacesByMedia(ctx context.Context, mediaID string) error {
 	return err
 }
 
+// FacesByMedia 列出某媒体已入库的人脸，供重扫时迁移用户命名关联（见 match.go）。
+//
+// 必须在 DeleteFacesByMedia **之前**调用：删除后这些行就再也读不回来了。
+//
+// bbox 是 Postgres 原生 box，写入时按 box(point(X,Y), point(X+W,Y+H)) 构造，
+// 故规范化后 (bbox)[1] 恒为左下角（X,Y）、(bbox)[0] 恒为右上角（X+W,Y+H）。
+// bbox 为 NULL 的行（理论上不该出现）用 COALESCE 退化成全 0 的零面积框，
+// 因而绝不可能与任何新检出匹配上（BoxIoU 返回 0）——即「宁可丢掉命名，也不张冠李戴」。
+func (s *Store) FacesByMedia(ctx context.Context, mediaID string) ([]FaceRef, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT COALESCE(person_id::text, ''),
+		       is_pet,
+		       COALESCE(cluster_id, ''),
+		       COALESCE(((bbox)[1])[0]::float8, 0),
+		       COALESCE(((bbox)[1])[1]::float8, 0),
+		       COALESCE(((bbox)[0])[0]::float8, 0),
+		       COALESCE(((bbox)[0])[1]::float8, 0)
+		FROM faces
+		WHERE media_id = $1::uuid`, mediaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []FaceRef{}
+	for rows.Next() {
+		var r FaceRef
+		var x2, y2 float64
+		if err := rows.Scan(&r.PersonID, &r.IsPet, &r.ClusterID, &r.X, &r.Y, &x2, &y2); err != nil {
+			return nil, err
+		}
+		r.W, r.H = x2-r.X, y2-r.Y
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // SaveFace 写入一张人脸（向量已 L2 归一化；bbox 用 BOX 类型）。
-func (s *Store) SaveFace(ctx context.Context, mediaID string, d Detection, emb []float32, clusterID string) error {
+//
+// personID 非空表示这张脸已被用户命名（faces.person_id），isPet 随之落库；
+// 二者由重扫时的命名迁移给出（见 match.go），新建人脸时传空串 / false。
+func (s *Store) SaveFace(ctx context.Context, mediaID string, d Detection, emb []float32,
+	clusterID, personID string, isPet bool) error {
+
 	if len(emb) != EmbeddingDim {
 		return fmt.Errorf("人脸向量维度应为 %d，实得 %d", EmbeddingDim, len(emb))
 	}
@@ -89,16 +135,22 @@ func (s *Store) SaveFace(ctx context.Context, mediaID string, d Detection, emb [
 	if clusterID != "" {
 		cluster = clusterID
 	}
+	var person any
+	if personID != "" {
+		person = personID
+	}
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO faces (media_id, cluster_id, bbox, confidence, embedding)
+		INSERT INTO faces (media_id, cluster_id, person_id, bbox, confidence, embedding, is_pet)
 		VALUES ($1,
 		        $2,
-		        box(point($3::float8, $4::float8), point($5::float8, $6::float8)),
-		        $7,
-		        $8::vector)`,
-		mediaID, cluster,
+		        $3::uuid,
+		        box(point($4::float8, $5::float8), point($6::float8, $7::float8)),
+		        $8,
+		        $9::vector,
+		        $10)`,
+		mediaID, cluster, person,
 		d.X, d.Y, d.X+d.W, d.Y+d.H,
-		d.Score, vectorLiteral(emb))
+		d.Score, vectorLiteral(emb), isPet)
 	return err
 }
 

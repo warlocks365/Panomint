@@ -29,18 +29,33 @@ type Vocab struct {
 	Classes []Class
 }
 
-// DefaultVocab 返回内置中文标签种子词表（约 110 个，分三类 + 互斥分组）。
+// DefaultVocab 返回内置中文标签种子词表（114 个，分三类 + 互斥分组）。
 //
-// 互斥组说明：
+// 互斥组说明（Group 非空 = 同组只保留相似度最高者）：
 //
-//	时段   日出/日落/黄昏/夜晚/清晨
-//	天气   晴天/多云/阴天/雨天/雪天/雾天/彩虹
+//	时段   日出/日落/黄昏/夜晚/清晨/夜景
+//	天气   晴天/多云/阴天/雨天/雪天/雾天
 //	季节   春天/夏天/秋天/冬天
 //	室内外 室内/室外
 //	动物   猫/狗/鸟/鱼/马/羊/熊猫/蝴蝶
 //	交通   汽车/火车/飞机/船/自行车/摩托车/公交车
 //	人物   人像/合影/儿童/老人
 //	食饮   美食/咖啡/蛋糕/水果
+//	地貌   城市/乡村/山地/森林/湖/海滩/沙漠/草原/雪原/冰川/河流
+//
+// 词表治理记录（118 → 114）：删除项均为**非画面语义**或**同义重复**，不是画面概念，删掉只减误命中：
+//
+//	全景   拍摄几何属性；由启发式 is_360 以置信度 1.0 确定性产出。
+//	       作为文本标签会命中任何广阔视野的风景照（实测西湖 360 全景误命中即此类），是纯噪声源。
+//	视频   文件类型，单帧画面不可辨识；由启发式 type=video 确定性产出。
+//	烟花秀 与「物体」类的「烟花」同义重复，同一张烟花照会同时命中两者。
+//	宠物   抽象上位词，且被错误归入「事件」类；宠物照已由「动物」组的猫/狗/鸟/鱼等覆盖。
+//
+// 另调整两处分组（不改标签名，只改互斥关系）：
+//
+//	彩虹   移出「天气」组 —— 彩虹是光学现象，天然与晴天/多云**同时存在**，
+//	       放进互斥组会让彩虹抢走本应属于正确天气标签的槽位。改后「晴天 + 彩虹」可并存。
+//	夜景   并入「时段」组 —— 与「夜晚」同义重复，会让同一张照片同时拿到两个语义相同的标签。
 //
 // 词表可增删：新增项建议给出 Group，避免与既有标签语义重叠。
 func DefaultVocab() *Vocab {
@@ -57,7 +72,8 @@ func DefaultVocab() *Vocab {
 			{Label: "雨天", EN: "rain", Group: "天气"},
 			{Label: "雪天", EN: "snowfall", Group: "天气"},
 			{Label: "雾天", EN: "fog", Group: "天气"},
-			{Label: "彩虹", EN: "rainbow", Group: "天气"},
+			// 彩虹是光学现象，与晴天/多云可同时存在，故不设互斥组（否则会抢走正确天气标签的槽位）。
+			{Label: "彩虹", EN: "rainbow", Group: ""},
 			{Label: "春天", EN: "spring season", Group: "季节"},
 			{Label: "夏天", EN: "summer season", Group: "季节"},
 			{Label: "秋天", EN: "autumn season", Group: "季节"},
@@ -93,7 +109,8 @@ func DefaultVocab() *Vocab {
 			{Label: "桥梁", EN: "bridge", Group: ""},
 			{Label: "公园", EN: "park", Group: ""},
 			{Label: "港口", EN: "harbor", Group: ""},
-			{Label: "夜景", EN: "night scene", Group: ""},
+			// 与「时段」组的「夜晚」同义重复，并入同一互斥组后每图只保留最高分的那个。
+			{Label: "夜景", EN: "night scene", Group: "时段"},
 		}},
 		{Name: "物体", Tags: []TagDef{
 			{Label: "猫", EN: "cat", Group: "动物"},
@@ -157,7 +174,6 @@ func DefaultVocab() *Vocab {
 			{Label: "旅行", EN: "travel trip", Group: ""},
 			{Label: "会议", EN: "meeting", Group: ""},
 			{Label: "演出", EN: "stage performance", Group: ""},
-			{Label: "烟花秀", EN: "fireworks show", Group: ""},
 			{Label: "滑雪", EN: "skiing", Group: ""},
 			{Label: "冲浪", EN: "surfing", Group: ""},
 			{Label: "潜水", EN: "diving", Group: ""},
@@ -165,9 +181,6 @@ func DefaultVocab() *Vocab {
 			{Label: "骑行", EN: "cycling", Group: ""},
 			{Label: "节日", EN: "festival", Group: ""},
 			{Label: "自拍", EN: "selfie", Group: ""},
-			{Label: "宠物", EN: "pet", Group: ""},
-			{Label: "全景", EN: "360 panoramic", Group: ""}, // 亦由启发式（is_360）直接产出
-			{Label: "视频", EN: "video frame", Group: ""},   // 亦由启发式（type=video）直接产出
 		}},
 	}}
 }

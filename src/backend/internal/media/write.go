@@ -150,6 +150,49 @@ func (s *Store) SetEdits(ctx context.Context, id string, edits *Edits) error {
 	return nil
 }
 
+// GetEdits 读取媒体当前的编辑参数。无编辑参数返回 (nil, nil)；媒体不存在/已删除返回 ErrNotFound。
+// 列内容无法反序列化时按"无编辑"处理——脏数据不应让旋转接口整体 500。
+func (s *Store) GetEdits(ctx context.Context, id string) (*Edits, error) {
+	var raw []byte
+	err := s.Pool.QueryRow(ctx,
+		`SELECT edits FROM media WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var e Edits
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return nil, nil
+	}
+	return &e, nil
+}
+
+// MergeRotateEdit 读-改-写合并：只更新 rotate，保留既有 crop。
+// POST /media/:id/rotate 的 op=rotate 走此路径，避免整体覆盖抹掉用户的裁剪框。
+// 纯函数，不触库（便于单测）。
+func MergeRotateEdit(cur *Edits, angle int) *Edits {
+	out := &Edits{Rotate: angle}
+	if cur != nil {
+		out.Crop = cur.Crop
+	}
+	return out
+}
+
+// MergeCropEdit 读-改-写合并：只更新 crop，保留既有 rotate。
+// op=crop 走此路径，避免把旋转角度重置为 0。纯函数，不触库（便于单测）。
+func MergeCropEdit(cur *Edits, crop *CropRect) *Edits {
+	out := &Edits{Crop: crop}
+	if cur != nil {
+		out.Rotate = cur.Rotate
+	}
+	return out
+}
+
 // SoftDelete 软删（入回收站）。
 func (s *Store) SoftDelete(ctx context.Context, id string) error {
 	ct, err := s.Pool.Exec(ctx,

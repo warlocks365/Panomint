@@ -158,7 +158,9 @@ func (s *Store) ApplySuggestion(ctx context.Context, mediaID, tagName string, co
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (media_id, tag_id) DO UPDATE
 		  SET origin = EXCLUDED.origin,
-		      confidence = COALESCE(media_tags.confidence, EXCLUDED.confidence),
+		      -- 置信度 latest-wins：新算出的置信度必须能覆盖旧值，否则调阈值后存量标签永远刷不新。
+		      -- 仅当新值为 NULL 时才保留旧值（避免手工关联把已有 AI 置信度抹掉）。
+		      confidence = COALESCE(EXCLUDED.confidence, media_tags.confidence),
 		      confirmed = media_tags.confirmed OR EXCLUDED.confirmed`,
 		mediaID, tagID, confirmed, confidence, origin); err != nil {
 		return err

@@ -1,6 +1,8 @@
 package media
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
@@ -14,9 +16,34 @@ import (
 
 // 手工标签 HTTP 处理器（Job000005）。读 media:read；写 media:write + 媒体归属校验。
 
-// ListTags GET /tags?q=（自动补全：子串过滤 + 使用计数）
+// parseTagListQuery 校验 GET /tags 的查询参数。
+// kind 只允许空串（不过滤）/"user"/"ai"；limit 留空或为 0 表示用默认值，需为正整数（负数/非数字 → 错误）。
+func parseTagListQuery(q, kind, limit string) (string, string, int, error) {
+	kind = strings.TrimSpace(kind)
+	if kind != "" && kind != "user" && kind != "ai" {
+		return "", "", 0, errors.New("kind 只能为 user 或 ai")
+	}
+	n := 0
+	if v := strings.TrimSpace(limit); v != "" {
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed < 0 {
+			return "", "", 0, errors.New("limit 需为非负整数")
+		}
+		n = parsed
+	}
+	return q, kind, n, nil
+}
+
+// ListTags GET /tags?q=&kind=&limit=（自动补全：子串过滤 + 使用计数；手工标签优先）。
+// 历史行为：硬编码 LIMIT 100 且按 usage_count 排序，会把使用次数低的手工标签整批截断/挤出，
+// 现改为可调 limit（缺省 500）+ kind 过滤 + 「手工标签优先」排序。
 func (h *Handler) ListTags(c *gin.Context) {
-	tags, err := h.Store.ListTags(c.Request.Context(), c.Query("q"))
+	q, kind, limit, err := parseTagListQuery(c.Query("q"), c.Query("kind"), c.Query("limit"))
+	if err != nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		return
+	}
+	tags, err := h.Store.ListTags(c.Request.Context(), q, kind, limit)
 	if err != nil {
 		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
 		return
@@ -51,7 +78,15 @@ func (h *Handler) AddTag(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "TAG_ATTACH_FAILED", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": id, "tag": tag})
+	// 回查真实值再返回：FindOrCreateUserTag 只取 id/name/kind/color，
+	// Confirmed 会退化为 false（DDL 默认 true）、UsageCount 恒为 0，
+	// 与刚建立的关联（confirmed=true、origin=user、usage_count>=1）不一致。
+	real, err := h.Store.GetTag(c.Request.Context(), tag.ID)
+	if err != nil {
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "tag": real})
 }
 
 // RemoveTag DELETE /media/:id/tags/:tag_id（解除关联；未关联按幂等 200 处理，标签不存在 404）
@@ -181,6 +216,11 @@ func (h *Handler) DeleteTag(c *gin.Context) {
 	id := c.Param("id")
 	into := strings.TrimSpace(c.Query("into"))
 	moved, err := h.Store.DeleteTagOrMerge(c.Request.Context(), id, into)
+	if errors.Is(err, ErrMergeTargetNotFound) {
+		// 提前校验而非等 PG 外键报错：响应里不能出现 SQLSTATE 23503 之类原文。
+		errResp(c, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "标签不存在")
 		return
@@ -193,7 +233,8 @@ func (h *Handler) DeleteTag(c *gin.Context) {
 }
 
 // ConfirmTag POST /tags/:id/confirm {media_id?, confirmed?}
-// media_id 存在 → 确认该媒体上的这一关联；否则确认标签本身（粗粒度审阅）。
+// media_id 存在 → 设置该媒体上这一关联的确认状态（media_tags.confirmed）；
+// 否则设置标签本身（tags.confirmed，粗粒度审阅）。两条路径都支持 confirmed=false 取消确认。
 func (h *Handler) ConfirmTag(c *gin.Context) {
 	id := c.Param("id")
 	var req struct {
@@ -205,11 +246,22 @@ func (h *Handler) ConfirmTag(c *gin.Context) {
 	if req.Confirmed != nil {
 		confirmed = *req.Confirmed
 	}
+	// 标签不存在一律 404（与 DELETE /tags/:id 语义一致），不再静默 200 空更新。
+	exists, err := h.Store.tagExists(c.Request.Context(), id)
+	if err != nil {
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		return
+	}
+	if !exists {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "标签不存在")
+		return
+	}
 	if req.MediaID != "" {
 		if _, ok := h.checkAccess(c, req.MediaID); !ok {
 			return
 		}
-		ok, err := h.Store.ConfirmTagForMedia(c.Request.Context(), req.MediaID, id)
+		// confirmed 真正落库到 media_tags.confirmed，响应回显即落库值（false 可取消确认）。
+		ok, err := h.Store.ConfirmTagForMedia(c.Request.Context(), req.MediaID, id, confirmed)
 		if err != nil {
 			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
 			return
@@ -217,26 +269,54 @@ func (h *Handler) ConfirmTag(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"media_id": req.MediaID, "tag_id": id, "confirmed": confirmed, "updated": ok})
 		return
 	}
-	ok, err := h.Store.MarkTagReviewed(c.Request.Context(), id)
+	ok, err := h.Store.SetTagReviewed(c.Request.Context(), id, confirmed)
 	if err != nil {
 		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"tag_id": id, "confirmed": true, "updated": ok})
+	c.JSON(http.StatusOK, gin.H{"tag_id": id, "confirmed": confirmed, "updated": ok})
 }
 
-// ConfirmMediaTags POST /media/:id/tags/confirm {tag_ids?:[]}：逐图批量接受（缺 tag_ids 即全部）。
+// parseConfirmTagIDs 解析 POST /media/:id/tags/confirm 的请求体 {"tag_ids":[...]}。
+//
+// 返回 (nil, nil) 表示「未提供 tag_ids」（含空请求体/`{}`/`null`），调用方按"确认该媒体全部"处理；
+// 返回非 nil 空切片表示「显式给了空数组」，调用方应按确认 0 条处理，不得退化为全部确认；
+// 解析失败（非法 JSON、tag_ids 类型不是数组等）返回 error，调用方须回 400。
+//
+// 抽成纯函数是为了能在不触库的前提下覆盖这些分支（原实现用 `_ = c.ShouldBindJSON(&req)`
+// 吞掉解析错误，tag_ids 传字符串时会静默退化成"确认全部 AI 标签"）。
+func parseConfirmTagIDs(raw []byte) (*[]string, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	var req struct {
+		TagIDs *[]string `json:"tag_ids"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
+	return req.TagIDs, nil
+}
+
+// ConfirmMediaTags POST /media/:id/tags/confirm {tag_ids?:[]}：逐图批量接受。
+// 仅「请求体为空/未提供 tag_ids」才走"全部确认"；显式空数组 = 确认 0 条；解析失败 400。
 func (h *Handler) ConfirmMediaTags(c *gin.Context) {
 	mediaID := c.Param("id")
 	if _, ok := h.checkAccess(c, mediaID); !ok {
 		return
 	}
-	var req struct {
-		TagIDs []string `json:"tag_ids"`
+	raw, err := c.GetRawData()
+	if err != nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "请求体读取失败")
+		return
 	}
-	_ = c.ShouldBindJSON(&req)
+	ids, err := parseConfirmTagIDs(raw)
+	if err != nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需为 {\"tag_ids\":[\"...\"]}")
+		return
+	}
 	ctx := c.Request.Context()
-	if len(req.TagIDs) == 0 {
+	if ids == nil {
 		n, err := h.Store.ConfirmAllForMedia(ctx, mediaID)
 		if err != nil {
 			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
@@ -246,8 +326,8 @@ func (h *Handler) ConfirmMediaTags(c *gin.Context) {
 		return
 	}
 	n := 0
-	for _, tid := range req.TagIDs {
-		ok, err := h.Store.ConfirmTagForMedia(ctx, mediaID, tid)
+	for _, tid := range *ids {
+		ok, err := h.Store.ConfirmTagForMedia(ctx, mediaID, tid, true)
 		if err != nil {
 			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
 			return
@@ -260,8 +340,18 @@ func (h *Handler) ConfirmMediaTags(c *gin.Context) {
 }
 
 // ListTagMedia GET /tags/:id/media?cursor=&limit=：按标签浏览（仅已确认关联）。
+// 标签不存在时 404，避免与「标签存在但无已确认媒体」返回的空列表混淆。
 func (h *Handler) ListTagMedia(c *gin.Context) {
 	tagID := c.Param("id")
+	exists, err := h.Store.tagExists(c.Request.Context(), tagID)
+	if err != nil {
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		return
+	}
+	if !exists {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "标签不存在")
+		return
+	}
 	limit := 0
 	if v := c.Query("limit"); v != "" {
 		limit, _ = strconv.Atoi(v)
@@ -310,17 +400,23 @@ func (h *Handler) AITagsPreview(c *gin.Context) {
 // AITagsTrigger POST /ai/tags {scope, media_id?, limit?}：手动触发自动打标（有界同步执行）。
 // 常驻增量由 `taggen -mode watch` 承担，此处仅为手动 nudge，不接队列（避免多 kind 互吞）。
 func (h *Handler) AITagsTrigger(c *gin.Context) {
-	if h.Tagger == nil {
-		errResp(c, http.StatusServiceUnavailable, "TAGGER_UNAVAILABLE", "AI 打标未启用（CLIP 不可用）")
-		return
-	}
 	var req struct {
 		Scope   string `json:"scope"`
 		MediaID string `json:"media_id"`
 		Limit   int    `json:"limit"`
 	}
+	// 入参校验先于 Tagger 可用性检查：非法/缺失 scope 一律 400，
+	// 否则 `{}` 或未知 scope 会静默按 scope=all 执行全量打标。
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需为 {\"scope\":\"all|media_id\"}")
+		return
+	}
+	if req.Scope != "all" && req.Scope != "media_id" {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "scope 需为 all 或 media_id")
+		return
+	}
+	if h.Tagger == nil {
+		errResp(c, http.StatusServiceUnavailable, "TAGGER_UNAVAILABLE", "AI 打标未启用（CLIP 不可用）")
 		return
 	}
 	ctx := c.Request.Context()

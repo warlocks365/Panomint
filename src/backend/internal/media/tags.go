@@ -26,6 +26,17 @@ type TagRef struct {
 // ErrInvalidTagName 标签名非法（空或超长）。
 var ErrInvalidTagName = errors.New("标签名需为 1-128 字符")
 
+// ErrMergeTargetNotFound 合并目标标签不存在。提前校验以替代 PG 外键报错，
+// 避免把 `SQLSTATE 23503` 之类的数据库原文透给调用方。
+var ErrMergeTargetNotFound = errors.New("目标标签不存在")
+
+// GET /tags 列表数量上限：库内标签数已超过旧的硬编码 100，截断会使
+// 使用次数较低的手工标签在页面上完全不可见。缺省与上限均为 500（可用 limit 参数下调）。
+const (
+	defaultTagListLimit = 500
+	maxTagListLimit     = 500
+)
+
 // NormalizeTagName 清洗并校验标签名（去首尾空白；1-128 字符）。
 func NormalizeTagName(name string) (string, error) {
 	name = strings.TrimSpace(name)
@@ -35,19 +46,40 @@ func NormalizeTagName(name string) (string, error) {
 	return name, nil
 }
 
-// ListTags GET /tags?q=：子串过滤（ILIKE，pg_trgm GIN 索引加速），按使用计数降序。
-func (s *Store) ListTags(ctx context.Context, q string) ([]TagRef, error) {
-	where := ""
+// ListTags GET /tags?q=&kind=&limit=：子串过滤（ILIKE，pg_trgm GIN 索引加速）。
+// kind 可选（user|ai）；limit<=0 时取 defaultTagListLimit，超过 maxTagListLimit 时收敛到上限。
+//
+// 排序语义：kind='user'（用户手工创建）恒排在 AI 标签之前，组内再按使用次数降序、名称升序。
+// 理由：手工标签是用户显式创建的信息资产，使用次数天然低于批量生成的 AI 标签；
+// 仅按 usage_count 排序会被 AI 标签整体挤出分页窗口，导致「建了却看不见」。
+func (s *Store) ListTags(ctx context.Context, q, kind string, limit int) ([]TagRef, error) {
+	if limit <= 0 {
+		limit = defaultTagListLimit
+	}
+	if limit > maxTagListLimit {
+		limit = maxTagListLimit
+	}
 	args := []any{}
+	conds := []string{}
 	if q = strings.TrimSpace(q); q != "" {
 		args = append(args, q)
-		where = "WHERE t.name ILIKE '%' || $1 || '%'"
+		conds = append(conds, fmt.Sprintf("t.name ILIKE '%%' || $%d || '%%'", len(args)))
 	}
+	if kind != "" {
+		args = append(args, kind)
+		conds = append(conds, fmt.Sprintf("t.kind = $%d", len(args)))
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
+	}
+	args = append(args, limit)
 	rows, err := s.Pool.Query(ctx, `
 		SELECT t.id, t.name, t.kind, t.color, t.confirmed, count(mt.media_id)::int
 		FROM tags t LEFT JOIN media_tags mt ON mt.tag_id = t.id
 		`+where+`
-		GROUP BY t.id ORDER BY count(mt.media_id) DESC, t.name LIMIT 100`, args...)
+		GROUP BY t.id ORDER BY (t.kind = 'user') DESC, count(mt.media_id) DESC, t.name
+		LIMIT $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,13 +211,26 @@ func (s *Store) DeleteTagOrMerge(ctx context.Context, id, intoID string) (int, e
 		if intoID == id {
 			return 0, errors.New("不能合并到自身")
 		}
+		// 先校验目标标签存在：否则下面的 INSERT 会撞 media_tags.tag_id 外键，
+		// 把 SQLSTATE 23503 原文透给调用方（应统一为 404 语义）。
+		var targetExists bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM tags WHERE id = $1)`, intoID).Scan(&targetExists); err != nil {
+			return 0, err
+		}
+		if !targetExists {
+			return 0, ErrMergeTargetNotFound
+		}
+		// 置信度取 latest-wins：来源（EXCLUDED）优先，仅当来源为 NULL 时保留目标旧值。
+		// 之前用 COALESCE(旧, 新) 会让存量置信度永远刷不新（阈值调整后无法重算）。
+		// confirmed 保持 OR 语义，用户确认状态永不被覆盖。
 		ct, err := tx.Exec(ctx, `
 			INSERT INTO media_tags (media_id, tag_id, confirmed, confidence, origin)
 			SELECT media_id, $2, confirmed, confidence, origin
 			FROM media_tags WHERE tag_id = $1
 			ON CONFLICT (media_id, tag_id) DO UPDATE
 			  SET confirmed = media_tags.confirmed OR EXCLUDED.confirmed,
-			      confidence = COALESCE(media_tags.confidence, EXCLUDED.confidence)`,
+			      confidence = COALESCE(EXCLUDED.confidence, media_tags.confidence)`,
 			id, intoID)
 		if err != nil {
 			return 0, err
@@ -208,20 +253,27 @@ func (s *Store) DeleteTagOrMerge(ctx context.Context, id, intoID string) (int, e
 	return moved, nil
 }
 
-// ConfirmTagForMedia 确认某媒体上的某标签关联；双写 tags.confirmed（粗粒度审阅）。
-// 返回是否确有更新。
-func (s *Store) ConfirmTagForMedia(ctx context.Context, mediaID, tagID string) (bool, error) {
+// ConfirmTagForMedia 设置某媒体上的某标签关联的确认状态，返回是否确有更新。
+//
+// confirmed=true 时双写 tags.confirmed（粗粒度「已审阅」）；
+// confirmed=false 时只改关联级 media_tags.confirmed，不回退 tags.confirmed——
+// 标签级 confirmed 是「该标签曾被人工审阅过」的粗粒度历史标记，
+// 取消单张图的确认不应连带撤销该标签在其他媒体上的审阅状态。
+// 传入值即落库值，调用方回显不等于本次请求值。
+func (s *Store) ConfirmTagForMedia(ctx context.Context, mediaID, tagID string, confirmed bool) (bool, error) {
 	ct, err := s.Pool.Exec(ctx,
-		`UPDATE media_tags SET confirmed = true WHERE media_id = $1 AND tag_id = $2`,
-		mediaID, tagID)
+		`UPDATE media_tags SET confirmed = $3 WHERE media_id = $1 AND tag_id = $2`,
+		mediaID, tagID, confirmed)
 	if err != nil {
 		return false, err
 	}
 	if ct.RowsAffected() == 0 {
 		return false, nil
 	}
-	if _, err := s.Pool.Exec(ctx, `UPDATE tags SET confirmed = true WHERE id = $1`, tagID); err != nil {
-		return false, err
+	if confirmed {
+		if _, err := s.Pool.Exec(ctx, `UPDATE tags SET confirmed = true WHERE id = $1`, tagID); err != nil {
+			return false, err
+		}
 	}
 	return true, nil
 }
@@ -244,9 +296,11 @@ func (s *Store) ConfirmAllForMedia(ctx context.Context, mediaID string) (int, er
 	return n, nil
 }
 
-// MarkTagReviewed 将标签名级「已审阅」标记置真（双写）；返回是否更新。
-func (s *Store) MarkTagReviewed(ctx context.Context, id string) (bool, error) {
-	ct, err := s.Pool.Exec(ctx, `UPDATE tags SET confirmed = true WHERE id = $1 AND confirmed = false`, id)
+// SetTagReviewed 设置标签名级「已审阅」标记（双向：confirmed 可置真也可置假）；返回是否确有更新。
+// 原先只能置真，导致「取消确认」在标签级路径上无声失败。
+func (s *Store) SetTagReviewed(ctx context.Context, id string, confirmed bool) (bool, error) {
+	ct, err := s.Pool.Exec(ctx,
+		`UPDATE tags SET confirmed = $2 WHERE id = $1 AND confirmed <> $2`, id, confirmed)
 	if err != nil {
 		return false, err
 	}

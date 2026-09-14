@@ -105,6 +105,18 @@ func (h *Handler) PersonMedia(c *gin.Context) {
 //
 // 契约要求返回 { job_id }；本实现是"复位扫描标记 + 由 facesgen 清扫循环接手"，
 // job_id 仅用于前端提示，不落任务表（详见 Store.ResetScanned 注释）。
+//
+// 响应字段说明（契约只承诺 job_id，scope/queued 是本实现的附加信息）：
+//
+//	job_id  前端提示用的伪任务号（NewClusterID 生成，无对应任务表记录）
+//	scope   回显请求范围
+//	queued  **被复位扫描标记的媒体条数**——不是任务数、也不是人脸数
+//	        （实测 = 有 LG 缩略图且未删除的媒体数，当前语料为 93）
+//
+// ⚠️ `queued` 这个名字容易读成"入队任务数"，语义不够自明；但既有验证脚本
+// （.workbuddy/face-corpus/verify_people_api.sh:113 期望 queued=可扫描媒体数）
+// 已按此含义断言，且契约 §12 只承诺 job_id，故本轮不改键名以免破坏兼容，
+// 在此以注释固化其定义。若日后要改名，建议 `media_reset`。
 func (h *Handler) TriggerScan(c *gin.Context) {
 	var req struct {
 		Scope string `json:"scope"`
