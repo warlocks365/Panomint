@@ -79,7 +79,7 @@ func main() {
 	flag.Float64Var(&o.conf, "faceconf", 0, "检测置信度阈值（默认 0.9）")
 	flag.Float64Var(&o.nms, "facenms", 0, "检测 NMS IoU 阈值（默认 0.3）")
 	flag.IntVar(&o.minPx, "minpx", 0, "最小人脸边长像素（默认 24）")
-	flag.Float64Var(&o.merge, "merge", 0, "聚类合并余弦阈值（默认 0.33）")
+	flag.Float64Var(&o.merge, "merge", 0, "聚类合并余弦阈值（默认 0.40）")
 	flag.IntVar(&o.interval, "interval", 30, "watch 模式扫描间隔（秒）")
 	flag.Parse()
 

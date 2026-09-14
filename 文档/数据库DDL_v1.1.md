@@ -515,6 +515,9 @@ CREATE OR REPLACE FUNCTION trigger_set_updated_at()
 - 向量索引 `ivfflat`：建表并灌入数据后再 `CREATE INDEX`；查询前 `SET ivfflat.probes = 10;`。
 
 
+- 人脸向量索引 `faces.embedding`：自迁移 `src/backend/migrations/00014_faces_cluster.sql` 起，`faces.embedding` 已由 `VECTOR(512)` + ivfflat 改为 **`VECTOR(128)` + HNSW**（`CREATE INDEX ... ON faces USING hnsw (embedding vector_cosine_ops)`）；`media.embedding`（CLIP 语义向量，512 维）**仍用 ivfflat，未受影响**。改用 HNSW 的原因：HNSW 增量插入无需「训练」，在小数据量与高维下召回更稳定，更适合持续追加的人脸库；且 128 维已不再适配原 `ivfflat ... WITH (lists = 50)` 的配置。**注意：`SET ivfflat.probes`（以及 ivfflat 的 `lists`）仅对 ivfflat 索引生效，对人脸 HNSW 索引不适用**；HNSW 的检索质量由建索引参数（`m`、`ef_construction`）与查询期 `hnsw.ef_search` 控制。
+
+
 - `deleted_at` 非空表示在回收站中（软删）；正常查询需 `WHERE deleted_at IS NULL`。
 
 - 大表分区可按 `taken_at` 按月分区（>1 亿行时）。
