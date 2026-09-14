@@ -3,6 +3,8 @@ package tags
 // 零样本分类（CLIP 文本塔 × 已缓存图像向量）：
 //
 //   - 启动时把词表逐标签编码为 512 维文本向量并缓存（一次成本，之后复用）；
+//     结果会**持久化**到 tag_label_vectors 表（见 labelcache.go），二次启动直接载入、
+//     一次 EncodeText 都不调 —— 否则 114 标签 × 5 模板 = 570 次编码会让 API 启动等近 2 分钟；
 //     每个标签用**多提示词模板集成**编码（中/英两族各 5 条，逐条 L2 归一化后取平均再归一化），
 //     目的是抑制单一措辞带来的偏差，提升标签向量的语义指向性与相似度的区分度；
 //   - 对每张媒体直接用 **已存在的 media.embedding**（无需再跑视觉塔）算余弦相似度；
@@ -23,6 +25,7 @@ package tags
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strconv"
@@ -82,6 +85,13 @@ type ClassifyConfig struct {
 	TopRatio float64 // 相对 top1 比例；<=0 时默认 0.88
 	MaxTags  int     // 每图上限；<=0 时默认 3
 	MinTop1  float64 // 入选门槛：top1 低于该值即判为「不属于任何标签」；<=0 时按 TAG_MIN_TOP1/env，默认 0（关闭）
+
+	// ModelDir 文本塔模型目录（EMBED_MODEL_DIR）。**仅参与 cache_key 计算**，不改变编码行为。
+	// 不放进 cache_key 会导致「换了模型目录却复用旧模型的向量」——向量空间不同，结果全错。
+	ModelDir string
+	// Cache 标签向量持久缓存；nil = 不使用缓存（每次启动照常编码，与改动前行为一致）。
+	// 读写失败一律降级为编码，绝不阻断启动（见 NewClassifier）。
+	Cache LabelVectorCache
 }
 
 // Suggestion 单条 AI 打标建议。
@@ -112,6 +122,13 @@ type Classifier struct {
 
 // NewClassifier 用已初始化的文本塔编码词表并缓存；v 为 nil 时用 DefaultVocab()。
 // cfg 的零值字段将由族默认/env 补齐。
+//
+// **缓存优先**（缺陷 1）：若 cfg.Cache 非空且命中（标签集合与当前词表完全一致），直接用
+// 持久化的向量构建分类器，**一次 EncodeText 都不调** —— 二次启动因此从 ~110s 降到数秒。
+// 未命中则走原编码路径，并把结果写回缓存。
+//
+// 失败降级是硬要求：DB 不可用、表不存在、读写失败都只记警告并**照常编码**，
+// 绝不因为缓存机制引入新的启动失败模式（原编码路径本身仍会返回 error）。
 func NewClassifier(ctx context.Context, enc TextEncoder, v *Vocab, cfg ClassifyConfig) (*Classifier, error) {
 	if v == nil {
 		v = DefaultVocab()
@@ -128,8 +145,20 @@ func NewClassifier(ctx context.Context, enc TextEncoder, v *Vocab, cfg ClassifyC
 		minTop1: resolveMinTop1(cfg.MinTop1),
 	}
 	if enc == nil {
-		return c, nil // 无编码器：仅用于启发式路径/测试
+		return c, nil // 无编码器：仅用于启发式路径/测试（也不使用缓存）
 	}
+
+	key := labelCacheKey(fam, cfg.ModelDir, v)
+	if cfg.Cache != nil {
+		items, err := cfg.Cache.Load(ctx, key)
+		if err != nil {
+			log.Printf("标签向量缓存读取失败，降级为重新编码（不影响启动）: %v", err)
+		} else if labels, ok := matchCachedLabels(items, v); ok {
+			c.labels = labels
+			return c, nil
+		}
+	}
+
 	for _, cls := range v.Classes {
 		for _, td := range cls.Tags {
 			vec, err := encodeLabel(ctx, enc, fam, td)
@@ -137,6 +166,12 @@ func NewClassifier(ctx context.Context, enc TextEncoder, v *Vocab, cfg ClassifyC
 				return nil, err
 			}
 			c.labels = append(c.labels, labelVec{label: td.Label, class: cls.Name, group: td.Group, vec: vec})
+		}
+	}
+
+	if cfg.Cache != nil {
+		if err := cfg.Cache.Save(ctx, key, toCachedLabels(c.labels)); err != nil {
+			log.Printf("标签向量缓存写入失败（不影响启动）: %v", err)
 		}
 	}
 	return c, nil
@@ -166,21 +201,26 @@ var clipCLIPTemplates = []string{
 	"%s",
 }
 
-// labelPrompts 按模型族把标签展开为提示词列表（顺序固定，便于测试与复现）。
+// templatesFor 返回某族使用的提示词模板集合（顺序固定，便于测试、复现与 cache_key 稳定）。
 //
 // 两族模板**不得交叉**：chinese-clip 的文本塔不认英文提示词，clip 的文本塔不认中文，
-// 混用会让该标签的向量彻底失去意义。英文名为空时回退中文标签（词表自洽性由单测守住，
-// 正常不应发生；真发生了说明词表缺 EN，应修词表而不是在这里兜底）。
-func labelPrompts(td TagDef, fam embed.ModelFamily) []string {
-	var tmpls []string
-	name := td.Label
+// 混用会让该标签的向量彻底失去意义。零值族（未设置）按中文族处理，与改动前一致。
+func templatesFor(fam embed.ModelFamily) []string {
 	if fam == embed.FamilyCLIP {
-		tmpls = clipCLIPTemplates
-		if td.EN != "" {
-			name = td.EN
-		}
-	} else {
-		tmpls = chineseCLIPTemplates
+		return clipCLIPTemplates
+	}
+	return chineseCLIPTemplates
+}
+
+// labelPrompts 按模型族把标签展开为提示词列表（顺序固定，便于测试与复现）。
+//
+// 英文名为空时回退中文标签（词表自洽性由单测守住，正常不应发生；
+// 真发生了说明词表缺 EN，应修词表而不是在这里兜底）。
+func labelPrompts(td TagDef, fam embed.ModelFamily) []string {
+	tmpls := templatesFor(fam)
+	name := td.Label
+	if fam == embed.FamilyCLIP && td.EN != "" {
+		name = td.EN
 	}
 	out := make([]string, 0, len(tmpls))
 	for _, tmpl := range tmpls {

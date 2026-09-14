@@ -39,11 +39,19 @@ type EmbeddedMedia struct {
 	Vec []float32
 }
 
-// ListPendingAI 列出待 AI 打标的媒体：未删除、有向量、有缩略图、且尚无 origin='ai' 关联。
+// ListPendingAI 列出待 AI 打标的媒体：未删除、有向量、有缩略图、且尚未完成过一轮打标。
 //
-// 说明：若某图既无 CLIP 建议也无启发式标签，它会在每轮清扫中被重新计算——
-// 但该计算只是缓存标签向量与图像向量的**点积**（无推理），成本可忽略。
-// forceMediaID 非空时只返回该媒体且忽略「是否已打标」（供手动单图触发）。
+// 为什么判据不是「没有 origin='ai' 关联行」（旧实现，已废弃）：
+// Applier.ApplyOne 先算启发式、再用 filterAISuggestions 丢掉与启发式**互斥组**冲突的
+// AI 建议。于是某张图只要启发式占满了互斥组（实测 `2025-12-米湖-地热-012.jpg` 拿到季节
+// 标签），它的 CLIP 建议会被全部丢弃 → **永远不产生 origin='ai' 行** → 按旧判据每分钟都
+// 被重选重打标，日志持续 "发现 1 条待打标"，永不收敛。
+//
+// 现改为按 media.tags_scanned_at 判空（与 faces_scanned_at 同模式）：无论是否产出建议，
+// 一轮走完就置位，「算过但没有建议」也是合法终态，不再被反复选中。
+//
+// forceMediaID 非空时只返回该媒体，**且不带 tags_scanned_at 条件**（供手动单图强制重打标，
+// 属显式请求，必须无视标记照常重算）。
 func (s *Store) ListPendingAI(ctx context.Context, limit int, forceMediaID string) ([]PendingMedia, error) {
 	if limit <= 0 {
 		limit = 200
@@ -66,9 +74,7 @@ func (s *Store) ListPendingAI(ctx context.Context, limit int, forceMediaID strin
 		WHERE m.deleted_at IS NULL
 		  AND m.embedding IS NOT NULL
 		  AND COALESCE(m.thumbnail_md,'') <> ''
-		  AND NOT EXISTS (
-		      SELECT 1 FROM media_tags mt
-		      WHERE mt.media_id = m.id AND mt.origin = 'ai')
+		  AND m.tags_scanned_at IS NULL
 		ORDER BY m.taken_at DESC NULLS LAST, m.id
 		LIMIT $1`, limit)
 	if err != nil {
@@ -197,6 +203,9 @@ func (s *Store) markTagReviewed(ctx context.Context, tagID string) error {
 }
 
 // Counts 统计：总数 / 已向量化 / 已被 AI 打标过 / 待 AI 打标。
+//
+// 「待 AI 打标」必须与 ListPendingAI 用**同一个判据**（tags_scanned_at IS NULL），
+// 否则 status 报的待办数与 watch 每轮实际选中的条数会对不上。
 func (s *Store) Counts(ctx context.Context) (total, embedded, aiTagged, pending int, err error) {
 	err = s.Pool.QueryRow(ctx, `
 		SELECT count(*),
@@ -205,10 +214,16 @@ func (s *Store) Counts(ctx context.Context) (total, embedded, aiTagged, pending 
 		           SELECT 1 FROM media_tags mt WHERE mt.media_id = m.id AND mt.origin = 'ai')),
 		       count(*) FILTER (WHERE embedding IS NOT NULL
 		           AND COALESCE(thumbnail_md,'') <> ''
-		           AND NOT EXISTS (
-		               SELECT 1 FROM media_tags mt WHERE mt.media_id = m.id AND mt.origin = 'ai'))
+		           AND tags_scanned_at IS NULL)
 		FROM media m WHERE deleted_at IS NULL`).Scan(&total, &embedded, &aiTagged, &pending)
 	return
+}
+
+// MarkTagsScanned 标记「该图已完成一轮 AI 打标」（见 ListPendingAI 的判据说明）。
+// 与 faces_scanned_at 同模式：**无论是否产出建议**都要置位，否则零建议的图会被每轮重选。
+func (s *Store) MarkTagsScanned(ctx context.Context, mediaID string) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE media SET tags_scanned_at = now() WHERE id = $1`, mediaID)
+	return err
 }
 
 // PendingAITags 列出某媒体尚未确认的 AI 建议（预览/前端待确认区）。

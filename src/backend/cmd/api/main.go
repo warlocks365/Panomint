@@ -277,8 +277,14 @@ func buildRecaller(pool *pgxpool.Pool, logger *zap.Logger) (search.Recaller, *ta
 
 	// 阈值按模型族解析（chinese-clip 0.35 / clip 0.24），可用 TAG_MIN_SIM 等环境变量覆盖；
 	// 最终应以 `taggen -mode calibrate` 在真实库上标定后固化。
+	//
+	// 注入持久缓存：二次启动直接载入标签向量，不再跑 570 次文本编码
+	// （这是启动从 ~110s 回落到数秒的关键）。缓存读写失败只记警告并降级为编码，不影响启动。
 	var clf *tags.Classifier
-	if c, cerr := tags.NewClassifier(context.Background(), enc, nil, tags.ClassifyConfig{}); cerr != nil {
+	if c, cerr := tags.NewClassifier(context.Background(), enc, nil, tags.ClassifyConfig{
+		ModelDir: cfg.ModelDir,
+		Cache:    &tags.PGLabelVectorCache{Pool: pool},
+	}); cerr != nil {
 		logger.Warn("AI 打标未启用（词表编码失败）", zap.Error(cerr))
 	} else {
 		minSim, topRatio, maxTags, family := c.Params()

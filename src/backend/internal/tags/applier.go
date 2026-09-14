@@ -29,6 +29,12 @@ type Applier struct {
 }
 
 // ApplyOne 处理一条已知向量的媒体，返回写入的标签条数。
+//
+// 成功走完（AI 建议 + 启发式两个循环都无错返回）后会把 media.tags_scanned_at 置为 now()，
+// 标记「该图已完成一轮打标」——**即使 Clf 为 nil、Suggest 返回空、或建议被
+// filterAISuggestions 全部丢弃，也要置位**。因为「算过但没有建议」正是让
+// ListPendingAI 收敛的合法终态；漏置位会让该图每分钟被重选重打标（缺陷 2）。
+// 置位失败返回 error，让调用方按「本轮未完成」处理并在下一轮重试，不静默吞掉。
 func (a *Applier) ApplyOne(ctx context.Context, m PendingMedia, vec []float32) (int, error) {
 	n := 0
 	// 启发式先算出来（纯内存，无 IO），用于压制同互斥组的 AI 建议。
@@ -46,6 +52,9 @@ func (a *Applier) ApplyOne(ctx context.Context, m PendingMedia, vec []float32) (
 			return n, err
 		}
 		n++
+	}
+	if err := a.Store.MarkTagsScanned(ctx, m.ID); err != nil {
+		return n, err
 	}
 	return n, nil
 }

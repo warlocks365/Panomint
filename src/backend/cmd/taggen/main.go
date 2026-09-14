@@ -114,6 +114,9 @@ func main() {
 
 	clf, err := tags.NewClassifier(ctx, enc, tags.DefaultVocab(), tags.ClassifyConfig{
 		MinSim: o.minSim, TopRatio: o.topRatio, MaxTags: o.maxTags,
+		// ModelDir 参与 cache_key：换模型目录即换一套标签向量，不能复用旧缓存。
+		ModelDir: cfg.ModelDir,
+		Cache:    &tags.PGLabelVectorCache{Pool: pool},
 	})
 	if err != nil {
 		log.Fatalf("构建分类器失败: %v", err)
