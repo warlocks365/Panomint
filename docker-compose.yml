@@ -94,6 +94,12 @@ services:
       # 语义召回余弦距离上限。**留空即按模型族自动取值**
       # （chinese-clip→0.63 / clip→0.78，实测标定）；如需微调再显式设置。
       EMBED_SEMANTIC_MAX_DIST: ${EMBED_SEMANTIC_MAX_DIST:-}
+      # 高德（契约 §7）：瓦片反代（Tiles）与 /map/search 地名源都读这两项。
+      # ⚠️ 此前只传给了 index-worker，api 容器里根本没有 AMAP_* →
+      # /map/search 恒降级（X-Map-Search-Degraded: amap_absent）、瓦片也只能吃磁盘缓存。
+      # AMAP_KEY 必须是「Web 服务」类型的 Key；AMAP_SECRET 为数字签名密钥（留空则不签名）。
+      AMAP_KEY: ${AMAP_KEY:-}
+      AMAP_SECRET: ${AMAP_SECRET:-}
     volumes:
       - mediadata:/data
       - tilecache:/tile-cache
