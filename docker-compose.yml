@@ -182,9 +182,11 @@ services:
       FACE_THREADS: ${FACE_THREADS:-0}
       EMBED_DEVICE: ${EMBED_DEVICE:-auto}
       EMBED_THREADS: ${EMBED_THREADS:-0}
-      # 聚类合并余弦阈值：SFace 官方同人判定为 0.363，这里默认取 0.33 换更高召回
-      # （偏低 = 倾向多分簇，宁少合不错合），待真实素材标定后固化
-      FACE_MERGE_SIM: ${FACE_MERGE_SIM:-0.33}
+      # 聚类合并余弦阈值（Job000011 标定）：跨照片错并最高 0.347~0.348、真同人最低 0.4382，
+      # 取 0.40 居中（两侧余量 0.052 / 0.038）。官方同人判定 0.363 落在错误区间内，不能直接用；
+      # 分辨率不是根因（脸 60→217px 异人相似度仅 0.525→0.4999）。剩余重叠由
+      # 「同媒体内人脸互不合并」兜底（见 store.go NearestClusters）。
+      FACE_MERGE_SIM: ${FACE_MERGE_SIM:-0.40}
       # 检测参数留空即用代码默认：inputSize 640 / conf 0.87 / nms 0.3 / minFacePx 24
       # conf 0.87 = 分离霓虹街景误检（0.861）与最小真脸（0.883）的取值。
       # ⚠️ 分离发生在**置信度轴**上；尺寸轴**不可分**（误检短边 56.7 与合影小脸 24.9~73.0 重叠），

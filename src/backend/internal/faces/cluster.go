@@ -35,6 +35,9 @@ type ClusterRef struct {
 
 // PickCluster 返回与 emb 最相似且相似度 ≥ mergeSim 的簇 ID；无满足者返回空串（调用方新建簇）。
 //
+// **前置不变量（由 NearestClusters 的 SQL 保证）**：refs 里已排除「含有该人脸所属
+// media 的其它人脸的簇」，即同一张媒体内的人脸最多归入同一个簇。本函数不再重复校验。
+//
 // 第二个返回值是命中的相似度（未命中时为全局最高相似度，便于日志与阈值标定）。
 func PickCluster(emb []float32, refs []ClusterRef, mergeSim float64) (string, float64) {
 	bestID := ""

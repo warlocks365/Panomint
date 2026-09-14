@@ -81,9 +81,21 @@ const (
 	DefaultMinFacePx = 24
 	// DefaultMergeSimilarity 聚类合并阈值（余弦相似度）。
 	//
-	// SFace 官方**同人判定**阈值为 0.363；聚类合并故意取略低值以提升召回，
-	// 需按自有语料标定（亚洲人脸无公开基准）。可用 FACE_MERGE_SIM 覆盖。
-	DefaultMergeSimilarity = 0.33
+	// 取 0.40，由 Job000011 在 93 媒体 / 69 张脸语料上标定，两侧各留余量：
+	//
+	//	跨照片错并（klasse 脸并进 taiwan 簇）最高相似度  0.347 ~ 0.348  → 需 > 0.348 才能挡住
+	//	真同人最低相似度（einstein-1 ↔ einstein-3）      0.4382          → 需 < 0.4382 才能保住
+	//
+	// 0.40 居中：距错并侧 0.052、距真同人侧 0.038。官方同人判定 0.363 落在错误区间内，
+	// **不能直接采用**——SFace 在 112×112 输入下的判别力上限就在此处。
+	//
+	// ⚠️ **分辨率不是根因，不要走放大输入这条路**：把脸从 60px 提到 217px，
+	// 异人最大相似度仅从 0.525 降到 0.4999，检出数/置信度一张不变 → 是模型判别力上限。
+	//
+	// 剩余重叠无法靠单一阈值解决（异人 0.525 > 真同人 0.4382），
+	// 真正的兜底是「同媒体内人脸互不合并」这条强先验（见 store.go NearestClusters）。
+	// 可用 FACE_MERGE_SIM 覆盖。
+	DefaultMergeSimilarity = 0.40
 )
 
 // 模型文件名候选（按顺序取第一个存在的文件；兼容 2023mar / 2026may 动态版 / 通用名）。
@@ -125,7 +137,7 @@ type Options struct {
 	ConfThreshold float64 // 检测置信度阈值（0=默认 0.9）
 	NMSThreshold  float64 // 检测 NMS IoU 阈值（0=默认 0.3）
 	MinFacePx     int     // 最小人脸边长（0=默认 24）
-	MergeSim      float64 // 聚类合并余弦阈值（0=默认 0.33）
+	MergeSim      float64 // 聚类合并余弦阈值（0=默认 0.40）
 
 	// Store 聚类所需的 DB 存取（nil=只检测不聚类）。
 	Store *Store

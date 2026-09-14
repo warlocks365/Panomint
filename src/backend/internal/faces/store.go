@@ -108,10 +108,16 @@ func (s *Store) MarkScanned(ctx context.Context, mediaID string) error {
 	return err
 }
 
-// NearestClusters 返回与 emb 余弦距离最近的 k 个已有簇（质心按 avg(embedding) 现算）。
+// NearestClusters 返回与 emb 余弦距离最近的 k 个**可并入的**已有簇（质心按 avg(embedding) 现算）。
+//
+// 关键不变量（由本查询唯一保证，调用方 PickCluster 直接信任传入的 refs）：
+// **同一张媒体内的人脸最多归入同一个簇** —— 一张合影/群照里的不同人脸本就是不同的人，
+// 故这里排除掉「已含有该 mediaID 某人脸的簇」。
+// 依据：Job000011 实测 16 人合影被并成 1 个 11 脸大簇，11 张脸**全部来自同一张照片**；
+// 单一相似度阈值无法分离（异人最高 0.525 > 真同人最低 0.4382），只能靠这条强先验兜底。
 //
 // 显式 ::text / ::float8 转换，避免依赖 pgvector 的 pgx 类型注册。
-func (s *Store) NearestClusters(ctx context.Context, emb []float32, k int) ([]ClusterRef, error) {
+func (s *Store) NearestClusters(ctx context.Context, mediaID string, emb []float32, k int) ([]ClusterRef, error) {
 	if len(emb) != EmbeddingDim {
 		return nil, fmt.Errorf("人脸向量维度应为 %d，实得 %d", EmbeddingDim, len(emb))
 	}
@@ -121,10 +127,15 @@ func (s *Store) NearestClusters(ctx context.Context, emb []float32, k int) ([]Cl
 	rows, err := s.Pool.Query(ctx, `
 		SELECT cluster_id, avg(embedding)::text AS centroid
 		FROM faces
-		WHERE cluster_id IS NOT NULL AND embedding IS NOT NULL
+		WHERE cluster_id IS NOT NULL AND cluster_id <> ''
+		  AND embedding IS NOT NULL
+		  AND cluster_id NOT IN (
+		      SELECT DISTINCT cluster_id FROM faces
+		      WHERE media_id = $3::uuid AND cluster_id IS NOT NULL AND cluster_id <> ''
+		  )
 		GROUP BY cluster_id
 		ORDER BY avg(embedding) <=> $1::vector
-		LIMIT $2`, vectorLiteral(emb), k)
+		LIMIT $2`, vectorLiteral(emb), k, mediaID)
 	if err != nil {
 		return nil, err
 	}

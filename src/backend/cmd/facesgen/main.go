@@ -268,8 +268,9 @@ func scanOne(ctx context.Context, opts faces.Options, det *faces.Detector, rec *
 			log.Printf("  %s 人脸特征失败（跳过该脸）: %v", m.Filename, err)
 			continue
 		}
-		// 与已有簇质心比较：命中则归入，否则新建簇（增量聚类）
-		refs, err := opts.Store.NearestClusters(ctx, emb, 5)
+		// 与已有簇质心比较：命中则归入，否则新建簇（增量聚类）。
+		// NearestClusters 会排除「本媒体已有脸所属的簇」，保证同媒体内最多一张脸进同一簇。
+		refs, err := opts.Store.NearestClusters(ctx, m.ID, emb, 5)
 		if err != nil {
 			return saved, newClusters, fmt.Errorf("查询相似簇失败: %w", err)
 		}
