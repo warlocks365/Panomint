@@ -5,7 +5,9 @@
 //   - 结构化过滤器：buildWhere（query.go）生成参数化 WHERE
 //   - 召回管道：Store.Search 组合结构化过滤 + Recaller 插槽（SemanticRecaller 占位）
 //
-// 本期不实现：person 参数、pgvector 语义召回、/search/video-moment。
+// 本期不实现：/search/video-moment、独立的多人物联合筛选（person 参数仅支持单人）。
+// person 参数已实现（契约 §8）：值为 people.id（UUID）时按人物 ID 过滤，否则按人物姓名模糊匹配；
+// 另外 q 关键词本身即可直接命中人物姓名（见 query.go 的 personNameMatch）。
 package search
 
 import (
@@ -19,8 +21,9 @@ import (
 
 // SearchParams GET /search 查询参数（对齐 API §10 契约子集）。
 type SearchParams struct {
-	Q          string // 关键词（空白分隔多 token，pg_trgm 模糊匹配）
+	Q          string // 关键词（空白分隔多 token，pg_trgm 模糊匹配；同时匹配人物姓名）
 	Tag        string
+	Person     string    // 人物：people.id（UUID）按 ID 过滤；非 UUID 按人物姓名模糊匹配（§8 person）
 	DateAfter  time.Time // taken_at >= DateAfter（含）
 	DateBefore time.Time // taken_at < DateBefore（不含；纯日期按闭区间顺延一天）
 	HasAfter   bool
@@ -68,6 +71,7 @@ func ParseParams(q func(string) string, userID string) (SearchParams, error) {
 	p := SearchParams{
 		Q:         strings.TrimSpace(q("q")),
 		Tag:       strings.TrimSpace(q("tag")),
+		Person:    strings.TrimSpace(q("person")),
 		Place:     strings.TrimSpace(q("place")),
 		Type:      q("type"),
 		Favorites: q("favorites") == "true",

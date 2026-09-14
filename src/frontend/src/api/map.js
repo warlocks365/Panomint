@@ -49,6 +49,13 @@ export function fetchPlaces(bbox, from, to, limit = 50) {
   return http.get(`/geo/places?${q.toString()}`).then((r) => r.data.places || [])
 }
 
+// searchPlaces 地名正向检索（GET /map/search）
+// 后端已按 display provider（默认 amap）把候选归一化为 GCJ-02，与地图高德栅格底图同一坐标系，
+// 返回值可直接喂 map.flyTo；q 为空由调用方拦截（后端返回 400 INVALID_PARAMS）。
+export function searchPlaces(q) {
+  return http.get('/map/search', { params: { q } }).then((r) => r.data.candidates || [])
+}
+
 // getMapIconPref 读取账户级地图图标偏好
 export function getMapIconPref() {
   return http.get('/preferences/map').then((r) => r.data.pref || null)

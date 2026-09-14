@@ -1,83 +1,100 @@
 <template>
-  <div class="map-timeline">
+  <div class="map-timeline" :class="{ 'tl--collapsed': detailHidden }">
     <div class="tl-head">
       <span class="tl-title">时间轴</span>
-      <span class="tl-range">{{ rangeLabel }}</span>
-      <span v-if="loading" class="tl-loading">加载中…</span>
-      <span class="tl-zoom">
+      <span v-if="!detailHidden" class="tl-range">{{ rangeLabel }}</span>
+      <span v-if="loading && !detailHidden" class="tl-loading">加载中…</span>
+      <span v-if="!detailHidden" class="tl-zoom">
         <button class="tl-zoom-btn" type="button" :disabled="granularity === 'year'" @click="zoomOut">−</button>
         <span class="tl-zoom-label">{{ granularityLabel }}</span>
         <button class="tl-zoom-btn" type="button" :disabled="granularity === 'day'" @click="zoomIn">＋</button>
       </span>
-      <button v-if="hasRange" class="tl-clear" type="button" @click="clear">清除</button>
+      <button v-if="hasRange && !detailHidden" class="tl-clear" type="button" @click="clear">清除</button>
+      <!-- 移动端折叠开关：折叠后只剩本行（≤40px），把高度让给地图 -->
+      <button
+        v-if="isMobile"
+        class="tl-toggle"
+        type="button"
+        :aria-expanded="String(!collapsed)"
+        :title="collapsed ? '展开时间轴' : '收起时间轴'"
+        @click="collapsed = !collapsed"
+      >
+        {{ collapsed ? '展开' : '收起' }}
+        <svg viewBox="0 0 10 6" width="9" height="6" fill="none" :class="{ 'tl-chevron--up': collapsed }">
+          <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        </svg>
+      </button>
     </div>
 
-    <div
-      v-if="bars.length"
-      ref="trackRef"
-      class="tl-track"
-      @pointerdown="onDown"
-      @pointermove="onMove"
-      @pointerup="onUp"
-      @pointercancel="onUp"
-    >
+    <div v-if="!detailHidden" class="tl-body">
       <div
-        v-for="(b, i) in bars"
-        :key="b.key"
-        class="tl-bar"
-        :class="{ on: inRange(i) }"
-        :style="{ height: barHeight(b.count) + '%' }"
-        :title="barTitle(b)"
-      ></div>
-    </div>
-    <div v-else class="tl-empty">当前视野内没有带时间的照片</div>
+        v-if="bars.length"
+        ref="trackRef"
+        class="tl-track"
+        @pointerdown="onDown"
+        @pointermove="onMove"
+        @pointerup="onUp"
+        @pointercancel="onUp"
+      >
+        <div
+          v-for="(b, i) in bars"
+          :key="b.key"
+          class="tl-bar"
+          :class="{ on: inRange(i) }"
+          :style="{ height: barHeight(b.count) + '%' }"
+          :title="barTitle(b)"
+        ></div>
+      </div>
+      <div v-else class="tl-empty">当前视野内没有带时间的照片</div>
 
-    <div v-if="bars.length" class="tl-axis">
-      <span>{{ bars[0].key }}</span>
-      <span>{{ bars[bars.length - 1].key }}</span>
-    </div>
+      <div v-if="bars.length" class="tl-axis">
+        <span>{{ bars[0].key }}</span>
+        <span>{{ bars[bars.length - 1].key }}</span>
+      </div>
 
-    <div class="tl-stats">
-      <div class="stat-cell">
-        <span class="stat-dot" style="background:#3b82f6"></span>
-        <span class="stat-name">照片</span>
-        <span class="stat-num">{{ statTotals.photos }}</span>
+      <div class="tl-stats">
+        <div class="stat-cell">
+          <span class="stat-dot" style="background:#3b82f6"></span>
+          <span class="stat-name">照片</span>
+          <span class="stat-num">{{ statTotals.photos }}</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-dot" style="background:#8b5cf6"></span>
+          <span class="stat-name">视频</span>
+          <span class="stat-num">{{ statTotals.videos }}</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-dot" style="background:#f59e0b"></span>
+          <span class="stat-name">全景照片</span>
+          <span class="stat-num">{{ statTotals.panoPhotos }}</span>
+        </div>
+        <div class="stat-cell">
+          <span class="stat-dot" style="background:#ef4444"></span>
+          <span class="stat-name">全景视频</span>
+          <span class="stat-num">{{ statTotals.panoVideos }}</span>
+        </div>
       </div>
-      <div class="stat-cell">
-        <span class="stat-dot" style="background:#8b5cf6"></span>
-        <span class="stat-name">视频</span>
-        <span class="stat-num">{{ statTotals.videos }}</span>
-      </div>
-      <div class="stat-cell">
-        <span class="stat-dot" style="background:#f59e0b"></span>
-        <span class="stat-name">全景照片</span>
-        <span class="stat-num">{{ statTotals.panoPhotos }}</span>
-      </div>
-      <div class="stat-cell">
-        <span class="stat-dot" style="background:#ef4444"></span>
-        <span class="stat-name">全景视频</span>
-        <span class="stat-num">{{ statTotals.panoVideos }}</span>
-      </div>
-    </div>
 
-    <div v-if="places.length" class="tl-places">
-      <span class="pl-label">位置</span>
-      <div class="pl-scroll">
-        <button
-          v-for="p in places"
-          :key="p.name"
-          class="pl-chip"
-          type="button"
-          :title="`${p.name} · ${p.count} 项（点击定位）`"
-          @click="$emit('place', p)"
-        >{{ p.name }}</button>
+      <div v-if="places.length" class="tl-places">
+        <span class="pl-label">位置</span>
+        <div class="pl-scroll">
+          <button
+            v-for="p in places"
+            :key="p.name"
+            class="pl-chip"
+            type="button"
+            :title="`${p.name} · ${p.count} 项（点击定位）`"
+            @click="$emit('place', p)"
+          >{{ p.name }}</button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useResponsive } from '../../composables/useResponsive'
 
 // 时间轴（Job000009 优化）：年/月/日粒度缩放 + 拖拽框选 + 四类媒体实时统计
 const props = defineProps({
@@ -94,6 +111,21 @@ const dragging = ref(false)
 const sel = ref([-1, -1]) // 框选中的索引区间（未提交）
 const downX = ref(0) // 按下时的 clientX（用于位移阈值，区分单击/拖拽）
 const downIndex = ref(-1) // 按下时的 bucket 索引
+
+// ---- 移动端折叠 ----
+// 手机默认折叠：展开态实测占 170~190px（track 54 + stats + places + padding），
+// 在 812×375 横屏下会把地图压到 ~90px 高。桌面端恒为展开，观感与改动前一致。
+const { isMobile, isLandscape } = useResponsive()
+const collapsed = ref(isMobile.value)
+// 跨过 1024px 断点时重置为「移动端折叠 / 桌面端展开」
+watch(isMobile, (m) => {
+  collapsed.value = m
+})
+// 手机上转成横屏 → 重新折叠（横屏只有 375px 高，必须优先保地图高度）
+watch(isLandscape, (l) => {
+  if (isMobile.value && l) collapsed.value = true
+})
+const detailHidden = computed(() => isMobile.value && collapsed.value)
 
 const granularityLabel = computed(() => ({ year: '年', month: '月', day: '日' })[props.granularity] || '月')
 
@@ -276,6 +308,34 @@ function bucketEnd(key) {
   gap: 10px;
   font-size: 12px;
   color: #475569;
+}
+
+/* 移动端折叠开关 */
+.tl-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.tl-chevron--up {
+  transform: rotate(180deg);
+}
+
+/* 折叠态：容器只剩标题行，总高 ≈ 5+20+5 = 30px（验收要求 ≤40px） */
+.tl--collapsed {
+  padding: 5px 10px;
+}
+
+.tl-body {
+  min-width: 0;
 }
 
 .tl-title {

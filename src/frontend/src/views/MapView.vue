@@ -1,12 +1,51 @@
 <template>
-  <div class="map-view">
+  <div class="map-view" :class="{ 'map-view--mobile': isMobile }">
     <div ref="mapRef" class="map-canvas"></div>
 
-    <div class="map-topbar">
-      <span class="mt-title">地图</span>
-      <span class="mt-stat">{{ clusterCount }} 个位置 · {{ pointCount }} 项</span>
-      <span v-if="err" class="mt-err">{{ err }}</span>
-      <button class="mt-icon-btn" type="button" @click="iconPickerOpen = !iconPickerOpen">图标</button>
+    <!-- 浮层容器：顶栏 + 地名搜索框纵向排列；容器自身不吃鼠标事件，地图交互不受遮挡 -->
+    <div class="map-float">
+      <div class="map-topbar">
+        <span class="mt-title">地图</span>
+        <span class="mt-stat">{{ clusterCount }} 个位置 · {{ pointCount }} 项</span>
+        <span v-if="err" class="mt-err">{{ err }}</span>
+        <button class="mt-icon-btn" type="button" @click="iconPickerOpen = !iconPickerOpen">图标</button>
+      </div>
+
+      <!-- 地图内置地名搜索：回车 → /map/search → 候选下拉 → flyTo 定位（不再跳 /search） -->
+      <div ref="searchRef" class="map-search" @keydown.esc="closeSearch">
+        <div class="ms-box">
+          <svg class="ms-icon" viewBox="0 0 16 16" width="14" height="14" fill="none">
+            <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" />
+            <path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+          <input
+            v-model="q"
+            class="ms-input"
+            type="text"
+            placeholder="搜索地名，回车定位"
+            @keyup.enter="runSearch"
+          />
+          <button v-if="q" class="ms-clear" type="button" title="清空" @click="clearSearch">
+            <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
+              <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        <div v-if="searchOpen" class="ms-panel">
+          <div v-if="searching" class="ms-hint">搜索中…</div>
+          <div v-else-if="searchErr" class="ms-hint ms-hint--err">{{ searchErr }}</div>
+          <div v-else-if="searchMsg" class="ms-hint">{{ searchMsg }}</div>
+          <ul v-else class="ms-list">
+            <li v-for="(c, i) in candidates" :key="`${c.name}-${i}`">
+              <button class="ms-item" type="button" @click="pickCandidate(c)">
+                <span class="ms-name">{{ c.name }}</span>
+                <span v-if="c.provider" class="ms-provider">{{ providerLabel(c.provider) }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
     </div>
 
     <MapIconPicker
@@ -54,7 +93,16 @@ import { useRouter } from 'vue-router'
 import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl' // v6 纯 ESM
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { getAccessToken } from '../utils/tokenStore'
-import { fetchClusters, fetchHistogram, fetchItems, fetchPlaces, getMapIconPref, putMapIconPref } from '../api/map'
+import {
+  fetchClusters,
+  fetchHistogram,
+  fetchItems,
+  fetchPlaces,
+  getMapIconPref,
+  putMapIconPref,
+  searchPlaces
+} from '../api/map'
+import { useResponsive } from '../composables/useResponsive'
 import MapTimeline from '../components/map/MapTimeline.vue'
 import MapItemList from '../components/map/MapItemList.vue'
 import MapIconPicker from '../components/map/MapIconPicker.vue'
@@ -63,6 +111,7 @@ import MapHoverCard from '../components/map/MapHoverCard.vue'
 // 地图模式（Job000009 优化）：全屏地图 + 时间轴缩放滑块 + 图标可配置 + 悬停预览
 const router = useRouter()
 const mapRef = ref(null)
+const { isMobile } = useResponsive()
 
 const clusters = ref([])
 const buckets = ref([])
@@ -88,6 +137,76 @@ let hoverCloseTimer = null
 
 const clusterCount = computed(() => clusters.value.length)
 const pointCount = computed(() => clusters.value.reduce((s, c) => s + (c.count || 0), 0))
+
+// ---- 地图内置地名搜索（问题⑥：地图内搜地名应定位地图，而不是被全局搜索框跳到 /search）----
+const q = ref('')
+const candidates = ref([])
+const searchOpen = ref(false)
+const searching = ref(false)
+const searchErr = ref('')
+const searchMsg = ref('') // 「未找到该地点」等空结果提示
+const searchRef = ref(null)
+let searchReqId = 0 // 过期请求丢弃（连续回车时只认最后一次）
+
+function providerLabel(p) {
+  return { amap: '高德', nominatim: 'OSM' }[p] || p
+}
+
+// 回车检索：q 为空不发请求（后端对空 q 返回 400 INVALID_PARAMS，前端先拦）
+async function runSearch() {
+  const text = q.value.trim()
+  if (!text) {
+    closeSearch()
+    return
+  }
+  const reqId = ++searchReqId
+  searching.value = true
+  searchOpen.value = true
+  searchErr.value = ''
+  searchMsg.value = ''
+  candidates.value = []
+  try {
+    const list = await searchPlaces(text)
+    if (reqId !== searchReqId) return
+    candidates.value = list
+    if (!list.length) searchMsg.value = '未找到该地点'
+  } catch (e) {
+    if (reqId !== searchReqId) return
+    // 失败只在地图内提示，绝不跳路由
+    searchErr.value = e?.response?.data?.error?.message || '地点搜索失败，请稍后重试'
+  } finally {
+    if (reqId === searchReqId) searching.value = false
+  }
+}
+
+// 选中候选 → 地图定位。后端返回 GCJ-02（默认 display provider=amap），
+// 与高德栅格底图同坐标系，无需再转换。
+function pickCandidate(c) {
+  if (!map || typeof c.lon !== 'number' || typeof c.lat !== 'number') return
+  map.flyTo({
+    center: [c.lon, c.lat],
+    zoom: Math.max(14, map.getZoom()),
+    duration: 800
+  })
+  scheduleReload()
+  closeSearch()
+}
+
+function closeSearch() {
+  searchOpen.value = false
+  candidates.value = []
+  searchErr.value = ''
+  searchMsg.value = ''
+}
+
+function clearSearch() {
+  q.value = ''
+  closeSearch()
+}
+
+function onSearchOutside(e) {
+  if (searchRef.value && !searchRef.value.contains(e.target)) closeSearch()
+}
 
 let map = null
 let reloadTimer = null
@@ -348,6 +467,8 @@ function onHoverCardLeave() {
 
 onMounted(async () => {
   setWorkerUrl('/maplibre-gl-worker.mjs')
+  // 点击地图（或页面其他区域）关闭候选下拉
+  document.addEventListener('click', onSearchOutside)
   await loadIconPref()
 
   map = new MapLibreMap({
@@ -448,6 +569,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('click', onSearchOutside)
   clearTimeout(reloadTimer)
   clearTimeout(hoverTimer)
   clearTimeout(hoverCloseTimer)
@@ -471,11 +593,25 @@ onBeforeUnmount(() => {
   background: #e8edf2;
 }
 
-.map-topbar {
+/* 浮层容器：绝对定位在画布左上；pointer-events:none 让地图交互完全不受容器遮挡 */
+.map-float {
   position: absolute;
   top: 12px;
   left: 12px;
+  right: 12px;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.map-float > * {
+  pointer-events: auto;
+}
+
+.map-topbar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -484,6 +620,122 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   padding: 6px 12px;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+/* 移动端：数值统计让位，避免与搜索框一起挤爆 390px 宽 */
+.map-view--mobile .mt-stat {
+  display: none;
+}
+
+/* ---- 地名搜索（浮层风格与 .map-topbar 一致）---- */
+.map-search {
+  width: 320px;
+  max-width: 100%;
+}
+
+.map-view--mobile .map-search {
+  align-self: stretch;
+  width: auto;
+}
+
+.ms-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  color: #94a3b8;
+}
+
+.ms-box:focus-within {
+  border-color: #2563eb;
+}
+
+.ms-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.ms-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: #e2e4e9;
+  color: #646a73;
+  padding: 0;
+}
+
+.ms-panel {
+  margin-top: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  padding: 4px;
+}
+
+.ms-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ms-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.ms-item:hover {
+  background: #f1f5f9;
+}
+
+.ms-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ms-provider {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.ms-hint {
+  padding: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.ms-hint--err {
+  color: #dc2626;
 }
 
 .mt-title {

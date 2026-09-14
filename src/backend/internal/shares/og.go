@@ -25,7 +25,20 @@ type ogData struct {
 	NoIndex     bool
 }
 
-// ogHTML 最简 OG 宿主页：无 JS、无外链，仅为抓取器与「误点进来的人」服务。
+// ogHTML OG 宿主页：抓取器与「真浏览器第一次跳转」共用同一份 HTML。
+//
+// 抓取器（微信/微博/Twitter/Slack…）不执行 JS，只读初始 HTML 里的 og:* 标签 → 卡片成立；
+// 真浏览器执行 JS → 立即带 ?spa=1 重进同一个 URL，由 nginx 的 $arg_spa 分支直出 SPA → 能播放。
+// 这样「卡片」与「可播放」两个能力同时保住，且不必依赖对 UA / Accept 的二次判别。
+//
+// 正文链接必须是**相对**的 ?spa=1：绝不能回指 PageURL（那是 og:url 的规范地址），
+// 指向自身会让误入的人点进死循环 —— 这正是本次修复的根因之一。
+// 这里保留可见链接而非 <noscript>：JS 开启、JS 关闭、内联脚本被 CSP 拦截三种情况下都可用。
+//
+// 脚本里 `indexOf('spa=1') !== -1` 的守卫不能删：万一 nginx 的 $arg_spa 分支尚未上线
+// （部署顺序颠倒），少了它就会无限重定向；有它则退化成「停在极简页」，不会把链接彻底打死。
+// 另注：html/template 的 JS 词法分析会剥离 <script> 内的 // 注释，所以解释一律写在这里，
+// 模板里写注释是死代码；这也说明脚本正文是原样透传、不做 JS 转义的。
 const ogHTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -53,7 +66,14 @@ const ogHTML = `<!DOCTYPE html>
 <body style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding:24px;line-height:1.7">
 <h1 style="font-size:18px;margin:0 0 8px">{{.Title}}</h1>
 <p style="margin:0 0 16px;color:#666">{{.Description}}</p>
-<p style="margin:0"><a href="{{.PageURL}}">在浏览器中打开</a></p>
+<script>
+(function () {
+  var s = location.search;
+  if (s.indexOf('spa=1') !== -1) { return; }
+  location.replace(location.pathname + s + (s ? '&' : '?') + 'spa=1');
+})();
+</script>
+<p style="margin:0"><a href="?spa=1">在浏览器中打开</a></p>
 </body>
 </html>
 `
@@ -78,12 +98,18 @@ func originOf(c *gin.Context) string {
 }
 
 // renderOG 渲染并写出 OG HTML。
+//
+// Cache-Control 用 no-store（而非原先的 public, max-age=300）：本页现在是**中转页**，
+// 内容直接派生自可变 DB 状态（标题 / 封面 / 有效期 / 次数），且响应不带任何缓存校验器
+// （无 ETag、无 Last-Modified），max-age 只会让用户在改动上线后的一段时间里反复吃到旧的、
+// 没有跳转脚本的页面 —— 那正是本次要修的故障。no-store 同时排除 bfcache 与移动端磁盘缓存
+// 这两条 no-cache 覆盖不到的复用路径。抓取器读 og:* 是即时读 HTML，不受影响。
 func (h *Handler) renderOG(c *gin.Context, status int, d ogData) {
 	if d.PageURL == "" {
 		d.PageURL = originOf(c) + "/share/" + c.Param("token")
 	}
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.Header("Cache-Control", "public, max-age=300")
+	c.Header("Cache-Control", "no-store")
 	c.Status(status)
 	_ = ogTmpl.Execute(c.Writer, d)
 }

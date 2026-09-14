@@ -17,7 +17,12 @@
 
   /* 尺寸 */
   --sidebar-width: 220px;
+  /* 侧栏收起态（仅图标）：56px，与桌面端导航图标列宽一致 */
+  --sidebar-width-icon: 56px;
   --topbar-height: 56px;
+  --content-padding: 24px;
+  /* 移动端地图页内容区内边距归零：画布需要满屏（390px 宽下 24px 占 12%，375px 高下吃掉 48px 高度） */
+  --content-padding-mobile: 0px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;

@@ -99,6 +99,19 @@ const calibOffset = new THREE.Quaternion()
 const isWeChat = /MicroMessenger/i.test(navigator.userAgent)
 let gyroWatchdog = 0
 let gyroGotData = false
+/* 平滑（R2/R4）：事件回调只写 targetQuat，相机由 rAF 统一 slerp 写入。
+   GYRO_SLEW = 每帧向目标朝向逼近的比例，0.2~0.3 兼顾跟手与平滑：越小越平滑、跟随延迟越大。 */
+const GYRO_SLEW = 0.25
+const GYRO_WATCHDOG_MS = 1500  // 首轮等待：传感器首次出数可能略慢
+const GYRO_SWAP_MS = 800       // 换源后第二轮等待：另一个事件源注册后通常立即出数
+const targetQuat = new THREE.Quaternion()
+const gyroRawQuat = new THREE.Quaternion()
+const tmpQuat = new THREE.Quaternion()
+const gyroDir = new THREE.Vector3()
+let gyroHasTarget = false
+let gyroEventName = ''            // 当前实际监听的事件名（两者只注册其一）
+let gyroTriedFallback = false     // 看门狗是否已尝试换源
+let gyroNeedInitialCalib = false  // 开启后等待首个样本建立补偿（R6）
 
 /* 子系统 5：错误恢复 */
 let netRetries = 0
@@ -160,29 +173,72 @@ function onWheel(e) {
 function screenOrientationAngle() {
   return (screen.orientation && screen.orientation.angle) || window.orientation || 0
 }
-function orientToQuat(alpha, beta, gamma) {
+// 结果写入 out（不新建 Quaternion）：陀螺仪事件每秒数十次，避免持续分配。
+function orientToQuat(out, alpha, beta, gamma) {
   const d = Math.PI / 180
   euler.set(beta * d, alpha * d, -gamma * d, 'YXZ')
-  const q = new THREE.Quaternion().setFromEuler(euler)
-  q.multiply(q1)
-  q.multiply(q0.setFromAxisAngle(zee, -screenOrientationAngle() * d))
-  return q
+  out.setFromEuler(euler)
+  out.multiply(q1)
+  out.multiply(q0.setFromAxisAngle(zee, -screenOrientationAngle() * d))
+  return out
 }
 function onDeviceOrientation(e) {
-  if (e.alpha === null && e.beta === null && e.gamma === null) return
+  const a = e.alpha, b = e.beta, g = e.gamma
+  // R3：α/β/γ 任一缺失或非有限数都直接丢弃该事件。α 的合法取值包含 0，
+  // 用 `|| 0` 兜底会把「缺失」误当成「0° 真实朝向」，相机在真实朝向与 0° 之间反复跳。
+  if (a == null || b == null || g == null) return
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(g)) return
   gyroGotData = true
-  camera.quaternion.copy(orientToQuat(e.alpha || 0, e.beta || 0, e.gamma || 0)).premultiply(calibOffset)
+  orientToQuat(gyroRawQuat, a, b, g)
+  if (gyroNeedInitialCalib) {
+    gyroNeedInitialCalib = false
+    // R6：首个样本建立补偿，等价于开启瞬间按一次「校准」——
+    // offset = 当前视角 × 传感器朝向⁻¹，于是 offset × q_raw === 当前视角，开启瞬间零跳变。
+    calibOffset.copy(camera.quaternion).multiply(tmpQuat.copy(gyroRawQuat).invert())
+  }
+  // R2/R4：回调只更新目标朝向，相机统一由 rAF 插值写入（不再逐事件直灌，也避免同帧多次写/读到中间态）。
+  targetQuat.copy(gyroRawQuat).premultiply(calibOffset)
+  gyroHasTarget = true
 }
-function attachGyroListeners() {
-  window.addEventListener('deviceorientation', onDeviceOrientation)
-  window.addEventListener('deviceorientationabsolute', onDeviceOrientation)
-  gyroGotData = false
+// R1：deviceorientation 与 deviceorientationabsolute 参考系不同（α 相差常量偏置），
+// Android Chrome 会同时派发两者 —— 两个事件交替命中同一 handler，相机在「两个朝向」之间
+// 高频交替，这是画面频繁闪动的根因。因此二者只注册其一：优先 absolute（磁力计真北参考系，
+// 无累积漂移），能力探测不可用则用 relative。探测可能失真（存在但永不到达 / alpha 恒 null），
+// 由看门狗换源兜底。
+function gyroAbsoluteAvailable() {
+  return 'ondeviceorientationabsolute' in window
+}
+function attachGyroListener(name) {
+  window.addEventListener(name, onDeviceOrientation)
+  gyroEventName = name
+}
+function detachGyroListener() {
+  if (!gyroEventName) return
+  window.removeEventListener(gyroEventName, onDeviceOrientation)
+  gyroEventName = ''
+}
+function armGyroWatchdog(ms) {
   clearTimeout(gyroWatchdog)
   gyroWatchdog = setTimeout(() => {
-    if (!gyroGotData) {
-      gyroOff(isWeChat ? '微信浏览器未提供陀螺仪数据，已降级为拖拽模式' : '未检测到陀螺仪数据，已降级为拖拽模式')
+    if (gyroGotData) return
+    if (!gyroTriedFallback) {
+      // 第一次超时先换成另一个事件源再等一轮（比直接降级保守），仍无有效数据才降级。
+      gyroTriedFallback = true
+      const alt = gyroEventName === 'deviceorientationabsolute' ? 'deviceorientation' : 'deviceorientationabsolute'
+      detachGyroListener()
+      attachGyroListener(alt)
+      armGyroWatchdog(GYRO_SWAP_MS)
+      return
     }
-  }, 1500)
+    gyroOff(isWeChat ? '微信浏览器未提供陀螺仪数据，已降级为拖拽模式' : '未检测到陀螺仪数据，已降级为拖拽模式')
+  }, ms)
+}
+function attachGyroListeners() {
+  gyroGotData = false
+  gyroTriedFallback = false
+  detachGyroListener()
+  attachGyroListener(gyroAbsoluteAvailable() ? 'deviceorientationabsolute' : 'deviceorientation')
+  armGyroWatchdog(GYRO_WATCHDOG_MS)
 }
 async function enableGyro() {
   if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -192,18 +248,42 @@ async function enableGyro() {
     } catch { gyroOff('权限请求失败，已降级为拖拽模式'); return }
   }
   attachGyroListeners()
+  // R6：置 gyroOn 之前先把插值目标对齐当前视角，使「开启瞬间」与「首个样本到达」两个时刻视角都连续。
+  gyroNeedInitialCalib = true
+  targetQuat.copy(camera.quaternion)
+  gyroHasTarget = true
   gyroOn.value = true
 }
+// R5：把当前相机朝向按 lookAt 的逆映射反解回 lon/lat，供关闭陀螺仪/看门狗降级时 rAF 无缝接管，
+// 避免视角瞬跳。（lookAt 的注视方向 dir = (sinφcosθ, cosφ, sinφ sinθ)，φ=deg2rad(90-lat)，θ=deg2rad(lon)）
+function syncLonLatFromCamera() {
+  gyroDir.set(0, 0, -1).applyQuaternion(camera.quaternion)
+  const dy = Math.max(-1, Math.min(1, gyroDir.y))
+  lat = Math.max(-89.9, Math.min(89.9, 90 - THREE.MathUtils.radToDeg(Math.acos(dy))))
+  const sinPhi = Math.sqrt(Math.max(0, 1 - dy * dy))
+  if (sinPhi > 1e-4) lon = THREE.MathUtils.radToDeg(Math.atan2(gyroDir.z, gyroDir.x))
+}
 function gyroOff(note) {
-  window.removeEventListener('deviceorientation', onDeviceOrientation)
-  window.removeEventListener('deviceorientationabsolute', onDeviceOrientation)
+  const wasOn = gyroOn.value
+  detachGyroListener()
   clearTimeout(gyroWatchdog)
   gyroOn.value = false
+  gyroHasTarget = false
+  gyroNeedInitialCalib = false
+  if (wasOn && camera) syncLonLatFromCamera()
   if (note) showToast(note)
 }
 function toggleGyro() { gyroOn.value ? gyroOff() : enableGyro() }
 function calibrate() {
-  calibOffset.copy(camera.quaternion).invert()
+  if (gyroOn.value && gyroHasTarget) {
+    // 校准 = 把当前视角重设为当前传感器朝向的参考（offset = 当前视角 × q_raw⁻¹），
+    // 与 R6 的开启补偿同一语义，因此按「校准」本身不会移动画面。
+    calibOffset.copy(camera.quaternion).multiply(tmpQuat.copy(gyroRawQuat).invert())
+    targetQuat.copy(gyroRawQuat).premultiply(calibOffset)
+    gyroHasTarget = true
+  } else {
+    calibOffset.copy(camera.quaternion).invert()
+  }
   showToast('已校准视角')
 }
 
@@ -503,7 +583,11 @@ onMounted(() => {
 
   fpsWindowStart = performance.now()
   renderer.setAnimationLoop(() => {
-    if (!gyroOn.value && !renderer.xr.isPresenting) {
+    if (gyroOn.value && gyroHasTarget && !renderer.xr.isPresenting) {
+      // R2/R4：传感器只在回调里更新 targetQuat，相机在这里统一插值，噪声不再逐事件直灌相机。
+      // 取舍：跟随引入约 1~2 帧延迟（多数场景下眩晕感反而更轻）；GYRO_SLEW 越小越平滑、延迟越大。
+      camera.quaternion.slerp(targetQuat, GYRO_SLEW)
+    } else if (!gyroOn.value && !renderer.xr.isPresenting) {
       const phi = THREE.MathUtils.degToRad(90 - lat)
       const theta = THREE.MathUtils.degToRad(lon)
       camera.lookAt(

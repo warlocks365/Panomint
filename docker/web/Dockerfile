@@ -21,6 +21,11 @@ map $request_method:$http_accept $spa_nav {
 
 # 社交/搜索抓取器判别：它们不执行 JS，只看初始 HTML → 需要服务端渲染 OG 标签；
 # 普通浏览器仍走 SPA（行为不变）。
+#
+# 注意：微信**内置浏览器（真人）**的 UA 同样含 MicroMessenger，会被本规则命中 →
+# 真人拿到 OG 页。解决办法不是把 MicroMessenger 从名单里删掉（那会一起丢掉微信卡片
+# 能力：实测抓取器正是命中本规则才出的卡片），而是让 OG 页自带 JS 跳转，真人再带
+# ?spa=1 回到 @spa 拿 SPA —— 见下面 /share/ location 的「$arg_spa 必须在前」。
 map $http_user_agent $og_bot {
     default 0;
     ~*(MicroMessenger|WeChat|Weixin|Twitterbot|facebookexternalhit|Facebot|TelegramBot|Slackbot|LinkedInBot|WhatsApp|Discordbot|Googlebot|bingbot|Applebot|Pinterest|SkypeUriPreview|redditbot|Embedly) 1;
@@ -101,12 +106,25 @@ server {
         try_files $uri =404;
     }
 
-    # 分享页 /share/<token>：抓取器 → 服务端渲染的 OG HTML；普通浏览器 → SPA（行为不变）
-    # 借用本文件既有的 error_page 418 写法，避开 nginx 对「location 内 if + proxy_pass」的告警
+    # 分享页 /share/<token>：三个出口，优先次序即正确性
+    #   ① ?spa=1 —— OG 中转页里的 JS 跳回来的第二次请求 → 强制 SPA（能播放）
+    #   ② 抓取器 UA → 服务端渲染的 OG HTML（保卡片；抓取器不执行 JS，不会被脚本带走）
+    #   ③ 其余 → SPA
+    #
+    # ⚠️ 两条 if 的**书写顺序是功能正确性的一部分，不是风格问题**：nginx 的 if 属于
+    #    ngx_http_rewrite_module，在 rewrite 阶段**按配置里出现的先后依次求值**，命中即
+    #    执行 return 并终结该请求。$arg_spa 必须写在 $og_bot 之前：
+    #    微信内置浏览器（真人）UA 含 MicroMessenger，必然命中 $og_bot；若 $og_bot 在前，
+    #    它带着 ?spa=1 回来时会被再次判成抓取器 → 又发 OG 页 → 而 OG 页的脚本见 search
+    #    里已有 spa=1 便不再跳转 → 用户被永久困在极简文字页（正是本次要修的 bug 的加强版）。
+    #
+    # 借用本文件既有的 error_page 写法，避开 nginx 对「location 内 if + proxy_pass」的告警。
     location ~ ^/share/(?<share_token>[A-Za-z0-9_-]+)/?$ {
         error_page 418 = @share_og;
+        error_page 419 = @spa;
         recursive_error_pages on;
-        if ($og_bot) { return 418; }
+        if ($arg_spa) { return 419; }   # ① 必须在前：带 ?spa=1 者一律给 SPA，不再判 UA
+        if ($og_bot)  { return 418; }   # ② 抓取器：只给 OG HTML
         try_files $uri $uri/ /index.html;
     }
 

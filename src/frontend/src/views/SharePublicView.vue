@@ -377,6 +377,17 @@ function closePano() {
 
 onMounted(async () => {
   document.title = '全景相册分享'
+  // OG 中转页会带 ?spa=1 跳进来（见 internal/shares/og.go 与 docker/web/Dockerfile 的 /share 分流）。
+  // 该参数只对「第一次请求要绕过抓取器判别」有意义，进入 SPA 后必须立刻从地址栏抹掉：
+  // 否则用户在微信里用「··· → 发送给朋友」转发时会把 ?spa=1 一起带出去，
+  // 下一个接收者的**抓取器**命中「强制 SPA」分支 → 拿不到 og:* → 分享卡片退化成纯标题。
+  // 保留其余 query（如 ?password=），顺序不变。
+  if (route.query.spa) {
+    const rest = { ...route.query }
+    delete rest.spa
+    const qs = new URLSearchParams(rest).toString()
+    window.history.replaceState({}, '', route.path + (qs ? '?' + qs : ''))
+  }
   try {
     await loadShare('')
   } catch (e) {
