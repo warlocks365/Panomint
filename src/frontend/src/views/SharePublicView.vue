@@ -118,6 +118,7 @@
         </button>
         <div class="pano-box">
           <Player360
+            v-if="panoReady"
             :key="panoItem.id"
             :media-id="String(panoItem.id)"
             :mode="panoItem.type === 'photo' ? 'photo' : 'video'"
@@ -125,7 +126,11 @@
             :title="panoItem.filename || ''"
             auth="none"
             :append-query="panoAppendQuery"
+            :bandwidth-kbps="panoBandwidthKbps"
           />
+          <div v-else class="pano-loading">
+            <div class="spinner"></div>
+          </div>
         </div>
       </div>
     </template>
@@ -136,7 +141,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import Hls from 'hls.js'
-import { fetchPublicShare, loadPublicThumb, publicHlsUrl, publicThumbUrl } from '../components/shares/publicApi'
+import { fetchPublicShare, loadPublicThumb, measureShareBandwidth, publicHlsUrl, publicThumbUrl } from '../components/shares/publicApi'
 import Player360 from '../components/player/360Player.vue'
 
 const route = useRoute()
@@ -165,6 +170,15 @@ let alive = true
 
 /* 360 全景查看器状态：照片取 lg 缩略图贴球面，视频走公开 HLS */
 const panoItem = ref(null)
+/* Phase 4 P1：带宽自测结束前先不挂载 360 播放器（避免用错档位起播） */
+const panoReady = ref(false)
+/* 实测下行带宽（kbps）；0 = 未知/测速失败 → 360Player 走 hls.js 默认 ABR */
+const panoBandwidthKbps = ref(0)
+/* 带宽自测等待上限：超时先播放，拿不到提示就交给 hls.js 默认 ABR（绝不无限阻塞） */
+const BW_HINT_TIMEOUT_MS = 1500
+/* 用户快速切换媒体时，丢弃上一轮迟到的测量结果 */
+let panoSeq = 0
+
 const panoSrc = computed(() => {
   if (!panoItem.value) return ''
   if (panoItem.value.type === 'photo') return publicThumbUrl(token, panoItem.value.id, 'lg', password.value)
@@ -172,6 +186,29 @@ const panoSrc = computed(() => {
 })
 // 密码分享的 HLS ts 切片请求不继承 master URL 查询串，需逐请求补挂
 const panoAppendQuery = computed(() => (password.value ? `password=${encodeURIComponent(password.value)}` : ''))
+
+// preparePano 打开 360 媒体：照片无需 HLS，立即进播放器；
+// 视频先做带宽自测（有上界），据测速值让 360Player 选初始档位。
+async function preparePano(item) {
+  panoItem.value = item
+  panoBandwidthKbps.value = 0
+  if (item.type === 'photo') {
+    panoReady.value = true
+    return
+  }
+  panoReady.value = false
+  const seq = ++panoSeq
+  const measured = measureShareBandwidth(token, password.value)
+    .then((r) => (r && Number(r.down_kbps) > 0 ? Number(r.down_kbps) : 0))
+    .catch(() => 0) // 测速失败 → 0 → 360Player 走 hls.js 默认 ABR
+  const hint = await Promise.race([
+    measured,
+    new Promise((resolve) => setTimeout(() => resolve(0), BW_HINT_TIMEOUT_MS))
+  ])
+  if (seq !== panoSeq || !alive) return // 已切走/已卸载：丢弃
+  panoBandwidthKbps.value = hint
+  panoReady.value = true
+}
 
 function isVideo(m) {
   // 360 视频走全景播放，不进普通播放器
@@ -260,8 +297,7 @@ async function submitPassword() {
 
 async function openItem(m) {
   if (is360(m)) {
-    panoItem.value = m // 360 照片/视频统一进全景查看器
-    return
+    return preparePano(m) // 360 照片/视频统一进全景查看器（视频需先测速定初始档）
   }
   if (isVideo(m)) {
     openPlayer(m)
@@ -333,6 +369,9 @@ function closePlayer() {
 }
 
 function closePano() {
+  panoSeq++ // 作废在途的带宽测量，避免其回填后重新挂载播放器
+  panoReady.value = false
+  panoBandwidthKbps.value = 0
   panoItem.value = null // v-if 卸载即触发 Player360 自身资源销毁
 }
 
@@ -351,6 +390,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   alive = false
+  panoSeq++
   destroyPlayer()
   for (const url of thumbs.values()) URL.revokeObjectURL(url)
   thumbs.clear()
@@ -640,6 +680,15 @@ onBeforeUnmount(() => {
   font-size: var(--font-size-sm);
   color: rgba(255, 255, 255, 0.75);
   text-align: center;
+}
+
+/* 带宽自测期间的占位（有上限，不会长期停留） */
+.pano-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .player-error {

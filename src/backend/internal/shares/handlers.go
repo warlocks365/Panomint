@@ -110,17 +110,9 @@ func (h *Handler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"id": id, "token": token, "url": shareURL(c, token)})
 }
 
-// shareURL 拼装公开访问 URL（尊重反向代理 X-Forwarded-Proto）。
+// shareURL 拼装公开访问 URL（尊重反向代理 X-Forwarded-Proto；originOf 见 og.go）。
 func shareURL(c *gin.Context, token string) string {
-	scheme := c.GetHeader("X-Forwarded-Proto")
-	if scheme == "" {
-		if c.Request.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
-	}
-	return fmt.Sprintf("%s://%s/public/shares/%s", scheme, c.Request.Host, token)
+	return fmt.Sprintf("%s/public/shares/%s", originOf(c), token)
 }
 
 // List GET /shares → 我的分享列表（含 access_count/状态）。

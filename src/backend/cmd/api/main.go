@@ -182,6 +182,15 @@ func main() {
 	authed.GET("/shares", permShare, sharesH.List)
 	authed.DELETE("/shares/:id", permShare, sharesH.Delete)
 
+	// Phase 4 P1：带宽（契约 §15）。GET 读生效带宽（manual 优先，否则最近自测）；
+	// PATCH 手动指定；probe/self-test 为登录态自测探针（与分享侧共用同一探针实现）。
+	// 探针会真实占用上下行带宽，已做尺寸与总耗时上界，详见 internal/shares/bandwidth.go。
+	authed.GET("/bandwidth", permRead, sharesH.GetBandwidth)
+	authed.PATCH("/bandwidth", permWrite, sharesH.PatchBandwidth)
+	authed.GET("/bandwidth/probe", permRead, sharesH.ProbeDown)
+	authed.POST("/bandwidth/probe", permRead, sharesH.ProbeUp)
+	authed.POST("/bandwidth/self-test", permWrite, sharesH.SelfTest)
+
 	// Stage 3 结构化搜索（Job000001，API §10）；Stage 4 语义召回（Job000010）在此接入。
 	// place 降级经 geo_cache 缓存的 Nominatim resolver。
 	// 语义召回依赖 CLIP 模型与 onnxruntime 原生库：任一缺失则降级为占位实现（Stage 3 行为），
@@ -209,11 +218,28 @@ func main() {
 	authed.GET("/preferences/map", permRead, geoH.GetMapIconPref)  // Job000009 图标配置（账户级）
 	authed.PUT("/preferences/map", permRead, geoH.PutMapIconPref)
 
+	// 契约 §7：模糊地理搜索 + 可用底图（读 media:read）。
+	// ⚠️ 该端点会打上游（中国走高德 / 国际走 Nominatim）并按 q 落 geo_cache ——
+	// 注意上游配额（高德按 Key 计 QPS、Nominatim 条款要求 ≥1 req/s），详见 internal/geo/mapsearch.go 文件头。
+	// 无高德 Key 时中国地名优雅降级到 Nominatim，绝不 500（降级归因见响应头 X-Map-Search-Degraded）。
+	mapSearchSvc := geo.NewMapSearchService(pool, cfg.AmapKey, os.Getenv("AMAP_SECRET"), log)
+	authed.GET("/map/search", permRead, mapSearchSvc.Search)      // ?q= → {candidates:[{name,lon,lat,provider}]}
+	authed.GET("/map/providers", permRead, mapSearchSvc.Providers) // → {china,intl,default}（不含密钥）
+
 	// Stage 2 公开端点（无鉴权，token 即凭证；不提供原文件下载）
 	r.GET("/public/shares/:token", sharesH.PublicGet)
 	r.GET("/public/shares/:token/media/:id/thumb", sharesH.PublicThumb)
 	r.GET("/public/shares/:token/media/:id/hls/*file", sharesH.PublicHLS)
 	r.GET("/public/shares/:token/media/:id/download", sharesH.PublicDownload) // 占位：统一 403，P1 实现
+
+	// Phase 4 P1：分享页 OG 封面（服务端渲染最简 HTML；社交抓取器不执行 JS，只看初始 HTML）。
+	// 绝对 URL 由请求 Host 动态拼出，不写死域名；受密码保护的分享只返回中性卡片（不泄露标题与缩略图）。
+	r.GET("/public/shares/:token/og", sharesH.PublicOG)
+	// Phase 4 P1：分享带宽自测（契约 §11，token 鉴权、无 JWT）。
+	// 三段式：下行探针(GET) → 上行探针(POST) → 无 body 的汇总(POST，落 bandwidth_profiles/tests)。
+	r.GET("/public/shares/:token/bandwidth-probe", sharesH.PublicProbeDown)
+	r.POST("/public/shares/:token/bandwidth-probe", sharesH.PublicProbeUp)
+	r.POST("/public/shares/:token/bandwidth-test", sharesH.PublicBandwidthTest)
 
 	// 管理端点（需 admin:users 权限）
 	admin := authed.Group("/admin", auth.RequirePerm(authStore, "admin:users"))

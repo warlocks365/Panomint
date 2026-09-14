@@ -65,3 +65,91 @@ export function loadPublicThumb(token, id, size = 'md', password = '') {
   pending.set(key, p)
   return p
 }
+
+/* ---------------- Phase 4 P1：分享带宽自测（360 播放页 ABR 初档依据） ---------------- */
+
+// 探针尺寸：下行 256KiB / 上行 128KiB —— 足够测出量级，又不会在移动网络上白烧流量。
+const BW_DOWN_BYTES = 256 * 1024
+const BW_UP_BYTES = 128 * 1024
+// 与后端 maxReportedKbps 一致：防前端计时异常产出离谱数值
+const BW_MAX_KBPS = 5000000
+
+function clampKbps(v) {
+  if (!Number.isFinite(v) || v <= 0) return 0
+  return Math.min(BW_MAX_KBPS, Math.round(v))
+}
+
+function randomBytes(n) {
+  const b = new Uint8Array(n)
+  for (let off = 0; off < n; off += 65536) {
+    // crypto.getRandomValues 单次上限 65536 字节
+    crypto.getRandomValues(b.subarray(off, Math.min(off + 65536, n)))
+  }
+  return b
+}
+
+// 探针端点 URL（下行 GET / 上行 POST 同一路径，token 鉴权 + 密码约束）
+export function publicProbeUrl(token, bytes, password = '') {
+  return withPassword(`${API_BASE}/public/shares/${token}/bandwidth-probe?bytes=${bytes}`, password)
+}
+
+// measureShareBandwidth 分享页带宽自测（3 个请求，与后端 internal/shares/bandwidth.go 对应）：
+//   1. GET  探针：服务端连写 N 字节随机数据，浏览器读完计时 → 下行 + TTFB 延迟
+//   2. POST 探针：浏览器上传 M 字节，服务端读请求体计时 → 上行
+//   3. POST /bandwidth-test（无 body）：服务端读探针缓存、落库并回 {up_kbps,down_kbps,latency_ms}
+//
+// 任何一步失败都抛错，调用方**必须回落 hls.js 默认 ABR**，不得阻塞播放。
+// 上行探针失败不致命（ABR 只依赖下行），但下行探针失败即视为测速失败。
+export async function measureShareBandwidth(token, password = '') {
+  // 1) 下行：边收边读，TTFB ≈ RTT（后端返回 X-Accel-Buffering: no，故 nginx 不会缓冲掉时间信息）
+  const t0 = performance.now()
+  const dl = await fetch(publicProbeUrl(token, BW_DOWN_BYTES, password), { cache: 'no-store' })
+  if (!dl.ok) throw new Error(`bandwidth probe HTTP ${dl.status}`)
+
+  let received = 0
+  let firstByteMs = 0
+  if (dl.body && typeof dl.body.getReader === 'function') {
+    const reader = dl.body.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!firstByteMs) firstByteMs = performance.now() - t0
+      received += value.byteLength
+    }
+  } else {
+    // 极老浏览器无流式 body：退化为整体计时，延迟按 0 处理
+    received = (await dl.arrayBuffer()).byteLength
+  }
+  const elapsedMs = Math.max(1, performance.now() - t0)
+  const downKbps = clampKbps((received * 8) / (elapsedMs / 1000) / 1000)
+  const latencyMs = Math.round(firstByteMs)
+  if (downKbps <= 0) throw new Error('bandwidth probe 无有效载荷')
+
+  // 2) 上行：失败只丢上行值，不影响选档
+  let upKbps = 0
+  try {
+    const up = await fetch(publicProbeUrl(token, BW_UP_BYTES, password), {
+      method: 'POST',
+      body: randomBytes(BW_UP_BYTES),
+      cache: 'no-store'
+    })
+    if (up.ok) upKbps = clampKbps(Number((await up.json())?.up_kbps) || 0)
+  } catch {
+    upKbps = 0
+  }
+
+  const local = { up_kbps: upKbps, down_kbps: downKbps, latency_ms: latencyMs }
+
+  // 3) 汇总落库。写库失败也要把已测到的带宽交回调用方（否则白白浪费一次测速）
+  try {
+    const url = withPassword(
+      `${API_BASE}/public/shares/${token}/bandwidth-test?down_kbps=${downKbps}&latency_ms=${latencyMs}`,
+      password
+    )
+    const res = await fetch(url, { method: 'POST', cache: 'no-store' })
+    if (res.ok) return await res.json()
+  } catch {
+    /* 回落本地测量值 */
+  }
+  return local
+}

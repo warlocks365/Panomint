@@ -54,7 +54,9 @@ const props = defineProps({
   title: { type: String, default: '' },
   mode: { type: String, default: 'video' }, // video | photo（360 照片球面渲染）
   auth: { type: String, default: 'bearer' }, // bearer（主站 HLS 带 token）| none（分享公开端点免鉴权）
-  appendQuery: { type: String, default: '' } // 追加到每个 HLS 请求 URL 的查询串（如分享密码 password=xxx）
+  appendQuery: { type: String, default: '' }, // 追加到每个 HLS 请求 URL 的查询串（如分享密码 password=xxx）
+  // Phase 4 P1：实测下行带宽（kbps）。0 = 未知/测速失败 → 完全不干预，用 hls.js 默认 ABR。
+  bandwidthKbps: { type: Number, default: 0 }
 })
 const isPhoto = computed(() => props.mode === 'photo')
 
@@ -224,6 +226,29 @@ function onVisibilityChange() {
 }
 
 /* ---- hls.js ---- */
+
+// pickStartLevel 按实测下行带宽在 master.m3u8 的档位里挑**初始档**：
+// 取「BANDWIDTH ≤ 0.8×down_kbps」中码率最高的那档（留 20% 余量，避免首片就卡）。
+// 返回 -1 表示不干预，交给 hls.js 默认 ABR —— 以下三种情况必须走 -1：
+//   · 带宽未知（0）或测速失败；· 只有一档（源片分辨率不够导致阶梯退化为单档）；
+//   · 没有任何档位低于可用带宽。
+function pickStartLevel(levels, downKbps, capIdx) {
+  if (!Array.isArray(levels) || levels.length <= 1) return -1
+  if (!downKbps || downKbps <= 0) return -1
+  const budget = downKbps * 1000 * 0.8
+  let best = -1
+  let bestRate = -1
+  levels.forEach((lv, i) => {
+    if (capIdx >= 0 && i > capIdx) return // 不越过纹理上限（与 MANIFEST_PARSED 里的 autoLevelCapping 一致）
+    const rate = Number(lv?.bitrate) || 0
+    if (rate > 0 && rate <= budget && rate > bestRate) {
+      bestRate = rate
+      best = i
+    }
+  })
+  return best
+}
+
 function attachHls(url) {
   if (hls) { hls.destroy(); hls = null }
   netRetries = 0; backoff = 1000
@@ -260,6 +285,19 @@ function attachHls(url) {
       })
       qualityOptions.value = opts
       if (maxAllowed >= 0) hls.autoLevelCapping = maxAllowed
+
+      // Phase 4 P1：按实测带宽选初始档。只影响**首片**，首个分片到手后立即把控制权交还 ABR，
+      // 因此既有的「纹理上限 autoLevelCapping」与「低帧率自动降档」全部保持原样；
+      // pickStartLevel 返回 -1 时（单档 / 无量测 / 无合适档）行为与改动前完全一致。
+      const hintLevel = pickStartLevel(data.levels, props.bandwidthKbps, maxAllowed)
+      if (hintLevel >= 0) {
+        hls.startLevel = hintLevel
+        hls.currentLevel = hintLevel
+        hls.once(Hls.Events.FRAG_LOADED, () => {
+          if (hls) hls.currentLevel = -1 // 交还 ABR，避免整段锁死档位
+        })
+      }
+
       video.play().catch(() => {})
       playing.value = !video.paused
     })
