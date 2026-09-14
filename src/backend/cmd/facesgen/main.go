@@ -23,6 +23,16 @@
 //	缩略图    -thumbdir  或 THUMB_DIR（默认 ./data/thumbnails）
 //	-faceconf/-facenms/-minpx/-merge  或 FACE_CONF / FACE_NMS / FACE_MIN_PX / FACE_MERGE_SIM
 //
+// 检测输入边长（默认**按源图长边自适应**，不再固定 640）：
+//
+//	-inputsize N 或 FACE_INPUT_SIZE   显式指定边长（**优先于一切推导**；静态图只能用模型声明值）
+//	FACE_INPUT_MAX=N                  自适应上限（默认 1280；设 640 完全退化回旧的固定 640 行为）
+//
+// 自适应规则：size = clamp(roundUp32(源图长边), 640, FACE_INPUT_MAX)——LG 缩略图宽
+// 1280，于是合影直接以 1280 画布 1:1 送网（640 时代等于白丢一半线性分辨率）。
+// ⚠️ 仅当模型输入为**动态**时生效；现役 face_detection_yunet_2023mar.onnx 是静态
+// [1,3,640,640]，只能取 640。详见 internal/faces/face.go 的 DefaultInputMax。
+//
 // 说明：推理在**本地** CPU / GPU 完成，不依赖任何远程 GPU 节点。
 package main
 
@@ -75,7 +85,7 @@ func main() {
 	flag.IntVar(&o.deviceID, "deviceID", -1, "CUDA 设备序号")
 	flag.IntVar(&o.threads, "threads", -1, "CPU 线程数")
 	flag.IntVar(&o.gpuMemMB, "gpuMemMB", -1, "CUDA 显存上限 MB")
-	flag.IntVar(&o.inputSize, "inputsize", 0, "检测输入边长（0=用模型声明值）")
+	flag.IntVar(&o.inputSize, "inputsize", 0, "检测输入边长；缺省=按源图长边自适应（clamp(roundUp32(源长边),640,FACE_INPUT_MAX=1280)，仅动态输入模型生效）。显式值优先，且静态输入模型只接受其声明值")
 	flag.Float64Var(&o.conf, "faceconf", 0, "检测置信度阈值（默认 0.9）")
 	flag.Float64Var(&o.nms, "facenms", 0, "检测 NMS IoU 阈值（默认 0.3）")
 	flag.IntVar(&o.minPx, "minpx", 0, "最小人脸边长像素（默认 24）")

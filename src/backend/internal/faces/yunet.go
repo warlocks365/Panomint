@@ -1,8 +1,9 @@
 package faces
 
-// YuNet 检测后处理：letterbox 预处理 + 12 头解码 + NMS。
+// YuNet 检测后处理：letterbox 预处理 + 12 头解码 + NMS，以及检测输入边长的推导。
 //
-// 本文件为**纯逻辑**（不依赖 CGO/ORT），便于在无 ORT 的环境下单测解码与坐标映射。
+// 本文件为**纯逻辑**（不依赖 CGO/ORT），便于在无 ORT 的环境下单测解码、坐标映射
+// 与输入尺寸推导（resolveInputSize / roundUp32）。
 //
 // 模型输出（opencv_zoo face_detection_yunet_2023mar / 2026may）为 12 个张量，
 // stride s ∈ {8, 16, 32}，每个 stride 各有 4 个头（锚点总数 A = (S/s)²）：
@@ -58,6 +59,11 @@ func DecodeImage(path string) (image.Image, error) {
 
 // letterboxPad 填充值（0=黑）。YuNet 训练时未使用 letterbox，
 // 此处按主流实现（od_opencv 等）用等比缩放 + 0 填充，避免长宽比失真伤小脸。
+//
+// 明确性质：**是补边（pad），不是拉伸（stretch）**——LetterboxFor 的 Scale 取
+// min(size/srcW, size/srcH)，两轴同一个系数，短轴两侧补 0；故非正方形源图
+// （如 LG 的 1280×791）进网后人脸长宽比不变，只是外围填黑。
+// 用例见 faces_test.go TestLetterboxPadsNonSquareSource。
 const letterboxPad = 0
 
 // Letterbox 等比缩放 + 居中填充的坐标变换参数。
@@ -132,25 +138,40 @@ func LetterboxPixels(img image.Image, size int) ([]float32, Letterbox) {
 		newH = 1
 	}
 
-	// 等比缩放（CatmullRom 近似双三次）
-	resized := image.NewRGBA(image.Rect(0, 0, newW, newH))
-	xdraw.CatmullRom.Scale(resized, resized.Bounds(), img, b, xdraw.Over, nil)
-
 	// 画布已零初始化，填充区天然为 letterboxPad
 	offX := int(math.Round(lb.PadX))
 	offY := int(math.Round(lb.PadY))
 	total := size * size
-	for y := 0; y < newH; y++ {
+
+	// 1:1 快路径：缩放后与源图等尺寸时不重采样，直接逐像素取 BGR。
+	// 自适应输入下这正是**常见**情形（LG 宽 1280、size 推导为 1280 → scale=1）：
+	// 走 CatmullRom 除了白付一次重采样代价，还会在 1:1 上引入本不该有的插值。
+	if newW == srcW && newH == srcH {
+		copyToCanvas(out, img, b.Min.X, b.Min.Y, srcW, srcH, offX, offY, size, total)
+		return out, lb
+	}
+
+	// 等比缩放（CatmullRom 近似双三次）
+	resized := image.NewRGBA(image.Rect(0, 0, newW, newH))
+	xdraw.CatmullRom.Scale(resized, resized.Bounds(), img, b, xdraw.Over, nil)
+	copyToCanvas(out, resized, 0, 0, newW, newH, offX, offY, size, total)
+	return out, lb
+}
+
+// copyToCanvas 把 src 上以 (x0,y0) 为左上、w×h 大小的区域按 BGR/0..255 写进
+// size×size 画布的 (offX,offY) 处（越界像素丢弃，填充区保持零值）。
+func copyToCanvas(out []float32, src image.Image, x0, y0, w, h, offX, offY, size, total int) {
+	for y := 0; y < h; y++ {
 		row := offY + y
 		if row < 0 || row >= size {
 			continue
 		}
-		for x := 0; x < newW; x++ {
+		for x := 0; x < w; x++ {
 			col := offX + x
 			if col < 0 || col >= size {
 				continue
 			}
-			c := color.NRGBAModel.Convert(resized.At(x, y)).(color.NRGBA)
+			c := color.NRGBAModel.Convert(src.At(x0+x, y0+y)).(color.NRGBA)
 			idx := row*size + col
 			// BGR 顺序（OpenCV 约定）
 			out[0*total+idx] = float32(c.B)
@@ -158,7 +179,56 @@ func LetterboxPixels(img image.Image, size int) ([]float32, Letterbox) {
 			out[2*total+idx] = float32(c.R)
 		}
 	}
-	return out, lb
+}
+
+// inputAlign 检测输入边长的对齐粒度。
+//
+// YuNet 三个输出头的 stride 为 8/16/32，锚点数按 (S/stride)² 计算，
+// 只有 S 是 32 的整数倍时三者才同时整除（resolveHeads 也要求 inputSize%stride==0）。
+// 取 32 是最安全的对齐粒度。
+const inputAlign = 32
+
+// roundUp32 向上取到 32 的整数倍；n<=0 返回 0。
+func roundUp32(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return (n + inputAlign - 1) / inputAlign * inputAlign
+}
+
+// resolveInputSize 计算一次检测实际使用的输入边长（**纯函数**，便于单测）。
+//
+// 优先级（前两条是既有语义，第三条是本次新增的自适应）：
+//
+//  1. explicit > 0    → 显式值（FACE_INPUT_SIZE / -inputsize）绝对优先，不再推导；
+//  2. staticSize > 0  → **模型声明的静态边长**。必须用它：静态图喂别的尺寸，
+//     ONNX Runtime 直接报错（比漏检更糟）。自适应在此让位；
+//  3. 其它（动态模型） → clamp(roundUp32(srcLong), base, max)。
+//
+// base 是下限（现默认 640，小图不得退化），max 是上限（DefaultInputMax）。
+// srcLong<=0（源尺寸未知，如构造期）时推导结果为 base。
+// max<base 时按 base 处理，保证 FACE_INPUT_MAX 不会被误设成比下限还小。
+func resolveInputSize(explicit, staticSize, srcLong, base, max int) int {
+	if base <= 0 {
+		base = DefaultInputSize
+	}
+	if max < base {
+		max = base
+	}
+	if explicit > 0 {
+		return explicit
+	}
+	if staticSize > 0 {
+		return staticSize
+	}
+	d := roundUp32(srcLong)
+	if d < base {
+		return base
+	}
+	if d > max {
+		return max
+	}
+	return d
 }
 
 // headKind 解码头类别。
