@@ -75,7 +75,11 @@ func main() {
 		log.Fatal("JWT 密钥配置错误", zap.Error(err))
 	}
 	authStore := &auth.Store{Pool: pool}
-	authH := &auth.Handler{Store: authStore, Secret: secret}
+	// 审计写入器在鉴权装配**之前**创建：登录与二次验证（启用/关闭）都要写审计，
+	// 而这几件事发生在整个 api 生命周期里最早的时刻，晚创建就漏记。
+	// 它是"尽力而为"的（失败只记 warn，不影响请求），因此提前创建没有可用性风险。
+	auditRec := audit.New(pool, log)
+	authH := &auth.Handler{Store: authStore, Secret: secret, Audit: auditRec}
 
 	// 种子管理员（开发默认 admin@pano.local / ADMIN_PASSWORD，生产必须经环境变量覆盖）
 	adminPwd := os.Getenv("ADMIN_PASSWORD")
@@ -94,6 +98,14 @@ func main() {
 	// 鉴权端点
 	authed := r.Group("", auth.AuthRequired(secret))
 	authed.GET("/auth/me", authH.Me)
+
+	// ===== Phase 5：二次验证（TOTP，RFC 6238）=====
+	// 三个端点都在鉴权后：它们操作的是"当前登录者自己"的二次验证，
+	// 身份由会话给出（user_id），不接受请求体传入用户 id —— 否则就成了越权接口。
+	// nginx 无需改动：`auth` 已在 docker/web/Dockerfile 的纯 API 正则组内。
+	authed.POST("/auth/mfa/setup", authH.MFASetup)     // 生成待确认密钥 → {secret, otpauth_url}
+	authed.POST("/auth/mfa/confirm", authH.MFAConfirm) // 用一次有效口令确认 → mfa_enabled=true
+	authed.POST("/auth/mfa/disable", authH.MFADisable) // 需有效口令 → 关闭并清除密钥
 
 	// T1.5 媒体/时间轴（需 media:read）
 	mediaQ := queue.New("media", queue.Config{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPass}) // 缩略图队列（indexctl worker 消费）
@@ -324,7 +336,7 @@ func main() {
 	// 审计写入是**尽力而为**的：失败只记 warn，绝不影响业务请求（见 internal/audit 包文档）。
 	// nginx 无需改动：/admin 已在 docker/web/Dockerfile 的纯 API 正则组内。
 	auditStore := &audit.PGStore{Pool: pool}
-	auditH := &audit.Handler{Store: auditStore, Recorder: audit.New(pool, log)}
+	auditH := &audit.Handler{Store: auditStore, Recorder: auditRec}
 	admin.GET("/audit", auditH.ListAudit)
 	authed.GET("/admin/stats", auth.RequirePerm(authStore, "admin:system"), auditH.Stats)
 	authed.GET("/admin/jobs", auth.RequirePerm(authStore, "admin:system"), auditH.Jobs)

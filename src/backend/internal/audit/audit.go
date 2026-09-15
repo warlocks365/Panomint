@@ -63,6 +63,17 @@ const (
 	// ActionTokenRotate 令牌轮换（refresh token / agent_token / 分享口令）。
 	ActionTokenRotate = "auth.token.rotate"
 
+	// ActionMFASetup 开始设置二次验证（生成待确认的 TOTP 密钥）。
+	//
+	// 之所以连"开始设置"也要记：它是"有人正在给你的账号加一把钥匙"的信号。
+	// 若攻击者拿到会话并开始绑定自己的认证器，这条记录是唯一的早期线索
+	// （confirm 之前账号本身还没被锁，用户仍能自救）。
+	ActionMFASetup = "auth.mfa.setup"
+	// ActionMFAEnable 二次验证已生效（TOTP 确认成功）。
+	ActionMFAEnable = "auth.mfa.enable"
+	// ActionMFADisable 二次验证被关闭。**高危**：等同于账号少一道防线。
+	ActionMFADisable = "auth.mfa.disable"
+
 	// ActionUserCreate 创建用户。
 	ActionUserCreate = "admin.user.create"
 	// ActionUserUpdate 改用户（角色/状态/重置密码）。

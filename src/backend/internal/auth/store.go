@@ -25,41 +25,68 @@ type User struct {
 	PasswordHash string `json:"-"`
 	Role         string `json:"role"`
 	Status       string `json:"status"`
+
+	// MFAEnabled 二次验证（TOTP）是否已生效。
+	MFAEnabled bool `json:"mfa_enabled"`
+	// MFAPending 「已生成密钥但尚未确认」——设置二次验证分两步（setup → confirm），
+	// 中间态必须对界面可见，否则用户刷新页面后就无从知道"我当时配到哪一步了"。
+	MFAPending bool `json:"mfa_pending"`
+
+	// MFASecret TOTP 密钥（base32）。**绝不序列化**（json:"-"）：它是可离线生成口令的
+	// 长期凭据，泄漏等于二次验证形同虚设。仅在服务端校验路径上使用。
+	MFASecret string `json:"-"`
 }
 
 var (
 	ErrBadCredentials = errors.New("邮箱或密码错误")
 	ErrUserDisabled   = errors.New("账户已禁用")
+
+	// ErrMFAAlreadyEnabled 已启用二次验证时不允许直接重新绑定密钥。
+	//
+	// 为什么不许"一键重绑"：那等于给会话劫持者一条替换认证器的捷径
+	// （换成攻击者自己的认证器，真实用户就被锁在外面）。要重绑必须先关闭，
+	// 而关闭需要提交一次有效的现有口令。
+	ErrMFAAlreadyEnabled = errors.New("二次验证已启用，请先关闭再重新绑定")
+	// ErrMFANotPending 没有待确认的密钥（跳过了 setup，或已被消耗）。
+	ErrMFANotPending = errors.New("没有待确认的二次验证设置")
+	// ErrMFANotEnabled 二次验证尚未启用（无需关闭）。
+	ErrMFANotEnabled = errors.New("二次验证未启用")
 )
 
 // FindByEmail 按邮箱查用户。
 func (s *Store) FindByEmail(ctx context.Context, email string) (*User, error) {
 	var u User
 	err := s.Pool.QueryRow(ctx, `
-		SELECT u.id, u.email, COALESCE(u.display_name,''), u.password_hash, r.name, u.status
+		SELECT u.id, u.email, COALESCE(u.display_name,''), u.password_hash, r.name, u.status,
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled
 		FROM users u JOIN roles r ON r.id = u.role_id
 		WHERE u.email = $1`, email).
-		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status)
+		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
+			&u.MFASecret, &u.MFAEnabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrBadCredentials
 	}
 	if err != nil {
 		return nil, err
 	}
+	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
 	return &u, nil
 }
 
-// FindByID 按 ID 查用户（me 端点）。
+// FindByID 按 ID 查用户（me 端点与二次验证端点）。
 func (s *Store) FindByID(ctx context.Context, id string) (*User, error) {
 	var u User
 	err := s.Pool.QueryRow(ctx, `
-		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status
+		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status,
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled
 		FROM users u JOIN roles r ON r.id = u.role_id
 		WHERE u.id = $1`, id).
-		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status)
+		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
+			&u.MFASecret, &u.MFAEnabled)
 	if err != nil {
 		return nil, err
 	}
+	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
 	return &u, nil
 }
 
@@ -149,7 +176,8 @@ func (s *Store) CreateUser(ctx context.Context, email, displayName, password, ro
 // ListUsers 用户列表（管理端点）。
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status
+		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status,
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled
 		FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.created_at`)
 	if err != nil {
 		return nil, err
@@ -158,12 +186,67 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
+			&u.MFASecret, &u.MFAEnabled); err != nil {
 			return nil, err
 		}
+		u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// ---------------------------------------------------------------------------
+// 二次验证（TOTP）状态变更
+//
+// 三个方法都用**带状态守卫的 UPDATE**（WHERE 里带上前置状态），而不是"先查再改"：
+//   - 先查再改在并发下会竞态（两次 setup 同时通过检查 → 后写覆盖先写）；
+//   - 守卫写在 SQL 里，判断与写入是同一个原子操作，天然无竞态。
+// 代价是"影响 0 行"会同时覆盖"用户不存在"与"状态不对"两种情况 ——
+// 此处刻意接受：调用方（handler）已经在同一请求里查过用户，能把状态判清楚并给出准确错误码。
+// ---------------------------------------------------------------------------
+
+// SetPendingMFASecret 写入待确认的 TOTP 密钥，并确保 mfa_enabled 仍为 false。
+// 已启用时返回 ErrMFAAlreadyEnabled（必须先 disable 才能重绑）。
+func (s *Store) SetPendingMFASecret(ctx context.Context, userID, secret string) error {
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE users SET mfa_secret = $2, mfa_enabled = false, updated_at = now()
+		WHERE id = $1 AND mfa_enabled = false`, userID, secret)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrMFAAlreadyEnabled
+	}
+	return nil
+}
+
+// EnableMFA 确认启用（要求已存在非空密钥）。无待确认密钥时返回 ErrMFANotPending。
+func (s *Store) EnableMFA(ctx context.Context, userID string) error {
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE users SET mfa_enabled = true, updated_at = now()
+		WHERE id = $1 AND mfa_secret IS NOT NULL AND mfa_secret <> ''`, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrMFANotPending
+	}
+	return nil
+}
+
+// DisableMFA 关闭二次验证并**清除密钥**（不留残值：留着的密钥日后可能被误用或被拖走）。
+func (s *Store) DisableMFA(ctx context.Context, userID string) error {
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE users SET mfa_enabled = false, mfa_secret = NULL, updated_at = now()
+		WHERE id = $1 AND mfa_enabled = true`, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrMFANotEnabled
+	}
+	return nil
 }
 
 // EnsureSeedAdmin 确保 owner 管理员存在（首次启动种子；默认密码仅开发用，生产必须改）。
