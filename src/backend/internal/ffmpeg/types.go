@@ -6,13 +6,13 @@ import "time"
 
 // Progress 一次转码的实时进度快照（来自 ffmpeg -progress 管道输出）。
 type Progress struct {
-	Frame        int64   // 已处理帧数
-	FPS          float64 // 当前处理帧率
-	BitrateKbps  float64 // 当前输出码率（kbits/s）；N/A 时为 0
-	OutTimeUs    int64   // 已处理时长（微秒）
-	Speed        float64 // 处理速度倍数（1.0 = 实时）
-	RemainingUs  int64   // 预计剩余时长（微秒）；未知为 -1（需 WithExpectedDurationUs）
-	Done         bool    // progress=end 时为 true
+	Frame       int64   // 已处理帧数
+	FPS         float64 // 当前处理帧率
+	BitrateKbps float64 // 当前输出码率（kbits/s）；N/A 时为 0
+	OutTimeUs   int64   // 已处理时长（微秒）
+	Speed       float64 // 处理速度倍数（1.0 = 实时）
+	RemainingUs int64   // 预计剩余时长（微秒）；未知为 -1（需 WithExpectedDurationUs）
+	Done        bool    // progress=end 时为 true
 }
 
 // Result 一次执行的最终结果。
