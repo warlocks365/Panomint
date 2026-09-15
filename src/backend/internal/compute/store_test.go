@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -45,6 +46,7 @@ func TestAllNodeSQLMustNotStorePlaintextToken(t *testing.T) {
 		"submitResultSQL":        submitResultSQL,
 		"probeJobStatusSQL":      probeJobStatusSQL,
 		"reclaimJobsSQL":         reclaimJobsSQL,
+		"publishHLSMasterSQL":    publishHLSMasterSQL,
 	}
 	for name, sql := range stmts {
 		// 允许出现在 COMMENT/参数里的是 hash 与 expires 两个派生列，明文列名一律禁止。
@@ -478,5 +480,97 @@ func TestNodeColsHasNoPlaintextToken(t *testing.T) {
 	// T6.2：状态锁必须被读出来（否则 effectiveStatus 无从区分初始 offline 与强制 offline）。
 	if !strings.Contains(nodeCols, "status_locked") {
 		t.Fatalf("nodeCols 必须包含 status_locked（否则 Node.StatusLocked 恒为 false，强制下线会被心跳推翻）：%s", nodeCols)
+	}
+}
+
+// TestStoreClaimableKindsDefaultsToNoop 未配置时，认领集合必须仍是"仅 noop"。
+//
+// 这是把 hls 交给节点执行的**唯一开关**，且必须是显式的（COMPUTE_CLAIMABLE_KINDS）。
+// 零值 Store（管理端/测试随手构造的那种）绝不能意外放开 hls ——
+// 那会让节点与 cmd/transcodectl 同时执行同一条 job_id。
+func TestStoreClaimableKindsDefaultsToNoop(t *testing.T) {
+	var s Store
+	if got := s.claimableKinds(); len(got) != 1 || got[0] != KindNoop {
+		t.Fatalf("零值 Store 的认领集合应为 [noop]，实际 %v", got)
+	}
+	s.ClaimableKinds = []string{KindNoop, KindHLS}
+	if got := s.claimableKinds(); len(got) != 2 || got[1] != KindHLS {
+		t.Fatalf("显式配置应被采纳，实际 %v", got)
+	}
+}
+
+// TestParseClaimableKinds 解析 -kinds / COMPUTE_CLAIMABLE_KINDS 的取值。
+//
+// 重点是"拼错的类型名必须报错"：若静默接受，节点会得到一个空的认领集合，
+// 表现是"永远领不到任务"，而日志里看不出任何异常 —— 这类沉默失败最难查。
+func TestParseClaimableKinds(t *testing.T) {
+	t.Run("空串 → nil（表示用默认值）", func(t *testing.T) {
+		for _, in := range []string{"", "   ", ",", " , "} {
+			got, err := ParseClaimableKinds(in)
+			if err != nil || got != nil {
+				t.Fatalf("输入 %q 应返回 (nil, nil)，实际 (%v, %v)", in, got, err)
+			}
+		}
+	})
+
+	t.Run("正常解析：大小写归一、去空白、去重、保持顺序", func(t *testing.T) {
+		got, err := ParseClaimableKinds(" HLS , noop ,hls ")
+		if err != nil {
+			t.Fatalf("不应报错: %v", err)
+		}
+		want := []string{"hls", "noop"}
+		if len(got) != len(want) {
+			t.Fatalf("应去重后得到 %v，实际 %v", want, got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("第 %d 项应为 %q，实际 %q（全部：%v）", i, want[i], got[i], got)
+			}
+		}
+	})
+
+	t.Run("未知类型 → ErrInvalidInput（不得静默忽略）", func(t *testing.T) {
+		for _, in := range []string{"nope", "noop,thumnail", "hls;"} {
+			if _, err := ParseClaimableKinds(in); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("输入 %q 应报 ErrInvalidInput，实际 %v", in, err)
+			}
+		}
+	})
+
+	t.Run("KnownKinds 必须覆盖执行器支持的全部类型", func(t *testing.T) {
+		for _, k := range []string{KindNoop, KindHLS} {
+			found := false
+			for _, known := range KnownKinds {
+				if known == k {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("KnownKinds 缺少执行器支持的 %q：%v", k, KnownKinds)
+			}
+		}
+	})
+}
+
+// TestPublishHLSMasterSQLIsKindGuarded 回写 media.hls_master 的语句必须自带 kind 守卫。
+//
+// 若不守 kind，一个非 hls 任务（将来的 thumbnail/memories）回传 result_path 时
+// 会污染 hls_master，让前端把一张图当视频播 —— 而且只在"那种任务真的跑起来"时才暴露。
+func TestPublishHLSMasterSQLIsKindGuarded(t *testing.T) {
+	compact := strings.Join(strings.Fields(publishHLSMasterSQL), "")
+	if !strings.Contains(compact, "j.kind='hls'") {
+		t.Fatalf("回写语句必须限定 kind='hls'：\n%s", publishHLSMasterSQL)
+	}
+	if !strings.Contains(compact, "SEThls_master=$2") {
+		t.Fatalf("回写语句必须写 media.hls_master：\n%s", publishHLSMasterSQL)
+	}
+	if !strings.Contains(compact, "media.id=j.media_id") {
+		t.Fatalf("回写语句必须按 job 关联到对应媒体：\n%s", publishHLSMasterSQL)
+	}
+	if !strings.Contains(compact, "media.deleted_atISNULL") {
+		t.Fatalf("回写语句必须跳过已软删媒体：\n%s", publishHLSMasterSQL)
+	}
+	if !strings.Contains(publishHLSMasterSQL, "WHERE j.id = $1::uuid") {
+		t.Fatalf("回写语句必须按 job id 定位：\n%s", publishHLSMasterSQL)
 	}
 }

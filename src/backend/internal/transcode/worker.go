@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +15,10 @@ import (
 )
 
 // HLSWorker 转码 Worker：消费 kind=transcode 任务，ffmpeg HLS 多码率输出到 <hlsDir>/<media_id>/。
+//
+// ⚠️ 本文件只负责**控制端的那一半**：查库拿媒体元数据、回写任务状态与 media.hls_master、
+// 以及消费 Valkey 队列。真正的 ffmpeg 管线在 hls.go 的 TranscodeHLS 里 —— 它与算力节点
+// agent 共用同一份实现，避免两处 ffmpeg 参数各自漂移（见 hls.go 的文件头说明）。
 type HLSWorker struct {
 	db        *pgxpool.Pool
 	q         *queue.Queue
@@ -30,23 +32,9 @@ func NewHLSWorker(db *pgxpool.Pool, q *queue.Queue, hlsDir string, mediaDirs ...
 }
 
 // resolveInput 按候选根目录解析 media.path 到磁盘文件。
+// 解析规则本身在 ResolveMediaPath（hls.go），此处只是绑定本 Worker 的候选根。
 func (w *HLSWorker) resolveInput(rel string) (string, error) {
-	if filepath.IsAbs(rel) {
-		if _, err := os.Stat(rel); err == nil {
-			return rel, nil
-		}
-		return "", fmt.Errorf("源文件不可达: %s", rel)
-	}
-	for _, root := range w.mediaDirs {
-		if root == "" {
-			continue
-		}
-		p := filepath.Join(root, filepath.FromSlash(rel))
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("源文件不可达: %s", rel)
+	return ResolveMediaPath(rel, w.mediaDirs...)
 }
 
 // hasAudioStream 用 ffprobe 探测是否含音轨（决定 HLSArgs 的 withAudio）。
@@ -61,6 +49,11 @@ func hasAudioStream(ctx context.Context, input string) bool {
 }
 
 // Handle 处理一个转码任务（queue.Handler 签名）。
+//
+// 错误语义刻意分两档（直接影响是否死信）：
+//   - **确定性失败**（媒体不存在、源文件不可达）→ 包 queue.ErrStop 进死信，
+//     因为退避重试一万次也不会有别的结果，只会刷满日志；
+//   - **可重试失败**（转码/IO 出错）→ 原样返回，交给队列退避重试。
 func (w *HLSWorker) Handle(ctx context.Context, job queue.Job) error {
 	if job.Kind != "transcode" {
 		return nil // 非本 Worker 任务
@@ -70,9 +63,6 @@ func (w *HLSWorker) Handle(ctx context.Context, job queue.Job) error {
 	profile := job.Payload["profile"]
 	if jobID == "" || mediaID == "" {
 		return fmt.Errorf("%w: 任务缺少 job_id/media_id", queue.ErrStop)
-	}
-	if profile == "" {
-		profile = "1080p"
 	}
 
 	var rel string
@@ -94,44 +84,21 @@ func (w *HLSWorker) Handle(ctx context.Context, job queue.Job) error {
 		return err
 	}
 
-	// 源分辨率决定码率阶梯（绝不上采样）；库里缺失时退回 ffprobe 探测
-	if srcW <= 0 || srcH <= 0 {
-		if pw, ph, perr := ffmpeg.ProbeSize(ctx, input); perr == nil {
-			srcW, srcH = pw, ph
-		} else {
-			log.Printf("无法确认源分辨率 media=%s: %v，回退按档位名取阶梯", mediaID, perr)
-		}
-	}
-
-	ladder := LadderForSourceProfile(profile, srcW, srcH)
-	if len(ladder) == 0 { // 分辨率仍未知：沿用档位名阶梯
-		ladder = LadderForProfile(profile)
-	}
-	outDir := filepath.Join(w.hlsDir, mediaID)
-	log.Printf("转码 media=%s profile=%s src=%dx%d 档位=%s", mediaID, profile, srcW, srcH, ladderNames(ladder))
-	// 重试场景：清掉半成品目录（幂等重转）
-	_ = os.RemoveAll(outDir)
-	for _, d := range append([]string{outDir}, ffmpeg.HLSDirs(outDir, ladder)...) {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			_ = w.setStatus(ctx, jobID, "failed", "")
-			return err
-		}
-	}
-
-	durUs, _ := ffmpeg.ProbeDurationUs(ctx, input)
-	args := append([]string{"-y"}, ffmpeg.HLSArgs(input, outDir, ladder, 4, hasAudioStream(ctx, input))...)
-	task := ffmpeg.New(args, ffmpeg.WithExpectedDurationUs(durUs))
-	if _, err := task.Run(ctx); err != nil {
+	masterURL, err := TranscodeHLS(ctx, HLSTranscodeRequest{
+		MediaID:   mediaID,
+		Input:     input,
+		HLSDir:    w.hlsDir,
+		Profile:   profile,
+		SrcWidth:  srcW,
+		SrcHeight: srcH,
+	})
+	if err != nil {
+		// 与历史行为一致：转码失败标记 failed 但**不**进死信，留给队列退避重试。
 		_ = w.setStatus(ctx, jobID, "failed", "")
-		return fmt.Errorf("HLS 转码: %w", err) // 普通错误走退避重试
-	}
-	if _, err := os.Stat(filepath.Join(outDir, "master.m3u8")); err != nil {
-		_ = w.setStatus(ctx, jobID, "failed", "")
-		return fmt.Errorf("转码完成但 master.m3u8 缺失: %w", err)
+		return err
 	}
 
 	// 回写：媒体 HLS 路径（URL 形态，契约 §13）+ 任务状态
-	masterURL := "/transcode/hls/" + mediaID + "/master.m3u8"
 	if _, err := w.db.Exec(ctx,
 		`UPDATE media SET hls_master = $1, updated_at = now() WHERE id = $2`, masterURL, mediaID); err != nil {
 		return err

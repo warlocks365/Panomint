@@ -1,23 +1,41 @@
 package compute
 
-import (
-	"context"
-	"log"
-)
-
 // 任务执行器（节点侧）。
 //
-// ⚠️ 本交付项**刻意不接真实 ffmpeg**：目标是把「拉取 → 执行 → 回传」的协议闭环
-// 先跑通，把范围锁在协议层。真实转码一旦进来就会拖出输入路径解析、档位/分片规则、
-// 软硬编选择、进度上报、失败重试等一整套转码子系统的问题，那是后续交付项的事。
+// 分工：
+//   - NoopExecutor   空执行器。只用于验证"拉取 → 执行 → 回传"协议闭环，不碰任何 IO。
+//   - LocalExecutor  真实执行器：按任务 kind 分派，`hls` 走 ffmpeg 转码。
 //
-// 所以这里只有接口 + 两个实现，且两个实现当前行为相同（立即成功）：
-//   - NoopExecutor  默认；证明闭环，不做任何 IO；
-//   - LocalExecutor 预留的真实执行器外壳，Device 决定将来软编还是硬编。
+// ⚠️ ffmpeg 的**调用方式**不在本文件：唯一实现在 internal/transcode 的 TranscodeHLS
+// （无 DB 依赖），控制端的 cmd/transcodectl 与这里的节点 agent 共用同一份。
+// 若在此处另写一份 ffmpeg 参数，两处迟早漂移（`force_divisible_by=2` 这类细节一旦漏掉，
+// 症状是"某些源必失败、另一些却正常"，极难定位）。
 //
-// 两者的区别只有 Name()，存在的意义是让"执行器可替换"这件事在类型系统里成立：
-// 节点命令行用 -executor noop|local 选择，未来把 local 换成真 ffmpeg 实现时，
-// 协议层、客户端、主循环、命令行**一行都不用改**。
+// # 关于输入路径（存储与算力分离的关键约定）
+//
+// 控制端下发的 `InputPath` 是 **media.path 的库内相对路径**，不是节点上的绝对路径。
+// 节点用自己配置的媒体根（-media-root，可多个、按序探测）把它解析成磁盘文件。
+// 也就是说：**节点必须能看到源文件**（同机、或把共享存储挂到与解析根一致的路径）。
+// 本实现刻意不发明"控制端上传/节点回传"的传输协议 —— 那会引入一套新的通道、
+// 鉴权与配额语义，而项目红线要求软件以本地 GPU/CPU 为主，本机/共享存储路径即主场景。
+// 节点侧找不到文件时**失败得明明白白**（错误里带上候选根），而不是静默跳过 ——
+// 一个装错挂载点的节点应当立刻暴露，而不是产出 0 字节的"成功"。
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"panoalbum/internal/transcode"
+)
+
+// 任务类型常量。与 transcode_jobs.kind 的取值域对齐。
+const (
+	// KindNoop 空任务：证明闭环用。
+	KindNoop = "noop"
+	// KindHLS 多码率 HLS 转码。
+	KindHLS = "hls"
+)
 
 // Executor 执行一个任务并返回可回传的结果。
 //
@@ -48,30 +66,86 @@ func (NoopExecutor) Execute(ctx context.Context, job JobSpec) ResultRequest {
 	return ResultRequest{JobID: job.JobID, Status: JobStatusDone}
 }
 
-// LocalExecutor 本地执行器外壳（本机 CPU / GPU 转码）。
+// LocalExecutor 本地执行器：在本节点上用本机 CPU/GPU 执行任务。
 //
-// Device 取 cpu|cuda|auto，与节点的 -device 同源——真实的编码器选择
-// （libx264 vs h264_nvenc）将由它决定，从而保证"同一份代码既跑得动无卡机器，
-// 也用得上独显"。
+// MediaRoots / HLSDir 必须由使用者在启动时给出（命令行或环境变量），
+// **代码里不写任何具体路径** —— 与"不得出现任何具体节点的地址/凭据"是同一条红线：
+// 路径同样是节点相关的部署事实，写死进软件会让它只在一台机器上正确。
 type LocalExecutor struct {
+	// Device cpu|cuda|auto。**当前仅记录与打日志**：HLSArgs 仍走 libx264 软编，
+	// 硬编（h264_nvenc）尚未接入，见待解决问题登记簿的"执行器接真实 ffmpeg"条目。
+	// 保留该字段是双接口原则的要求：接口在，换到有卡的机器即可启用，不必改协议与调用点。
 	Device string
+
+	// MediaRoots media.path 相对路径的解析根，按序探测（通常上传目录在前、索引根在后）。
+	MediaRoots []string
+
+	// HLSDir HLS 输出根目录；实际输出到 <HLSDir>/<mediaID>/。
+	HLSDir string
+
+	// SegSeconds HLS 分片时长（秒）；<= 0 取 transcode.DefaultSegSeconds。
+	SegSeconds int
 }
 
-// NewLocalExecutor 构造本地执行器。
-func NewLocalExecutor(device string) Executor { return LocalExecutor{Device: device} }
+// NewLocalExecutor 构造本地执行器。路径相关字段由调用方按需补齐
+// （先构造再赋值，或直接用结构体字面量）——它们没有合理的默认值。
+func NewLocalExecutor(device string) *LocalExecutor { return &LocalExecutor{Device: device} }
 
 // Name 执行器名。
-func (LocalExecutor) Name() string { return "local" }
+func (*LocalExecutor) Name() string { return "local" }
 
-// Execute ⚠️ **真实 ffmpeg 的唯一落地点**。
+// Execute 按 kind 分派任务。
 //
-// 接入时在此处：按 Device 选择软编（libx264）或硬编（h264_nvenc），
-// 读 job.InputPath、按 job.Profile/OutputSpec 产出 HLS，并把产出目录回填进
-// ResultPath。当前实现与 noop 相同（立即成功），是为了把本次交付范围锁在协议闭环。
-func (e LocalExecutor) Execute(ctx context.Context, job JobSpec) ResultRequest {
+// 未知 kind **必须失败**：早先的实现对所有任务一律返回 done，那会让一个还没接入的
+// 任务类型看起来"执行成功"，控制端据此把任务标成 done —— 比失败危险得多。
+func (e *LocalExecutor) Execute(ctx context.Context, job JobSpec) ResultRequest {
 	if err := ctx.Err(); err != nil {
 		return ResultRequest{JobID: job.JobID, Status: JobStatusFailed, Error: "任务被取消: " + err.Error()}
 	}
-	log.Printf("compute: local 执行器（device=%s）尚未接入 ffmpeg，任务 %s 按 noop 处理", e.Device, job.JobID)
-	return ResultRequest{JobID: job.JobID, Status: JobStatusDone}
+	switch job.Kind {
+	case KindNoop:
+		return ResultRequest{JobID: job.JobID, Status: JobStatusDone}
+	case KindHLS:
+		return e.executeHLS(ctx, job)
+	default:
+		return ResultRequest{JobID: job.JobID, Status: JobStatusFailed,
+			Error: fmt.Sprintf("本地执行器暂不支持的任务类型 %q（当前支持 %s|%s）", job.Kind, KindNoop, KindHLS)}
+	}
+}
+
+// executeHLS 执行 HLS 转码。所有失败都带**可操作的**原因（路径/配置/ffmpeg 输出），
+// 因为节点是无人值守的：控制端日志里的这一行往往是唯一的排障线索。
+func (e *LocalExecutor) executeHLS(ctx context.Context, job JobSpec) ResultRequest {
+	fail := func(format string, args ...any) ResultRequest {
+		return ResultRequest{JobID: job.JobID, Status: JobStatusFailed, Error: fmt.Sprintf(format, args...)}
+	}
+	if job.MediaID == "" {
+		return fail("任务缺少 media_id")
+	}
+	if job.InputPath == "" {
+		return fail("任务缺少 input_path（控制端未能提供 media.path）")
+	}
+	if e.HLSDir == "" {
+		return fail("节点未配置 HLS 输出目录（请用 -hls-dir 或 HLS_DIR 指定）")
+	}
+
+	input, err := transcode.ResolveMediaPath(job.InputPath, e.MediaRoots...)
+	if err != nil {
+		return fail("源文件在本节点不可达（候选媒体根 %v，media.path=%q）: %v",
+			e.MediaRoots, job.InputPath, err)
+	}
+
+	log.Printf("compute: 开始 HLS 转码 media=%s profile=%q device=%s input=%s",
+		job.MediaID, job.Profile, e.Device, input)
+	url, err := transcode.TranscodeHLS(ctx, transcode.HLSTranscodeRequest{
+		MediaID:    job.MediaID,
+		Input:      input,
+		HLSDir:     e.HLSDir,
+		Profile:    job.Profile,
+		SegSeconds: e.SegSeconds,
+	})
+	if err != nil {
+		return fail("HLS 转码失败: %v", err)
+	}
+	return ResultRequest{JobID: job.JobID, Status: JobStatusDone, ResultPath: url}
 }

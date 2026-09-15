@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -145,6 +146,19 @@ var (
 	// 「任务不存在/不属于我」与「任务已是终态」两种不同的失败语义（见 SubmitResult）。
 	probeJobStatusSQL = `SELECT status::text FROM transcode_jobs WHERE id = $1::uuid`
 
+	// publishHLSMasterSQL 把 HLS 产出地址回写到 media.hls_master（契约 §13 的 URL 形态）。
+	//
+	// 为什么由**控制端**做这件事而不是节点：节点只拿 agent_token，没有数据库凭据，
+	// 也不该有（见 agentapi.go 的鉴权说明）。节点负责产出文件并回传 result_path，
+	// 控制端在同一事务里既落任务状态、又更新媒体的可播放地址，两者不可能不一致。
+	//
+	// 自带 kind='hls' 守卫：非 HLS 任务即使回传了 result_path 也不会污染 hls_master。
+	publishHLSMasterSQL = `UPDATE media SET hls_master = $2, updated_at = now()
+		FROM transcode_jobs j
+		WHERE j.id = $1::uuid AND j.kind = 'hls' AND media.id = j.media_id
+		  AND media.deleted_at IS NULL
+		RETURNING media.id`
+
 	// reclaimJobsSQL 回收「僵死节点」名下仍在 running 的任务：置回 pending 并清空归属，
 	// 使下一个健康节点能重新认领（pollJobsSQL 只认 status='pending'）。
 	//
@@ -171,6 +185,56 @@ var (
 // Store 算力节点存取。
 type Store struct {
 	Pool *pgxpool.Pool
+
+	// ClaimableKinds 本节点允许认领的任务类型。**空时取 DefaultClaimableKinds（仅 noop）**。
+	//
+	// 为什么要做成可配而不是直接把 hls 塞进默认值：`kind='hls'` 的行同时被
+	// cmd/transcodectl 通过 **Valkey 队列**消费（注意它消费的是队列项，不是 SQL 轮询，
+	// 两者是同一批业务的不同通道）。默认放开会让同一条 job_id 被节点和控制端各跑一遍，
+	// 产出互相覆盖。所以切换是**显式**的运维动作：先把 transcodectl 的消费下线
+	// （停 transcode-worker 或停止入队），再给节点加 `-kinds noop,hls`。
+	ClaimableKinds []string
+}
+
+// claimableKinds 归一化可认领集合：空 → 默认（仅 noop）。
+func (s *Store) claimableKinds() []string {
+	if len(s.ClaimableKinds) == 0 {
+		return DefaultClaimableKinds
+	}
+	return s.ClaimableKinds
+}
+
+// KnownKinds 全部已知任务类型。用于校验 -kinds 的取值，避免把拼错的类型名当成"有效的空集合"
+// （那会让节点永远领不到任务，而日志里看不出任何异常）。
+var KnownKinds = []string{KindNoop, KindHLS}
+
+// ParseClaimableKinds 解析逗号分隔的任务类型列表（如 "noop,hls"），并校验取值合法。
+// 空串返回 nil（= 用默认值）。空白项被忽略；重复项去重；顺序保持输入顺序。
+func ParseClaimableKinds(csv string) ([]string, error) {
+	if strings.TrimSpace(csv) == "" {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	out := []string{}
+	for _, raw := range strings.Split(csv, ",") {
+		k := strings.ToLower(strings.TrimSpace(raw))
+		if k == "" {
+			continue
+		}
+		if !slices.Contains(KnownKinds, k) {
+			return nil, fmt.Errorf("%w: 未知任务类型 %q（可用：%s）",
+				ErrInvalidInput, k, strings.Join(KnownKinds, ","))
+		}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 // scanNode 按 nodeCols 的顺序扫描一行节点。
@@ -466,7 +530,7 @@ func (s *Store) PollJobs(ctx context.Context, nodeID string, max int) ([]JobSpec
 		max = MaxPollJobs
 	}
 
-	rows, err := s.Pool.Query(ctx, pollJobsSQL, nodeID, max, DefaultClaimableKinds)
+	rows, err := s.Pool.Query(ctx, pollJobsSQL, nodeID, max, s.claimableKinds())
 	if err != nil {
 		return nil, fmt.Errorf("拉取任务失败: %w", err)
 	}
@@ -530,6 +594,9 @@ func (s *Store) inputPaths(ctx context.Context, mediaIDs []string) (map[string]s
 //
 // 分开的意义在于排障：前者是"世界变了"，后者是"你的任务 id 不对"，处置完全不同。
 //
+// HLS 任务成功时，本次还会把 result_path 回写进 media.hls_master（契约 §13），
+// 使媒体立即可播放；**与任务状态同一事务**，不允许出现"任务 done 但媒体不可播"。
+//
 // 任务失败的原因（r.Error）**不落库**：transcode_jobs 没有可放它的列，而为了一个错误串
 // 新增列会牵扯 DDL 变更与历史兼容。当前只回给调用方与日志；待接入 ffmpeg 需要
 // 持久化失败细节时再一并设计（例如新增 transcode_job_events 事件表）。
@@ -541,13 +608,38 @@ func (s *Store) SubmitResult(ctx context.Context, nodeID string, r ResultRequest
 		return fmt.Errorf("%w: status 需为 done|failed，实际 %q", ErrInvalidInput, r.Status)
 	}
 
+	// 任务状态与 media.hls_master 必须在**同一事务**里落库：否则会出现
+	// "任务已 done、但媒体没有可播放地址"的半成品状态，而节点已经不会再重传，
+	// 这条任务就永远修不回来了。
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("回传任务结果失败: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // Commit 之后再 Rollback 是 no-op
+
 	var got string
-	err := s.Pool.QueryRow(ctx, submitResultSQL, r.JobID, nodeID, r.Status, r.ResultPath).Scan(&got)
+	err = tx.QueryRow(ctx, submitResultSQL, r.JobID, nodeID, r.Status, r.ResultPath).Scan(&got)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// 本次没有改动任何行，回滚即可；再另行反查以区分「终态」与「不属于我」。
 		return s.classifySubmitMiss(ctx, r.JobID)
 	}
 	if err != nil {
 		return fmt.Errorf("回传任务结果失败: %w", err)
+	}
+
+	// HLS 任务成功 → 回写 media.hls_master（契约 §13 的 URL 形态）。
+	// ErrNoRows 在这里是**正常**的：非 hls 任务、媒体已软删、或 result_path 为空，
+	// 都无需回写（publishHLSMasterSQL 自带 kind='hls' 与 deleted_at 守卫）。
+	if r.Status == JobStatusDone && r.ResultPath != "" {
+		var mediaID string
+		if err := tx.QueryRow(ctx, publishHLSMasterSQL, r.JobID, r.ResultPath).Scan(&mediaID); err != nil &&
+			!errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("回写 HLS 播放地址失败: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("提交任务结果失败: %w", err)
 	}
 	return nil
 }

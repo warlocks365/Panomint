@@ -18,8 +18,8 @@ import (
 	"panoalbum/internal/albums"
 	"panoalbum/internal/audit"
 	"panoalbum/internal/auth"
-	"panoalbum/internal/config"
 	"panoalbum/internal/compute"
+	"panoalbum/internal/config"
 	"panoalbum/internal/embed"
 	"panoalbum/internal/faces"
 	"panoalbum/internal/folders"
@@ -225,7 +225,7 @@ func main() {
 	// 注意上游配额（高德按 Key 计 QPS、Nominatim 条款要求 ≥1 req/s），详见 internal/geo/mapsearch.go 文件头。
 	// 无高德 Key 时中国地名优雅降级到 Nominatim，绝不 500（降级归因见响应头 X-Map-Search-Degraded）。
 	mapSearchSvc := geo.NewMapSearchService(pool, cfg.AmapKey, os.Getenv("AMAP_SECRET"), log)
-	authed.GET("/map/search", permRead, mapSearchSvc.Search)      // ?q= → {candidates:[{name,lon,lat,provider}]}
+	authed.GET("/map/search", permRead, mapSearchSvc.Search)       // ?q= → {candidates:[{name,lon,lat,provider}]}
 	authed.GET("/map/providers", permRead, mapSearchSvc.Providers) // → {china,intl,default}（不含密钥）
 
 	// Stage 2 公开端点（无鉴权，token 即凭证；不提供原文件下载）
@@ -247,6 +247,26 @@ func main() {
 	// 两个认证平面：管理端是人操作（JWT + admin:system）；节点侧是机器凭据（agent_token），
 	// **不复用 JWT** —— 节点没有 user_id/角色，且需要"按节点吊销/轮换"的粒度。
 	computeStore := &compute.Store{Pool: pool}
+	// 可认领的任务类型：默认仅 noop（见 compute.DefaultClaimableKinds 的说明）。
+	//
+	// ⚠️ 放开 hls 是**显式的运维动作**，不是改个默认值就行：kind='hls' 的行同时被
+	// cmd/transcodectl 通过 **Valkey 队列**消费（注意它消费的是队列项，不是 SQL 轮询），
+	// 必须先下线那条消费（停 transcode-worker 或停止入队），否则同一条 job_id 被两边各跑一遍，
+	// 产出互相覆盖。另外放开时须确认所有在轮询的节点都配了 `-executor local` 与媒体根，
+	// 否则它们会领到任务再失败（执行器对不支持的 kind 是**显式失败**，不会假装成功）。
+	if kinds, err := compute.ParseClaimableKinds(os.Getenv("COMPUTE_CLAIMABLE_KINDS")); err != nil {
+		log.Fatal("COMPUTE_CLAIMABLE_KINDS 非法", zap.Error(err))
+	} else if len(kinds) > 0 {
+		computeStore.ClaimableKinds = kinds
+	}
+	{
+		effective := computeStore.ClaimableKinds
+		if len(effective) == 0 {
+			effective = compute.DefaultClaimableKinds
+		}
+		// 明确打出生效集合：这是"节点为什么领不到 hls 任务"这类问题的第一现场证据。
+		log.Info("算力节点可认领任务类型", zap.Strings("kinds", effective))
+	}
 	computeOfflineAfter := compute.OfflineAfterFromEnv() // COMPUTE_OFFLINE_AFTER_SECONDS，默认 180s（TDD §6.1：60s×3）
 	computeH := &compute.Handler{Store: computeStore, OfflineAfter: computeOfflineAfter}
 	computeAgentH := &compute.AgentHandler{
