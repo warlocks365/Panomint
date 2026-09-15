@@ -18,6 +18,7 @@ import (
 	"panoalbum/internal/albums"
 	"panoalbum/internal/auth"
 	"panoalbum/internal/config"
+	"panoalbum/internal/compute"
 	"panoalbum/internal/embed"
 	"panoalbum/internal/faces"
 	"panoalbum/internal/folders"
@@ -240,6 +241,33 @@ func main() {
 	r.GET("/public/shares/:token/bandwidth-probe", sharesH.PublicProbeDown)
 	r.POST("/public/shares/:token/bandwidth-probe", sharesH.PublicProbeUp)
 	r.POST("/public/shares/:token/bandwidth-test", sharesH.PublicBandwidthTest)
+
+	// ===== T6.2 算力节点 agent（契约 §15）=====
+	// 两个认证平面：管理端是人操作（JWT + admin:system）；节点侧是机器凭据（agent_token），
+	// **不复用 JWT** —— 节点没有 user_id/角色，且需要"按节点吊销/轮换"的粒度。
+	computeStore := &compute.Store{Pool: pool}
+	computeOfflineAfter := compute.OfflineAfterFromEnv() // COMPUTE_OFFLINE_AFTER_SECONDS，默认 180s（TDD §6.1：60s×3）
+	computeH := &compute.Handler{Store: computeStore, OfflineAfter: computeOfflineAfter}
+	computeAgentH := &compute.AgentHandler{
+		Store:             computeStore,
+		OfflineAfter:      computeOfflineAfter,
+		HeartbeatInterval: compute.DefaultHeartbeatInterval,
+	}
+
+	// ⚠️ 通配段只出现在 PATCH/DELETE。**不要**新增 POST /compute-nodes/:id/xxx 这类路由
+	// （例如 :id/rotate-token），否则与下面 /compute-nodes/agent 的静态段在同一层冲突 → gin 启动即 panic。
+	// 令牌轮换已并入 PATCH 的 rotate_token 字段。
+	adminNodes := authed.Group("/compute-nodes", auth.RequirePerm(authStore, "admin:system"))
+	adminNodes.GET("", computeH.List)
+	adminNodes.POST("", computeH.Register)
+	adminNodes.PATCH("/:id", computeH.Patch)
+	adminNodes.DELETE("/:id", computeH.Delete)
+
+	// 节点侧：挂在 r（**不走 JWT**），由 AgentAuth 按 agent_token 的 sha256 校验并注入 node_id。
+	agentPlane := r.Group("/compute-nodes/agent", compute.AgentAuth(computeStore, computeOfflineAfter))
+	agentPlane.POST("/heartbeat", computeAgentH.Heartbeat)
+	agentPlane.POST("/poll", computeAgentH.Poll)
+	agentPlane.POST("/result", computeAgentH.Result)
 
 	// 管理端点（需 admin:users 权限）
 	admin := authed.Group("/admin", auth.RequirePerm(authStore, "admin:users"))
