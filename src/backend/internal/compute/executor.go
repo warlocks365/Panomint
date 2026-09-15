@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log"
 
+	"panoalbum/internal/ffmpeg"
 	"panoalbum/internal/transcode"
 )
 
@@ -72,10 +73,14 @@ func (NoopExecutor) Execute(ctx context.Context, job JobSpec) ResultRequest {
 // **代码里不写任何具体路径** —— 与"不得出现任何具体节点的地址/凭据"是同一条红线：
 // 路径同样是节点相关的部署事实，写死进软件会让它只在一台机器上正确。
 type LocalExecutor struct {
-	// Device cpu|cuda|auto。**当前仅记录与打日志**：HLSArgs 仍走 libx264 软编，
-	// 硬编（h264_nvenc）尚未接入，见待解决问题登记簿的"执行器接真实 ffmpeg"条目。
-	// 保留该字段是双接口原则的要求：接口在，换到有卡的机器即可启用，不必改协议与调用点。
+	// Device cpu|cuda|auto。用于**日志与排障**；真正决定编码器的是 Encoder
+	// （由 EncoderForDevice 结合节点真实能力算出，见 cmd/nodeagent 的装配）。
 	Device string
+
+	// Encoder 视频编码器。零值 = 软编 libx264（默认，任何环境都有）。
+	// 硬编不可用时 internal/transcode 会自动回退软编重跑，不会让任务失败 ——
+	// 故这里可以放心地按"节点自报能力"打开，而不必先探测 ffmpeg 的构建选项。
+	Encoder ffmpeg.VideoEncoder
 
 	// MediaRoots media.path 相对路径的解析根，按序探测（通常上传目录在前、索引根在后）。
 	MediaRoots []string
@@ -85,6 +90,23 @@ type LocalExecutor struct {
 
 	// SegSeconds HLS 分片时长（秒）；<= 0 取 transcode.DefaultSegSeconds。
 	SegSeconds int
+}
+
+// EncoderForDevice 由 -device 与**节点真实探测到的能力**推出编码器。
+//
+// 为什么必须同时看两个输入：
+//   - 只看 device：`-device cuda` 在没有显卡的机器上会每次转码都先失败一次再回退，
+//     白白多花一次进程启动与探测成本（日志里还会持续出现"回退"告警）；
+//   - 只看 hasNVENC：`-device cpu` 是运维**显式要求用 CPU**（例如把 GPU 留给别的任务），
+//     此时即便有卡也不该占用它。
+//
+// 于是规则是"两者都成立才硬编"：显式非 cpu 的 device **且** 探测到 NVENC。
+// 注意 auto 也算"非 cpu"——它表示"能用就用"，与探测结果结合正是它的语义。
+func EncoderForDevice(device string, hasNVENC bool) ffmpeg.VideoEncoder {
+	if hasNVENC && device != DeviceCPU {
+		return ffmpeg.EncoderNVENC
+	}
+	return ffmpeg.EncoderX264
 }
 
 // NewLocalExecutor 构造本地执行器。路径相关字段由调用方按需补齐
@@ -135,14 +157,15 @@ func (e *LocalExecutor) executeHLS(ctx context.Context, job JobSpec) ResultReque
 			e.MediaRoots, job.InputPath, err)
 	}
 
-	log.Printf("compute: 开始 HLS 转码 media=%s profile=%q device=%s input=%s",
-		job.MediaID, job.Profile, e.Device, input)
+	log.Printf("compute: 开始 HLS 转码 media=%s profile=%q device=%s encoder=%s input=%s",
+		job.MediaID, job.Profile, e.Device, e.Encoder, input)
 	url, err := transcode.TranscodeHLS(ctx, transcode.HLSTranscodeRequest{
 		MediaID:    job.MediaID,
 		Input:      input,
 		HLSDir:     e.HLSDir,
 		Profile:    job.Profile,
 		SegSeconds: e.SegSeconds,
+		Encoder:    e.Encoder,
 	})
 	if err != nil {
 		return fail("HLS 转码失败: %v", err)

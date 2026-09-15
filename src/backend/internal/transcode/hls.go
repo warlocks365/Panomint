@@ -70,6 +70,11 @@ type HLSTranscodeRequest struct {
 	SrcHeight int
 	// SegSeconds 分片时长；<= 0 取 DefaultSegSeconds。
 	SegSeconds int
+
+	// Encoder 视频编码器；零值/未知值一律按软编 libx264 处理（见 ffmpeg.HLSArgsEnc）。
+	// 想用硬编请显式传 ffmpeg.EncoderNVENC —— 调用方应据**节点真实能力**决定，
+	// 而不是据"配置里写了 cuda"决定（见 internal/compute.EncoderForDevice）。
+	Encoder ffmpeg.VideoEncoder
 }
 
 // TranscodeHLS 执行多码率 HLS 转码，成功后返回 master.m3u8 的 **URL 路径**
@@ -78,6 +83,18 @@ type HLSTranscodeRequest struct {
 // ⚠️ 本函数**不碰数据库**：任务状态与 media.hls_master 由调用方回写。
 // 这样节点侧只需具备文件系统与 ffmpeg，不必持有数据库凭据 —— 与
 // internal/compute 的"节点只拿 agent_token、不进用户/角色体系"是同一个边界选择。
+//
+// # 硬件编码的自动回退（双接口原则的落地点）
+//
+// 指定了非 libx264 的编码器时，**一旦失败就自动回退 libx264 重跑一次**，而不是让任务失败。
+// 理由：硬编可用性取决于"驱动 + ffmpeg 构建"两件都不在本进程控制内的事，
+// 且两者都可能随时变化（发行版自带 ffmpeg 常见不含 nvenc；容器里没挂 GPU 设备；
+// 驱动升级后 nvenc 会话数打满……）。让这些情况把任务判失败，等于把环境问题伪装成内容问题。
+//
+// 为什么用"任何失败都回退"而不是"匹配 stderr 里的 nvenc 错误串"：
+//   - stderr 文案随 ffmpeg 版本/构建变化，靠匹配字符串是脆的；
+//   - 回退路径上无论原因为何都会再跑一次软编，若真是内容问题，软编同样失败并把**软编的错误**报出来，
+//     所以"失败原因被掩盖"的代价接近零（代价只是多花一次软编开销，且仅在显式启用硬编时才发生）。
 //
 // 返回的 error 一律是**可重试语义**（转码失败/IO 失败）；调用方自行决定是死信还是退避重试。
 func TranscodeHLS(ctx context.Context, req HLSTranscodeRequest) (string, error) {
@@ -97,6 +114,10 @@ func TranscodeHLS(ctx context.Context, req HLSTranscodeRequest) (string, error) 
 	seg := req.SegSeconds
 	if seg <= 0 {
 		seg = DefaultSegSeconds
+	}
+	enc := req.Encoder
+	if !ffmpeg.ValidVideoEncoder(enc) {
+		enc = ffmpeg.EncoderX264
 	}
 
 	srcW, srcH := req.SrcWidth, req.SrcHeight
@@ -118,29 +139,55 @@ func TranscodeHLS(ctx context.Context, req HLSTranscodeRequest) (string, error) 
 	}
 
 	outDir := filepath.Join(req.HLSDir, req.MediaID)
-	log.Printf("转码 media=%s profile=%s src=%dx%d 档位=%s", req.MediaID, profile, srcW, srcH, ladderNames(ladder))
+	masterURL := "/transcode/hls/" + req.MediaID + "/master.m3u8"
 
-	// 重试/重派场景：先清掉半成品目录（幂等重转）。
-	// 这一步必须在新任务开始前完成，否则上一次跑了一半的 seg_*.ts 会与新产出混在一起，
-	// 表现为"播放到中途花屏或时长异常"。
+	// 用归一化后的取值继续（档位/分片/分辨率都已解析完），这样下游的日志与参数
+	// 反映的是**实际生效**的值，而不是调用方可能留空的入参 —— 排障时这很关键。
+	nreq := req
+	nreq.Profile, nreq.SegSeconds, nreq.SrcWidth, nreq.SrcHeight = profile, seg, srcW, srcH
+
+	err := runHLSPass(ctx, nreq, outDir, ladder, seg, enc)
+	if err != nil && enc != ffmpeg.EncoderX264 {
+		log.Printf("硬件编码 %s 未能完成（media=%s），回退软编 %s 重试一次: %v",
+			enc, req.MediaID, ffmpeg.EncoderX264, err)
+		if fbErr := runHLSPass(ctx, nreq, outDir, ladder, seg, ffmpeg.EncoderX264); fbErr != nil {
+			return "", fmt.Errorf("硬编失败、软编回退也失败（硬编原因: %v；软编原因: %w）", err, fbErr)
+		}
+		return masterURL, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return masterURL, nil
+}
+
+// runHLSPass 用指定编码器跑一遍完整转码（清目录 → 建目录 → ffmpeg → 校验 master）。
+//
+// 每次都从头清 outDir：回退重试时若不清，硬编留下的半成品会与软编产出混在一起，
+// 表现为"播放到中途花屏或时长异常"——极难定位，故把这个动作放在**每一趟**的开头。
+func runHLSPass(ctx context.Context, req HLSTranscodeRequest, outDir string, ladder []ffmpeg.HLSRendition,
+	seg int, enc ffmpeg.VideoEncoder) error {
+	log.Printf("转码 media=%s profile=%s src=%dx%d 档位=%s 编码器=%s",
+		req.MediaID, req.Profile, req.SrcWidth, req.SrcHeight, ladderNames(ladder), enc)
+
 	_ = os.RemoveAll(outDir)
 	for _, d := range append([]string{outDir}, ffmpeg.HLSDirs(outDir, ladder)...) {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			return "", err
+			return err
 		}
 	}
 
 	durUs, _ := ffmpeg.ProbeDurationUs(ctx, req.Input)
 	args := append([]string{"-y"},
-		ffmpeg.HLSArgs(req.Input, outDir, ladder, seg, hasAudioStream(ctx, req.Input))...)
+		ffmpeg.HLSArgsEnc(req.Input, outDir, ladder, seg, hasAudioStream(ctx, req.Input), enc)...)
 	task := ffmpeg.New(args, ffmpeg.WithExpectedDurationUs(durUs))
 	if _, err := task.Run(ctx); err != nil {
-		return "", fmt.Errorf("HLS 转码: %w", err)
+		return fmt.Errorf("HLS 转码(%s): %w", enc, err)
 	}
 	// ffmpeg 退出码为 0 也不代表产出完整（例如磁盘写满时可能先报错后仍以 0 退出），
 	// 故显式校验 master 播放列表确实存在。
 	if _, err := os.Stat(filepath.Join(outDir, "master.m3u8")); err != nil {
-		return "", fmt.Errorf("转码完成但 master.m3u8 缺失: %w", err)
+		return fmt.Errorf("转码完成但 master.m3u8 缺失: %w", err)
 	}
-	return "/transcode/hls/" + req.MediaID + "/master.m3u8", nil
+	return nil
 }

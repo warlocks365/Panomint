@@ -95,6 +95,8 @@ func main() {
 	}
 
 	var executor compute.Executor
+	// 本地执行器需要在"能力探测完成后"再决定编码器，故单独留一个引用。
+	var localExec *compute.LocalExecutor
 	switch *executorName {
 	case "noop":
 		executor = compute.NewNoopExecutor()
@@ -113,6 +115,7 @@ func main() {
 		le := compute.NewLocalExecutor(*device)
 		le.MediaRoots = mediaRoots
 		le.HLSDir = *hlsDir
+		localExec = le
 		executor = le
 	default:
 		fmt.Fprintf(os.Stderr, "错误：-executor %q 非法，需为 noop|local\n", *executorName)
@@ -132,6 +135,16 @@ func main() {
 	})
 	if err != nil {
 		log.Fatalf("启动参数错误: %v", err)
+	}
+
+	// 编码器要在**能力探测之后**决定（NewAgent 内部已跑过 nvidia-smi）：
+	// 这样"配置里写了 cuda 但机器没卡"会自然落到软编，节点照常上线工作，
+	// 而不是每次转码都先失败一次再回退（双接口原则：要求 GPU 但机器没有 = 降级，不是起不来）。
+	if localExec != nil {
+		caps := agent.Capabilities()
+		localExec.Encoder = compute.EncoderForDevice(*device, caps.HasNVENC)
+		log.Printf("视频编码器：%s（device=%s has_nvenc=%v；硬编失败会自动回退软编）",
+			localExec.Encoder, *device, caps.HasNVENC)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

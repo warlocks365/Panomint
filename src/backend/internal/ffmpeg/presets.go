@@ -137,11 +137,64 @@ func LadderForSource(srcWidth, srcHeight int) []HLSRendition {
 	return []HLSRendition{{Name: "src", Width: w, Height: h, BitrateK: 500}}
 }
 
-// HLSArgs 生成多码率 HLS 参数（软编 libx264；NVENC 在有 GPU 的算力节点启用，见 T6.2）。
-// 输出结构：outDir/master.m3u8 + outDir/<索引>/index.m3u8 + seg_*.ts（%v 展开为档位索引 0..n-1）。
+// VideoEncoder 视频编码器。**双接口原则**（长期红线）：CPU 与 GPU 两条路径必须同时存在，
+// "开发环境没有 CUDA/没有显卡"不是删减 GPU 接口的理由 —— 因此这里是**运行时取值**，
+// 不是 build tag，也不存在"无卡就把 GPU 分支编译掉"的做法。
+type VideoEncoder string
+
+const (
+	// EncoderX264 软编 libx264：任何装了 ffmpeg 的机器都有，是默认值，
+	// 也是硬件编码不可用时的**回退目标**（回退逻辑在 internal/transcode/hls.go）。
+	EncoderX264 VideoEncoder = "libx264"
+	// EncoderNVENC NVIDIA 硬编 h264_nvenc：需要 NVIDIA 驱动 + 编译时启用了 nvenc 的 ffmpeg。
+	//
+	// ⚠️ 二者**缺一不可得**：Debian/Alpine 发行版自带的 ffmpeg 常见构建**不含 nvenc**
+	// （例如本项目测试服上的 Alpine ffmpeg 只启用了 vaapi/vdpau/libvpl），
+	// 此时 ffmpeg 会以 "Unknown encoder 'h264_nvenc'" 退出 —— 这属于预期内的失败，
+	// 由调用方回退到 EncoderX264，而不是让任务失败。
+	EncoderNVENC VideoEncoder = "h264_nvenc"
+)
+
+// ValidVideoEncoder 取值是否已知。
+func ValidVideoEncoder(e VideoEncoder) bool {
+	return e == EncoderX264 || e == EncoderNVENC
+}
+
+// presetFor 编码器对应的 -preset 取值。
+//
+// ⚠️ 两个编码器的 preset 名**不通用**：x264 用 veryfast/medium 这类词，nvenc 用 p1..p7。
+// 把 "veryfast" 传给 nvenc 会直接报 `Undefined constant or missing '(' in 'veryfast'`，
+// 是个很容易写错、且只在有卡机器上才暴露的坑，故在这里集中映射。
+func presetFor(e VideoEncoder) string {
+	if e == EncoderNVENC {
+		// p1 最快 / p7 最慢最好。取 p4 与 x264 的 veryfast 大致同档（本项目是家用相册，
+		// 单节点并发通常 >1，速度比极限压缩率重要）。
+		return "p4"
+	}
+	return "veryfast"
+}
+
+// HLSArgs 生成多码率 HLS 参数（**默认软编 libx264**）。
+//
+// 保留这个签名是为了不动既有调用点与测试；需要硬编时用 HLSArgsEnc。
+// 控制端（cmd/transcodectl）永远走软编 —— 它跑在可能没有显卡的 NAS/服务器上。
+func HLSArgs(input, outDir string, ladder []HLSRendition, segSeconds int, withAudio bool) []string {
+	return HLSArgsEnc(input, outDir, ladder, segSeconds, withAudio, EncoderX264)
+}
+
+// HLSArgsEnc 同 HLSArgs，但可指定视频编码器（算力节点据自身能力选择）。
+//
+// 输出结构不变：outDir/master.m3u8 + outDir/<索引>/index.m3u8 + seg_*.ts（%v 展开为档位索引 0..n-1）。
 // 注意：调用方需预创建各档位索引子目录（ffmpeg 不自动建目录），可用 HLSDirs 获取列表。
 // withAudio 为 true 时按变体逐份映射首个音频流（要求输入含音轨，可先 ProbeDurationUs/探针确认）。
-func HLSArgs(input, outDir string, ladder []HLSRendition, segSeconds int, withAudio bool) []string {
+//
+// 缩放在 CPU 上做（filter_complex 的 scale），只有**编码**走硬编：这样 2:1 全景源的
+// force_divisible_by=2 取偶逻辑与分辨率阶梯完全复用既有实现，不必再维护一套 scale_cuda 变体；
+// ffmpeg 会自动把系统内存帧上传给 nvenc。
+func HLSArgsEnc(input, outDir string, ladder []HLSRendition, segSeconds int, withAudio bool, enc VideoEncoder) []string {
+	if !ValidVideoEncoder(enc) {
+		enc = EncoderX264 // 未知取值回退软编：绝不因一个配置笔误就让任务失败
+	}
 	n := len(ladder)
 
 	var fc strings.Builder
@@ -161,11 +214,11 @@ func HLSArgs(input, outDir string, ladder []HLSRendition, segSeconds int, withAu
 	for i, r := range ladder {
 		args = append(args,
 			"-map", fmt.Sprintf("[v%dout]", i),
-			fmt.Sprintf("-c:v:%d", i), "libx264",
+			fmt.Sprintf("-c:v:%d", i), string(enc),
 			fmt.Sprintf("-b:v:%d", i), fmt.Sprintf("%dk", r.BitrateK),
 			fmt.Sprintf("-maxrate:v:%d", i), fmt.Sprintf("%dk", r.BitrateK*12/10),
 			fmt.Sprintf("-bufsize:v:%d", i), fmt.Sprintf("%dk", r.BitrateK*2),
-			fmt.Sprintf("-preset:v:%d", i), "veryfast",
+			fmt.Sprintf("-preset:v:%d", i), presetFor(enc),
 		)
 		entry := fmt.Sprintf("v:%d", i)
 		if withAudio {

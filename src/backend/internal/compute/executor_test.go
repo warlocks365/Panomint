@@ -110,6 +110,61 @@ func TestLocalExecutorHLSConfigErrors(t *testing.T) {
 	})
 }
 
+// TestEncoderForDevice 编码器选择必须**同时**看 -device 与节点真实探测到的能力。
+//
+// 两个输入各管一件事，缺任一条都会出问题：
+//   - 只看 device：`-device cuda` 在无卡机器上会每次转码都先失败一次再回退（无谓开销 + 持续告警）；
+//   - 只看 hasNVENC：`-device cpu` 是运维**显式要求用 CPU**（把 GPU 让给别的任务），
+//     此时有卡也不该占用它。
+//
+// 这条同时是双接口原则的断言：要求 GPU 而机器没有 → 得到软编（降级），**不是**报错。
+func TestEncoderForDevice(t *testing.T) {
+	cases := []struct {
+		name     string
+		device   string
+		hasNVENC bool
+		want     ffmpeg.VideoEncoder
+	}{
+		{"cpu + 有卡 → 仍软编（显式让出 GPU）", DeviceCPU, true, ffmpeg.EncoderX264},
+		{"cpu + 无卡 → 软编", DeviceCPU, false, ffmpeg.EncoderX264},
+		{"cuda + 有卡 → 硬编", DeviceCUDA, true, ffmpeg.EncoderNVENC},
+		{"cuda + 无卡 → 降级软编（不报错）", DeviceCUDA, false, ffmpeg.EncoderX264},
+		{"auto + 有卡 → 硬编", DeviceAuto, true, ffmpeg.EncoderNVENC},
+		{"auto + 无卡 → 软编", DeviceAuto, false, ffmpeg.EncoderX264},
+		{"空串（等价 auto）+ 无卡 → 软编", "", false, ffmpeg.EncoderX264},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := EncoderForDevice(c.device, c.hasNVENC); got != c.want {
+				t.Fatalf("EncoderForDevice(%q, %v) = %q，期望 %q", c.device, c.hasNVENC, got, c.want)
+			}
+		})
+	}
+}
+
+// TestLocalExecutorPassesEncoderThrough 执行器必须把 Encoder 真正传下去（而不是只存在字段里）。
+//
+// 手法：请求硬编 + 源文件不可达 → 断言**不是**"不支持"类错误，而是"源文件不可达"，
+// 这证明它走到了 hls 分支并进入了真正的转码流程（Encoder 的最终生效由
+// internal/transcode 与 internal/ffmpeg 的测试覆盖）。
+func TestLocalExecutorPassesEncoderThrough(t *testing.T) {
+	root := t.TempDir()
+	ex := NewLocalExecutor(DeviceCUDA)
+	ex.Encoder = ffmpeg.EncoderNVENC
+	ex.MediaRoots = []string{root}
+	ex.HLSDir = t.TempDir()
+
+	r := ex.Execute(context.Background(), JobSpec{
+		JobID: "j", Kind: KindHLS, MediaID: "m", InputPath: "nope.mp4",
+	})
+	if r.Status != JobStatusFailed {
+		t.Fatalf("源文件不存在应失败，实际 %+v", r)
+	}
+	if !strings.Contains(r.Error, "不可达") {
+		t.Fatalf("应报「源文件不可达」（说明已进入 hls 分支），实际 %q", r.Error)
+	}
+}
+
 // TestLocalExecutorRealHLS 真实 ffmpeg 端到端：生成一段测试视频 → 转 HLS → 校验产出。
 //
 // 这是"执行器真的接了 ffmpeg"的证据，而不是"代码看起来接了"。
