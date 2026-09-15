@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"panoalbum/internal/albums"
+	"panoalbum/internal/audit"
 	"panoalbum/internal/auth"
 	"panoalbum/internal/config"
 	"panoalbum/internal/compute"
@@ -273,6 +274,19 @@ func main() {
 	admin := authed.Group("/admin", auth.RequirePerm(authStore, "admin:users"))
 	admin.POST("/users", authH.CreateUser)
 	admin.GET("/users", authH.ListUsers)
+
+	// ===== Phase 5 精选第一项：审计日志 + 管理端只读端点 =====
+	// 契约 §2 `GET /admin/audit`（分页）、§14 `GET /admin/stats`、§12 `GET /admin/jobs`。
+	// 权限点一律取自库中**实际存在**的种子权限（实测只有 admin:system / admin:users 两个 admin 前缀），不新造权限名：
+	//   /admin/audit → admin:users（契约 §2「管理端点（需 admin:users）」表头明确列出）
+	//   /admin/stats、/admin/jobs → admin:system（系统级运维面，与 §15 节点管理同级）
+	// 审计写入是**尽力而为**的：失败只记 warn，绝不影响业务请求（见 internal/audit 包文档）。
+	// nginx 无需改动：/admin 已在 docker/web/Dockerfile 的纯 API 正则组内。
+	auditStore := &audit.PGStore{Pool: pool}
+	auditH := &audit.Handler{Store: auditStore, Recorder: audit.New(pool, log)}
+	admin.GET("/audit", auditH.ListAudit)
+	authed.GET("/admin/stats", auth.RequirePerm(authStore, "admin:system"), auditH.Stats)
+	authed.GET("/admin/jobs", auth.RequirePerm(authStore, "admin:system"), auditH.Jobs)
 
 	h := &health.Handler{Pool: pool, Queue: q, DiskCheckDir: "./data"}
 	r.GET("/health", h.Live)
