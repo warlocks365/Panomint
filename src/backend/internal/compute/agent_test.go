@@ -293,6 +293,100 @@ func TestAgentResultFailureDoesNotCrash(t *testing.T) {
 	}
 }
 
+// TestAgentHeartbeatNotBlockedByLongJob 长任务不得挡住心跳。
+//
+// 这是「离线超时任务重派」交付项的**前置缺陷**回归断言。原实现里 pollAndRun 返回前会
+// wg.Wait()，于是 tick 的耗时 = 最慢任务的耗时，而心跳只在每个 tick 的开头发一次
+// —— 一个跑得比离线阈值（180s）更久的转码任务，会让这个**仍在干活**的节点被服务端
+// 判为 offline，进而触发任务回收：任务被交给另一个节点重跑，两个节点写同一份产出。
+//
+// 断言方式：让单个任务睡满若干个心跳周期，检查到任务回传为止服务端收到的心跳数。
+// 修复前该值恒为 1（整段任务期间只有进入任务那次心跳）；修复后约为 jobDelay/interval。
+// 阈值取 5，与两种情况都留有数量级余量，不会因调度抖动而假失败。
+func TestAgentHeartbeatNotBlockedByLongJob(t *testing.T) {
+	h := &agentHarness{pendingJobs: []JobSpec{{JobID: "long", Kind: "noop", MediaID: "m"}}}
+	srv := h.server(t)
+
+	const (
+		jobDelay  = 400 * time.Millisecond
+		hbEvery   = 20 * time.Millisecond
+		wantMinHB = 5
+	)
+	a := newTestAgent(t, srv.URL, AgentConfig{
+		Executor:          &slowExecutor{delay: jobDelay},
+		HeartbeatInterval: hbEvery,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() { _ = a.Run(ctx) }()
+
+	// 等到任务回传的那一刻再读心跳数：这一刻等价于"任务期间"的终点。
+	deadline := time.Now().Add(4 * time.Second)
+	var hbCount int
+	for {
+		hb, _, results := h.snapshot()
+		if len(results) > 0 {
+			hbCount = len(hb)
+			break
+		}
+		if time.Now().After(deadline) {
+			hb, polls, results := h.snapshot()
+			t.Fatalf("超时未收到回传：heartbeats=%d polls=%d results=%d", len(hb), polls, len(results))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+
+	if hbCount < wantMinHB {
+		t.Fatalf("任务执行期间只收到 %d 次心跳（期望 ≥%d）：心跳被任务执行挡住了，"+
+			"长转码会让健康节点被判离线并被回收任务", hbCount, wantMinHB)
+	}
+}
+
+// TestAgentDrainWaitsForInflightJob 停机时在跑任务会被等待收尾（最多 shutdownGrace）。
+//
+// 与上一条互补：上一条要求主循环**不**等任务，这一条要求停机时**要**等——
+// 两者共同刻画"执行与心跳解耦，但停机不丢任务"。
+func TestAgentDrainWaitsForInflightJob(t *testing.T) {
+	h := &agentHarness{pendingJobs: []JobSpec{{JobID: "j-drain", Kind: "noop", MediaID: "m"}}}
+	srv := h.server(t)
+
+	a := newTestAgent(t, srv.URL, AgentConfig{
+		Executor:          &slowExecutor{delay: 120 * time.Millisecond},
+		HeartbeatInterval: 20 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+
+	// 等任务真的开始跑（activeTasks > 0）再取消，确保考察的是"在跑任务"的收尾。
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt64(&a.activeTasks) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("任务始终未开始执行")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("取消后应返回 nil，实际 %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run 未退出")
+	}
+
+	// 收尾之后必须已经回传（drain 等到了任务结束），而不是把任务丢掉。
+	_, _, results := h.snapshot()
+	if len(results) == 0 {
+		t.Fatal("停机在跑任务被丢弃：drain 未等待任务收尾（或回传未发出）")
+	}
+}
+
 // TestAgentConcurrencyLimit 并发上限不得被突破，且确实并行（峰值应恰为 2）。
 func TestAgentConcurrencyLimit(t *testing.T) {
 	jobs := []JobSpec{}

@@ -152,11 +152,23 @@ func (h *AgentHandler) Heartbeat(c *gin.Context) {
 // Poll POST /compute-nodes/agent/poll ← {max?} → {jobs:[...], server_time}
 //
 // 无任务时返回空数组（不是 null），节点侧无需为空的两种情况写分支。
+//
+// 顺序是**先回收、再认领**：回收把僵死节点名下卡在 running 的任务放回 pending，
+// 紧接着的认领就能把刚刚释放出来的任务交给本节点，避免多等一个轮询周期。
 func (h *AgentHandler) Poll(c *gin.Context) {
 	var req PollRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		fail(c, http.StatusBadRequest, CodeInvalidInput, "请求体格式错误")
 		return
+	}
+
+	// 回收僵死任务（见 Store.ReclaimStale）。触发点是"有节点来拉任务"，不引入定时任务。
+	if ids, err := h.Store.ReclaimStale(c.Request.Context(), h.offlineAfter()); err != nil {
+		// 回收失败**不阻断**本次拉取：它只影响"僵尸任务能否被重派"，
+		// 而阻断拉取会让本来健康的节点也一起停摆 —— 故障面被放大。
+		log.Printf("compute: 回收僵死任务失败（不影响本次拉取）: %v", err)
+	} else if len(ids) > 0 {
+		log.Printf("compute: 回收 %d 个僵死任务（原节点心跳静默超时 / 被管理员下线）: %v", len(ids), ids)
 	}
 
 	jobs, err := h.Store.PollJobs(c.Request.Context(), nodeID(c), req.Max)
@@ -178,6 +190,10 @@ func (h *AgentHandler) Result(c *gin.Context) {
 
 	if err := h.Store.SubmitResult(c.Request.Context(), nodeID(c), r); err != nil {
 		switch {
+		case errors.Is(err, ErrJobFinalized):
+			// 409 而不是 404：任务确实存在，只是已结束（正常竞态）。节点侧据此
+			// 不必怀疑自己的任务 id，也不必重试。
+			fail(c, http.StatusConflict, CodeJobFinalized, "任务已是终态，回传被拒绝")
 		case errors.Is(err, ErrJobNotFound):
 			fail(c, http.StatusNotFound, CodeJobNotFound, "任务不存在或不属于本节点")
 		case errors.Is(err, ErrInvalidInput):

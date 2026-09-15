@@ -34,7 +34,32 @@ const (
 
 	// MaxPollJobs 单次拉取的任务数上限（防止一个节点一次吞掉整条队列）。
 	MaxPollJobs = 16
+
+	// DefaultReclaimAfter 「在跑任务的节点已僵死」的判定阈值，用于把僵死节点名下
+	// 仍处于 running 的任务收回队列（见 store.go 的 reclaimJobsSQL）。
+	//
+	// 为什么比离线阈值再宽一倍：节点在 DefaultOfflineAfter（180s）已被判为 offline，
+	// 但「判离线」只意味着停止给它派新任务，代价可控；而把**已经领走、可能正在执行**
+	// 的任务收回重派，代价高得多——若原节点其实还活着（短暂网络分区、心跳丢包、
+	// 时钟偏差），就会出现两个节点同时处理同一条媒体、产出互相覆盖。
+	// 故回收比离线判定更保守：再多等一个离线阈值才动手。
+	//
+	// ⚠️ 判据是**节点心跳**，不是**任务已运行时长**。这是刻意的：节点侧的心跳已与
+	// 任务执行解耦（见 agent.go 的 pollAndRun），健康节点跑几小时的大转码时心跳照常发，
+	// 因此长任务不会被误回收；只有"节点不再报到了"才会被回收。
+	DefaultReclaimAfter = 2 * DefaultOfflineAfter
 )
+
+// ReclaimAfter 由离线阈值推出回收阈值：2 × offlineAfter；offlineAfter <= 0 时取默认值。
+//
+// 与 DefaultReclaimAfter 同源，保证"调整离线阈值"时回收阈值随之缩放，
+// 不会出现"离线判定已改成 30s、回收却仍等 360s"这类两套节奏打架的情况。
+func ReclaimAfter(offlineAfter time.Duration) time.Duration {
+	if offlineAfter <= 0 {
+		return DefaultReclaimAfter
+	}
+	return 2 * offlineAfter
+}
 
 // ---- 错误码（与项目既有响应包络一致：{"error":{"code","message"}}） ----
 
@@ -43,10 +68,14 @@ const (
 	CodeInvalidAgentToken = "INVALID_AGENT_TOKEN" // 节点令牌无效或已过期
 	CodeNodeNotFound      = "NODE_NOT_FOUND"
 	CodeInvalidInput      = "INVALID_INPUT"
-	CodeJobNotFound       = "JOB_NOT_FOUND"       // 回传的任务不存在或不属于本节点
+	CodeJobNotFound       = "JOB_NOT_FOUND" // 回传的任务不存在或不属于本节点
 	CodeJobNotOwned       = "JOB_NOT_OWNED"
-	CodeNodeBusy          = "NODE_BUSY"
-	CodeInternal          = "INTERNAL"
+	// CodeJobFinalized 任务已是终态（done/failed），迟到的回传被拒绝。
+	// 与 JOB_NOT_FOUND 分开是为了让节点侧能区分「我记错了任务 id」与
+	// 「任务已经结束（可能被回收后由别的节点完成）」——前者要查 bug，后者是正常竞态。
+	CodeJobFinalized = "JOB_FINALIZED"
+	CodeNodeBusy     = "NODE_BUSY"
+	CodeInternal     = "INTERNAL"
 )
 
 // APIError 统一错误响应体。

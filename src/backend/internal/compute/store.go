@@ -63,6 +63,9 @@ var (
 	ErrInvalidInput = errors.New("compute: 输入非法")
 	// ErrJobNotFound 回传的任务不存在，或不属于该节点。
 	ErrJobNotFound = errors.New("compute: 任务不存在或不属于本节点")
+	// ErrJobFinalized 任务已是终态（done/failed）。迟到的重复回传被拒绝，
+	// 避免"已 done 的任务被一条迟到的 failed 改写"。
+	ErrJobFinalized = errors.New("compute: 任务已是终态，回传被拒绝")
 )
 
 // ---- 固定 SQL ----
@@ -122,11 +125,47 @@ var (
 	// 真实绝对路径解析（MediaRoot / UploadDir 回退，同 internal/transcode）留待接入 ffmpeg 时落地。
 	pollInputPathsSQL = `SELECT id::text, COALESCE(path,'') FROM media WHERE id = ANY($1::uuid[])`
 
-	// submitResultSQL 回传结果。WHERE 里的归属守卫 (node_id IS NULL OR node_id = $2)
-	// 防止一个节点把另一个节点的任务标成完成/失败（节点令牌之间必须互相隔离）。
+	// submitResultSQL 回传结果。两道守卫缺一不可：
+	//
+	//  1. **终态守卫** `status NOT IN ('done','failed')`：终态不可改写。否则一条延迟到达的
+	//     重复回传（节点重试、网络重放）能把已经 done 的任务改成 failed，
+	//     让"这条任务到底成没成"变得不可信。回收机制上线后，迟到的回传只会更常见。
+	//
+	//  2. **归属守卫**：任务当前归属于本节点，**或**任务已因原节点僵死被回收而处于
+	//     「无人持有且仍是 pending」的状态。后者是刻意留的口子——原节点其实完成了工作，
+	//     只是回传晚了，接受它可以避免让别的节点白跑一遍。若任务已被**别的**节点领走
+	//     （node_id = 他人），则拒绝，避免两个节点互相覆盖产出。
 	submitResultSQL = `UPDATE transcode_jobs SET status = $3, result_path = NULLIF($4,''), node_id = $2::uuid
-		WHERE id = $1::uuid AND (node_id IS NULL OR node_id = $2::uuid)
+		WHERE id = $1::uuid
+		  AND status NOT IN ('done', 'failed')
+		  AND (node_id = $2::uuid OR (node_id IS NULL AND status = 'pending'))
 		RETURNING id`
+
+	// probeJobStatusSQL 回传落空时反查任务真实状态，用于区分
+	// 「任务不存在/不属于我」与「任务已是终态」两种不同的失败语义（见 SubmitResult）。
+	probeJobStatusSQL = `SELECT status::text FROM transcode_jobs WHERE id = $1::uuid`
+
+	// reclaimJobsSQL 回收「僵死节点」名下仍在 running 的任务：置回 pending 并清空归属，
+	// 使下一个健康节点能重新认领（pollJobsSQL 只认 status='pending'）。
+	//
+	// 判据（阈值见 DefaultReclaimAfter / ReclaimAfter）：
+	//   - 管理员显式下线（status_locked 且 status='offline'）→ 这是人的明确意图，立即可回收，
+	//     不必再等心跳超时；
+	//   - 心跳静默超过阈值 → 用 COALESCE(last_heartbeat, created_at) 兜底，
+	//     让"刚登记、还没发过首次心跳"的新节点也享有一段与在线节点等长的宽限期，
+	//     避免它刚领到任务、心跳还没发出去就被别的节点抢走。
+	//
+	// 只动 running 行：pending 本就无人持有；done/failed 是终态，也是审计意义上的历史，
+	// 任何自动化都不该改写它们。
+	reclaimJobsSQL = `UPDATE transcode_jobs j SET status = 'pending', node_id = NULL
+		WHERE j.status = 'running'
+		  AND j.node_id IS NOT NULL
+		  AND j.node_id IN (
+			SELECT id FROM compute_nodes
+			WHERE (status_locked AND status = 'offline')
+			   OR COALESCE(last_heartbeat, created_at) < now() - ($1::int * interval '1 second')
+		  )
+		RETURNING j.id::text`
 )
 
 // Store 算力节点存取。
@@ -412,6 +451,11 @@ func (s *Store) Heartbeat(ctx context.Context, nodeID string, hb HeartbeatReques
 
 // PollJobs 原子认领本节点的待处理任务（默认只认领 kind='noop'，见 DefaultClaimableKinds）。
 //
+// 调用方应**先**执行 ReclaimStale：本方法只认 status='pending' 的行，僵死节点名下
+// 卡在 running 的任务不会被它认领，需要回收那一步把状态放回 pending。
+// 两者分开是为了让"回收"可以在别处复用（例如管理端手动触发），也为了让各自的
+// SQL 契约能独立断言。
+//
 // max <= 0 取 MaxPollJobs，max > MaxPollJobs 截断——上限存在的意义是防止一个节点
 // 一次把整条队列吞进内存（尤其是任务里带路径/规格字符串时）。
 func (s *Store) PollJobs(ctx context.Context, nodeID string, max int) ([]JobSpec, error) {
@@ -479,6 +523,13 @@ func (s *Store) inputPaths(ctx context.Context, mediaIDs []string) (map[string]s
 
 // SubmitResult 回传任务结果并写入 node_id 归属。
 //
+// 落空时**反查一次**任务状态，把两种语义分开（见 submitResultSQL 的两道守卫）：
+//   - 任务已是终态 → ErrJobFinalized（正常竞态：任务可能已被回收、由别的节点完成，
+//     或本节点重复回传）；
+//   - 任务不存在 / 属于别的节点 → ErrJobNotFound。
+//
+// 分开的意义在于排障：前者是"世界变了"，后者是"你的任务 id 不对"，处置完全不同。
+//
 // 任务失败的原因（r.Error）**不落库**：transcode_jobs 没有可放它的列，而为了一个错误串
 // 新增列会牵扯 DDL 变更与历史兼容。当前只回给调用方与日志；待接入 ffmpeg 需要
 // 持久化失败细节时再一并设计（例如新增 transcode_job_events 事件表）。
@@ -493,10 +544,59 @@ func (s *Store) SubmitResult(ctx context.Context, nodeID string, r ResultRequest
 	var got string
 	err := s.Pool.QueryRow(ctx, submitResultSQL, r.JobID, nodeID, r.Status, r.ResultPath).Scan(&got)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrJobNotFound
+		return s.classifySubmitMiss(ctx, r.JobID)
 	}
 	if err != nil {
 		return fmt.Errorf("回传任务结果失败: %w", err)
 	}
 	return nil
+}
+
+// classifySubmitMiss 回传落空时判定具体原因。
+// 反查失败不掩盖主因：仍按 ErrJobNotFound 返回（那是最保守、最不需要上层特殊处理的结论）。
+func (s *Store) classifySubmitMiss(ctx context.Context, jobID string) error {
+	var status string
+	if err := s.Pool.QueryRow(ctx, probeJobStatusSQL, jobID).Scan(&status); err != nil {
+		return ErrJobNotFound
+	}
+	if status == JobStatusDone || status == JobStatusFailed {
+		return ErrJobFinalized
+	}
+	return ErrJobNotFound
+}
+
+// ReclaimStale 回收僵死节点名下仍在 running 的任务，返回被回收的任务 id。
+//
+// 触发方式是**惰性的**：由节点拉取任务时顺带执行（见 agentapi.Poll），不引入常驻定时任务。
+// 与 offline.go「离线判定只在查询侧做」的既有选择一致，理由是——没有任何节点来拉任务时，
+// 回收出来的任务也没有节点会去执行，回收本身没有收益；反过来，只要有健康节点在轮询，
+// 它每一轮都会把僵死节点遗留的任务捞回队列，无需额外的调度器。
+//
+// 本方法是幂等的：重复执行只会命中"仍然 running 且归属僵死节点"的行。
+func (s *Store) ReclaimStale(ctx context.Context, offlineAfter time.Duration) ([]string, error) {
+	secs := int(ReclaimAfter(offlineAfter).Seconds())
+	if secs <= 0 {
+		// 阈值非正会让 `now() - 0s` 退化成"回收所有 running 任务"，属危险配置，
+		// 这里直接跳过而不是带着危险语义执行。
+		return nil, nil
+	}
+
+	rows, err := s.Pool.Query(ctx, reclaimJobsSQL, secs)
+	if err != nil {
+		return nil, fmt.Errorf("回收僵死任务失败: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("读取回收任务 id 失败: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("遍历回收任务失败: %w", err)
+	}
+	return ids, nil
 }

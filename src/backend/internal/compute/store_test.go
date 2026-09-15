@@ -34,15 +34,17 @@ func TestInsertSQLMustNotStorePlaintextToken(t *testing.T) {
 // TestAllNodeSQLMustNotStorePlaintextToken 全量扫描：任何语句都不得读明文令牌列。
 func TestAllNodeSQLMustNotStorePlaintextToken(t *testing.T) {
 	stmts := map[string]string{
-		"listNodesSQL":             listNodesSQL,
-		"getNodeSQL":               getNodeSQL,
-		"insertNodeSQL":            insertNodeSQL,
-		"deleteNodeSQL":            deleteNodeSQL,
-		"findNodeByTokenHashSQL":   findNodeByTokenHashSQL,
-		"heartbeatSQL":             heartbeatSQL,
-		"pollJobsSQL":              pollJobsSQL,
-		"pollInputPathsSQL":        pollInputPathsSQL,
-		"submitResultSQL":          submitResultSQL,
+		"listNodesSQL":           listNodesSQL,
+		"getNodeSQL":             getNodeSQL,
+		"insertNodeSQL":          insertNodeSQL,
+		"deleteNodeSQL":          deleteNodeSQL,
+		"findNodeByTokenHashSQL": findNodeByTokenHashSQL,
+		"heartbeatSQL":           heartbeatSQL,
+		"pollJobsSQL":            pollJobsSQL,
+		"pollInputPathsSQL":      pollInputPathsSQL,
+		"submitResultSQL":        submitResultSQL,
+		"probeJobStatusSQL":      probeJobStatusSQL,
+		"reclaimJobsSQL":         reclaimJobsSQL,
 	}
 	for name, sql := range stmts {
 		// 允许出现在 COMMENT/参数里的是 hash 与 expires 两个派生列，明文列名一律禁止。
@@ -128,6 +130,7 @@ func TestHeartbeatSQLKeepsUnreportedFields(t *testing.T) {
 // 这是 T6.2 缺陷的**直接回归断言**（缺陷现象：登记后心跳成功，节点仍 forever offline）：
 //   - 未加锁时用节点自报状态，缺省 'online' —— 否则新登记节点（落库默认 offline）永不上线；
 //   - 已加锁时保持原值 —— 否则"管理员强制下线"会被心跳推翻，等于没有强制下线能力。
+//
 // 保留 COALESCE($2, ...) 是为了**不把节点自报的 busy 抹成 online**：
 // cmd/nodeagent 在 active_tasks>0 时上报 busy，无条件写 'online' 会让 busy 永远不可见。
 func TestHeartbeatSQLSetsStatusWhenUnlocked(t *testing.T) {
@@ -174,16 +177,100 @@ func TestDefaultClaimableKindsExcludesHLS(t *testing.T) {
 	}
 }
 
-// TestSubmitResultSQLIsOwnershipGuarded 回传必须带归属守卫，防止节点篡改他人任务。
+// TestSubmitResultSQLIsOwnershipGuarded 回传必须带归属守卫与终态守卫，防止节点篡改他人任务
+// 或改写已结束的任务。
+//
+// ⚠️ 本测试在「离线超时任务重派」交付项中改过（原来是单条 `node_id IS NULL OR node_id = $2`）：
+// 回收机制上线后，"node_id IS NULL" 不再只出现在"任务刚被创建"这一刻——僵死节点的任务
+// 会被放回 pending 且清空归属。于是旧写法把两种完全不同的情形混成一条：既接受
+// 「原节点完成得很晚」（应接受，避免白跑一遍），也接受「任务已被别的节点领走」
+// （不该接受，会互相覆盖产出）。新写法把后者排除掉，并补上终态守卫。
 func TestSubmitResultSQLIsOwnershipGuarded(t *testing.T) {
-	if !strings.Contains(submitResultSQL, "node_id IS NULL OR node_id = $2::uuid") {
-		t.Fatalf("回传语句缺少 node_id 归属守卫：\n%s", submitResultSQL)
+	compact := strings.Join(strings.Fields(submitResultSQL), "")
+	if !strings.Contains(compact, "(node_id=$2::uuidOR(node_idISNULLANDstatus='pending'))") {
+		t.Fatalf("回传语句缺少两分支归属守卫（本节点持有 ‖ 已回收且无人持有）：\n%s", submitResultSQL)
+	}
+	if !strings.Contains(compact, "statusNOTIN('done','failed')") {
+		t.Fatalf("回传语句缺少终态守卫（终态不可改写）：\n%s", submitResultSQL)
 	}
 	if !strings.Contains(submitResultSQL, "status = $3") {
 		t.Fatalf("回传语句必须更新 status：\n%s", submitResultSQL)
 	}
 	if !strings.Contains(submitResultSQL, "result_path = NULLIF($4,'')") {
 		t.Fatalf("回传语句应把空串 result_path 归一为 NULL：\n%s", submitResultSQL)
+	}
+}
+
+// TestProbeJobStatusSQLIsASingleLookup 反查语句必须是按主键的单次查询（失败路径专用）。
+func TestProbeJobStatusSQLIsASingleLookup(t *testing.T) {
+	if !strings.Contains(probeJobStatusSQL, "WHERE id = $1::uuid") {
+		t.Fatalf("反查语句必须按主键定位：\n%s", probeJobStatusSQL)
+	}
+	if !strings.Contains(probeJobStatusSQL, "status") {
+		t.Fatalf("反查语句必须取回 status：\n%s", probeJobStatusSQL)
+	}
+}
+
+// TestReclaimJobsSQLOnlyTouchesStaleRunning 回收语句的边界必须精确。
+//
+// 这是最危险的一条语句：它会把任务从别的节点手里拿走。写宽了（例如漏掉 status='running'
+// 或漏掉归属非空）就会误伤正常在跑的任务，且这种 bug 只在多节点并发时才显形。
+func TestReclaimJobsSQLOnlyTouchesStaleRunning(t *testing.T) {
+	compact := strings.Join(strings.Fields(reclaimJobsSQL), "")
+
+	// 只回收 running：pending 无人持有，done/failed 是终态（审计意义上的历史）。
+	if !strings.Contains(compact, "j.status='running'") {
+		t.Fatalf("回收语句必须限定 status='running'：\n%s", reclaimJobsSQL)
+	}
+	if !strings.Contains(compact, "j.node_idISNOTNULL") {
+		t.Fatalf("回收语句必须要求归属非空（node_id IS NULL 的行本就无人持有）：\n%s", reclaimJobsSQL)
+	}
+	// 归属清空 + 状态置回 pending，才能被 pollJobsSQL 重新认领。
+	if !strings.Contains(compact, "SETstatus='pending',node_id=NULL") {
+		t.Fatalf("回收语句必须置 pending 并清空 node_id：\n%s", reclaimJobsSQL)
+	}
+	// 判据来源必须是 compute_nodes 的心跳（或管理员强制下线），而不是"任务跑了多久"。
+	if !strings.Contains(compact, "FROMcompute_nodes") {
+		t.Fatalf("回收判据必须取自 compute_nodes：\n%s", reclaimJobsSQL)
+	}
+	if !strings.Contains(compact, "status_lockedANDstatus='offline'") {
+		t.Fatalf("回收语句必须识别「管理员强制下线」（status_locked + offline）：\n%s", reclaimJobsSQL)
+	}
+	if !strings.Contains(compact, "COALESCE(last_heartbeat,created_at)") {
+		t.Fatalf("回收语句须用 COALESCE(last_heartbeat, created_at) 兜底，给从未心跳的新节点宽限期：\n%s", reclaimJobsSQL)
+	}
+	if !strings.Contains(compact, "$1::int*interval'1second'") {
+		t.Fatalf("回收阈值必须是可注入的参数（不得写死秒数）：\n%s", reclaimJobsSQL)
+	}
+	// 绝不把终态行也捞进来。
+	for _, bad := range []string{"'pending'OR", "statusIN('done'", "status='done'"} {
+		if strings.Contains(compact, bad) {
+			t.Fatalf("回收语句不该出现 %q（会误伤终态行）：\n%s", bad, reclaimJobsSQL)
+		}
+	}
+}
+
+// TestReclaimAfter 回收阈值由离线阈值推出（2×），且对非正值有安全的兜底。
+//
+// 「回收阈值 = 2 × 离线阈值」这一比例是刻意的：回收比"判离线"更保守，
+// 因为误回收的代价（两个节点跑同一条媒体、产出互相覆盖）远高于晚回收。
+func TestReclaimAfter(t *testing.T) {
+	if DefaultReclaimAfter != 2*DefaultOfflineAfter {
+		t.Fatalf("DefaultReclaimAfter 应为 2×DefaultOfflineAfter，实际 %s vs %s",
+			DefaultReclaimAfter, DefaultOfflineAfter)
+	}
+	if got := ReclaimAfter(0); got != DefaultReclaimAfter {
+		t.Fatalf("offlineAfter<=0 应回落默认值 %s，实际 %s", DefaultReclaimAfter, got)
+	}
+	if got := ReclaimAfter(-time.Second); got != DefaultReclaimAfter {
+		t.Fatalf("负值应回落默认值 %s，实际 %s", DefaultReclaimAfter, got)
+	}
+	if got, want := ReclaimAfter(30*time.Second), 60*time.Second; got != want {
+		t.Fatalf("应随离线阈值缩放：ReclaimAfter(30s) = %s，期望 %s", got, want)
+	}
+	// 阈值必须是正的，否则 reclaimJobsSQL 的 `now() - 0s` 会回收**所有** running 任务。
+	if DefaultReclaimAfter <= 0 {
+		t.Fatal("回收阈值必须为正")
 	}
 }
 

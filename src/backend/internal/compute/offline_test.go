@@ -16,8 +16,8 @@ import (
 // 引入 status_locked 后，这三条改为 locked 版本，并新增「未加锁 offline + 新鲜心跳 → online」。
 func TestEffectiveStatus(t *testing.T) {
 	now := time.Now()
-	within := now.Add(-time.Second)                  // 刚心跳过
-	exact := now.Add(-DefaultOfflineAfter)           // 恰好落在阈值上
+	within := now.Add(-time.Second)                     // 刚心跳过
+	exact := now.Add(-DefaultOfflineAfter)              // 恰好落在阈值上
 	over := now.Add(-DefaultOfflineAfter - time.Second) // 超出阈值 1s
 
 	cases := []struct {

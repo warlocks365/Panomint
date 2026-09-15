@@ -12,7 +12,13 @@ import (
 
 // 节点 agent 主循环（节点侧）。
 //
-// 一个 tick 内的顺序：心跳 → 拉取任务 → 并发执行 → 回传结果。
+// 一个 tick 内的顺序：心跳 → 拉取任务 → **派发**执行（不等待）→ 回到循环继续心跳。
+//
+// ⚠️ 「不等待」是这个文件最要紧的设计约束：任务的执行时长由外部命令（将来的 ffmpeg）
+// 决定，可能是小时级；而心跳必须始终按时发出，否则服务端会把这个仍在干活的节点判为
+// offline，并把它名下正在跑的任务回收给别的节点（详见 pollAndRun 的注释）。
+// 所以主循环只负责"派发 + 心跳"，任务的收尾只由停机 drain 关心。
+//
 // 心跳与拉取共用同一个 ticker（都在 DefaultHeartbeatInterval 这一刻发生），
 // 刻意不引入第二个独立节奏——两个各自漂移的定时器只会让排障变复杂。
 //
@@ -28,20 +34,26 @@ const (
 // shutdownGrace 收到取消信号后等在跑任务收尾的上限。
 const shutdownGrace = 5 * time.Second
 
+// submitTimeout 单次结果回传的等待上界。
+//
+// 比 shutdownGrace 短，是为了让"停机时最后一轮回传"能在收尾窗口内完成，
+// 而不是把整个 grace 耗在一次不可达的请求上。
+const submitTimeout = 3 * time.Second
+
 // AgentConfig 节点 agent 配置。
 //
 // 注意 ServerURL / Token **没有默认值**：它们只能来自运行时输入（命令行/环境变量）。
 // 这是项目红线的直接体现——任何具体节点的地址与凭据都不得写死进代码或默认配置。
 type AgentConfig struct {
-	ServerURL string        // 控制端地址，如 http://control-plane:8080
-	Token     string        // 节点接入令牌（明文，仅存于进程内存）
-	NodeName  string        // 节点名，仅用于日志
-	Device    string        // cpu|cuda|auto
-	Concurrency int         // 并发任务数
-	Executor  Executor      // 任务执行器；nil 时用 NoopExecutor
+	ServerURL         string        // 控制端地址，如 http://control-plane:8080
+	Token             string        // 节点接入令牌（明文，仅存于进程内存）
+	NodeName          string        // 节点名，仅用于日志
+	Device            string        // cpu|cuda|auto
+	Concurrency       int           // 并发任务数
+	Executor          Executor      // 任务执行器；nil 时用 NoopExecutor
 	HeartbeatInterval time.Duration // 心跳周期；<= 0 时用 DefaultHeartbeatInterval
 	OfflineAfter      time.Duration // 离线阈值（仅用于日志与对齐）；<= 0 时用 DefaultOfflineAfter
-	Logger    *log.Logger
+	Logger            *log.Logger
 }
 
 // Agent 节点 agent 运行时。
@@ -55,6 +67,11 @@ type Agent struct {
 	activeTasks int64
 	// sem 并发额度（容量 = Concurrency）。
 	sem chan struct{}
+	// wg 在跑任务的收尾等待组。**只用于停机 drain**，绝不在主循环里 Wait ——
+	// 主循环一旦等待任务结束，长任务就会把心跳一起挡住，服务端会把一个仍在干活的
+	// 节点判为 offline，进而触发任务回收（两个节点跑同一条媒体）。
+	// 见 pollAndRun 的说明。
+	wg sync.WaitGroup
 
 	// 首次心跳需要携带完整能力声明（TDD §6.1「重连后重新注册能力」），之后不再重复。
 	// 用 atomic 而非普通 bool：心跳由主循环单 goroutine 发起，但保持"只置一次"的
@@ -126,6 +143,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	interval := a.cfg.HeartbeatInterval
 	backoff := time.Duration(0)
 
+	// 所有退出路径（ctx 取消、凭据 fatal、循环顶部发现已取消）都要等在跑任务收尾。
+	// 用 defer 而不是在某个分支里显式调用：显式调用会漏掉"循环顶部发现已取消"那条路径，
+	// 而漏掉的后果是任务被静默丢弃、要等服务端回收才会重跑。
+	defer a.drain()
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -166,7 +188,6 @@ func (a *Agent) Run(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				a.drain()
 				return nil
 			case <-timer.C:
 			}
@@ -218,11 +239,20 @@ func (a *Agent) sendHeartbeat(ctx context.Context) error {
 	return err
 }
 
-// pollAndRun 拉取任务并（受并发额度限制地）执行与回传。
+// pollAndRun 拉取任务并（受并发额度限制地）**派发**执行与回传。
 //
-// 并发模型：sem 是容量 = Concurrency 的信号量。拉取量取"当前空闲额度"，
-// 保证不会领到超过本节点处理能力的任务（领了却不执行会让任务卡在 running，
-// 而 running 的任务不会被任何其他节点重领）。
+// ⚠️ 本方法**立即返回，不等待任务跑完**——这是刻意的，且是 T6.2 的一个真实缺陷修复：
+// 原实现用一个局部 WaitGroup 在返回前 `wg.Wait()`，于是 tick 的耗时 = 最慢任务的耗时。
+// 而心跳发生在每个 tick 的开头，所以**一个跑得比离线阈值（180s）更久的转码任务，
+// 会让这个正在干活的节点被服务端判为 offline**。后果不是"状态显示不对"这么轻：
+// 心跳静默超时的节点，其名下的 running 任务会被回收重派给别的节点
+// （见 store.go 的 reclaimJobsSQL），于是两个节点同时转码同一条媒体、产出互相覆盖。
+//
+// 修法：派发后立刻回到主循环，心跳按自己的节奏继续发。并发上限由 sem 信号量保证，
+// 而 pollQuota 取"当前空闲额度"，所以不等待也不会超领——领了却不执行才会让任务白卡在
+// running（见 pollQuota 的注释）。
+//
+// 停机收尾由 drain 负责（它等的就是同一个 wg）。
 func (a *Agent) pollAndRun(ctx context.Context) error {
 	quota := a.pollQuota()
 	if quota <= 0 {
@@ -238,18 +268,17 @@ func (a *Agent) pollAndRun(ctx context.Context) error {
 	}
 	a.log.Printf("领取 %d 个任务", len(resp.Jobs))
 
-	var wg sync.WaitGroup
 	for _, job := range resp.Jobs {
 		select {
 		case a.sem <- struct{}{}:
 		case <-ctx.Done():
-			wg.Wait()
+			// 停机：已派发的任务交给 drain 收尾，本轮不再领新任务。
 			return nil
 		}
 		atomic.AddInt64(&a.activeTasks, 1)
-		wg.Add(1)
+		a.wg.Add(1)
 		go func(j JobSpec) {
-			defer wg.Done()
+			defer a.wg.Done()
 			defer func() {
 				<-a.sem
 				atomic.AddInt64(&a.activeTasks, -1)
@@ -257,7 +286,6 @@ func (a *Agent) pollAndRun(ctx context.Context) error {
 			a.runOne(ctx, j)
 		}(job)
 	}
-	wg.Wait()
 	return nil
 }
 
@@ -276,7 +304,7 @@ func (a *Agent) pollQuota() int {
 // runOne 执行一个任务并回传结果。
 //
 // 回传失败只记日志：任务已在服务端被标为 running 且 node_id 已落库，
-// 此处重试整轮即可（下一轮若仍失败，运维可从 running 且心跳超时的节点上人工介入）。
+// 最终会由服务端的回收机制（心跳静默超时的节点，其 running 任务被放回队列）兜底。
 // 刻意不在本地做重试队列——那等于在节点侧再实现一遍调度，属越界。
 func (a *Agent) runOne(ctx context.Context, job JobSpec) {
 	res := a.cfg.Executor.Execute(ctx, job)
@@ -285,7 +313,15 @@ func (a *Agent) runOne(ctx context.Context, job JobSpec) {
 		res.JobID = job.JobID
 	}
 
-	if err := a.client.Submit(ctx, res); err != nil {
+	// ⚠️ 回传用**与停机信号解耦**的上下文：任务已经在本地算完了，若只因进程正在退出
+	// 就把结果丢掉，这条任务会在服务端一直卡在 running，直到回收阈值（默认 360s）才被
+	// 重派给别的节点 —— 等于把已经完成的工作白跑一遍。
+	// 与 internal/audit 的写法同源：用 context.WithoutCancel 摘掉取消信号，
+	// 再叠一个短超时兜住"控制端不可达"（否则停机可能被一次卡死的请求拖住）。
+	submitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), submitTimeout)
+	defer cancel()
+
+	if err := a.client.Submit(submitCtx, res); err != nil {
 		a.log.Printf("任务 %s 结果回传失败: %v", res.JobID, err)
 		return
 	}
@@ -293,12 +329,24 @@ func (a *Agent) runOne(ctx context.Context, job JobSpec) {
 }
 
 // drain 取消后等在跑任务收尾，最多 shutdownGrace。
+//
+// 等的是同一个 a.wg（pollAndRun 派发时 Add、任务结束时 Done）。之所以用"goroutine + 超时"
+// 而不是裸 wg.Wait()：一个卡死的转码进程不该让节点永远停不下来——超过 grace 就放弃等待、
+// 记一条日志后退出，交由服务端的回收机制把那批任务放回队列。
+// 这也正是"节点可以随时被杀掉"这一运维假设的兑现方式。
 func (a *Agent) drain() {
-	deadline := time.Now().Add(shutdownGrace)
-	for atomic.LoadInt64(&a.activeTasks) > 0 && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return
+	case <-time.After(shutdownGrace):
 	}
 	if n := atomic.LoadInt64(&a.activeTasks); n > 0 {
-		a.log.Printf("停机：仍有 %d 个任务在执行，超过 %s 未收尾，直接退出", n, shutdownGrace)
+		a.log.Printf("停机：仍有 %d 个任务在执行，超过 %s 未收尾，直接退出"+
+			"（这些任务会在服务端心跳超时后被回收重派）", n, shutdownGrace)
 	}
 }

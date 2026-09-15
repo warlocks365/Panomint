@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func ptrStr(s string) *string     { return &s }
-func ptrInt(v int) *int           { return &v }
-func ptrStatus(s Status) *Status  { return &s }
-func ptrBool(b bool) *bool        { return &b }
+func ptrStr(s string) *string    { return &s }
+func ptrInt(v int) *int          { return &v }
+func ptrStatus(s Status) *Status { return &s }
+func ptrBool(b bool) *bool       { return &b }
 
 // mustJSON 序列化辅助（失败即 Fatal）。
 func mustJSON(t *testing.T, v any) string {

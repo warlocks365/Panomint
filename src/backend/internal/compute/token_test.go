@@ -61,11 +61,11 @@ func TestTokenValid(t *testing.T) {
 	future := now.Add(time.Hour)
 
 	cases := []struct {
-		name        string
-		storedHash  string
-		presented   string
-		expiresAt   *time.Time
-		want        bool
+		name       string
+		storedHash string
+		presented  string
+		expiresAt  *time.Time
+		want       bool
 	}{
 		{"正例：令牌正确且未过期", hash, plain, nil, true},
 		{"正例：令牌正确且未到过期", hash, plain, &future, true},
