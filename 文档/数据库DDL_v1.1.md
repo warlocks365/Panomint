@@ -514,6 +514,7 @@ title: 数据库 DDL (v1.1)
 <BulletedList id="3vsSlgV9jejoZIewCd74Ox">
   向量索引 `ivfflat`：建表并灌入数据后再 `CREATE INDEX`；查询前 `SET ivfflat.probes = 10;`。
 - 算力节点表 `compute_nodes`：**必须含 `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`**。本文件早先的建表块漏了该列，却在触发器段为它建了 `set_updated_at_compute_nodes`；触发器函数体执行 `NEW.updated_at = now()`，缺列会导致**任何 UPDATE 都报 `record "new" has no field "updated_at"`**（已在库上实测复现）。库侧已由迁移 `migrations/00018_compute_node_agent.sql` 补齐；同时该迁移把 agent 令牌改为只存 sha256（`agent_token_hash`）并新增 `agent_token_expires_at`。
+- 算力节点表 `compute_nodes` 的明文令牌列 `agent_token`：已由迁移 `migrations/00021_drop_compute_node_agent_token.sql` **删除**。该列在 00018 时已被清空且 Go 侧不读不写，但保留列本身仍是永久负债——任何一行 compute_nodes 的审计副本 / `pg_dump` 备份 / 只读从库快照都可能残留**可直接冒用**的明文凭据；而哈希列被拖走无法反推明文，风险等级不同。**该迁移对数据不可逆**（被删列的明文无法恢复），对结构可逆（Down 重建一个恒为 NULL 的可空 `VARCHAR(255)`）。令牌只存 sha256 于 `agent_token_hash`，轮换写哈希列。
 - 人脸向量索引 `faces.embedding`：自迁移 `migrations/00014_faces_cluster.sql` 起，`faces.embedding` 已由 `VECTOR(512)` + ivfflat 改为 **`VECTOR(128)` + HNSW**；`media.embedding`（CLIP 语义向量，512 维）**仍用 ivfflat，未受影响**。改用 HNSW 的原因：HNSW 增量插入无需「训练」，在小数据量与高维下召回更稳定，更适合持续追加的人脸库；且 128 维已不再适配原 `ivfflat ... WITH (lists = 50)` 配置。**注意：`SET ivfflat.probes`（以及 ivfflat 的 `lists`）仅对 ivfflat 索引生效，对人脸 HNSW 索引不适用**；HNSW 的检索质量由建索引参数（`m`、`ef_construction`）与查询期 `hnsw.ef_search` 控制。
 </BulletedList>
 
@@ -548,7 +549,7 @@ title: 数据库 DDL (v1.1)
         name           VARCHAR(128) NOT NULL,
         kind           VARCHAR(16) NOT NULL,         -- local_gpu|cloud_gpu|lan_agent
         host           VARCHAR(256),                 -- IP/域名（lan_agent 用内网地址）
-        agent_token    VARCHAR(256),                 -- ⚠️ 已废弃（00018）：令牌改为只存 sha256 于 agent_token_hash，本列不再写入。仅因「不改既有列」保留
+        -- agent_token  VARCHAR(256)  —— 已于迁移 00021 删除（明文令牌列，安全欠债）
         codecs         VARCHAR(64) NOT NULL DEFAULT 'h264',  -- 支持编码: h264|hevc|av1
         has_nvenc      BOOLEAN NOT NULL DEFAULT false,
         vram_mb        INTEGER,

@@ -626,7 +626,11 @@ CREATE TABLE compute_nodes (
 
     host           VARCHAR(256),                 -- IP/域名（lan_agent 用内网地址）
 
-    agent_token    VARCHAR(256),                 -- agent 长连接鉴权
+    -- ⚠️ 令牌**只存 sha256 哈希，不存明文**（迁移 00018 引入）。
+    -- 明文列 agent_token 已于迁移 00021 删除（安全欠债清偿），此处不再出现。
+    agent_token_hash       VARCHAR(64),          -- sha256 hex；NULL = 该节点未启用 agent（local_gpu/cloud_gpu 不发令牌）
+
+    agent_token_expires_at TIMESTAMPTZ,          -- NULL = 永不过期；过期判定在查询侧（internal/compute/token.go）
 
     codecs         VARCHAR(64) NOT NULL DEFAULT 'h264',  -- 支持编码: h264|hevc|av1
 
@@ -638,13 +642,25 @@ CREATE TABLE compute_nodes (
 
     status         VARCHAR(16) NOT NULL DEFAULT 'offline',  -- online|busy|offline
 
+    -- 管理员显式置过状态时为 true（强制上/下线），心跳不得改写 status（迁移 00019）
+    status_locked  BOOLEAN NOT NULL DEFAULT false,
+
     last_heartbeat TIMESTAMPTZ,
 
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    -- ⚠️ 本列**必须存在**：本文件下方为它建了 set_updated_at_compute_nodes 触发器，
+    -- 触发器函数体执行 NEW.updated_at = now()。缺列会导致**任何** UPDATE compute_nodes
+    -- 都报 `record "new" has no field "updated_at"` —— 而心跳续期/上下线/令牌轮换全是
+    -- UPDATE，这张表会直接变成不可用（迁移 00018 修的就是这个坑，勿再删本列）
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 
 );
 
 CREATE INDEX idx_nodes_status ON compute_nodes(status);
+
+-- 令牌校验按哈希定位（AgentAuth 在每次心跳/拉取都会走这里），必须有索引（迁移 00018）
+CREATE INDEX idx_nodes_agent_token_hash ON compute_nodes(agent_token_hash);
 
 
 
