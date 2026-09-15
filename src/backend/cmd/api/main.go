@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -266,6 +268,25 @@ func main() {
 		}
 		// 明确打出生效集合：这是"节点为什么领不到 hls 任务"这类问题的第一现场证据。
 		log.Info("算力节点可认领任务类型", zap.Strings("kinds", effective))
+	}
+
+	// 任务认领次数上限（迁移 00022 的 transcode_jobs.attempts）：
+	// 达到上限的任务由控制端判 failed，避免"反复领了就死"的节点让同一条任务被无限重派。
+	// 非法或 <=0 一律回落默认值 —— 0 会让认领条件 `attempts < 0` 恒假、任何任务都领不到。
+	if v := strings.TrimSpace(os.Getenv("COMPUTE_MAX_ATTEMPTS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			computeStore.MaxAttempts = n
+		} else {
+			log.Warn("COMPUTE_MAX_ATTEMPTS 非法，回落默认值",
+				zap.String("value", v), zap.Int("default", compute.DefaultMaxAttempts))
+		}
+	}
+	{
+		eff := computeStore.MaxAttempts
+		if eff <= 0 {
+			eff = compute.DefaultMaxAttempts
+		}
+		log.Info("算力节点任务认领上限", zap.Int("max_attempts_per_job", eff))
 	}
 	computeOfflineAfter := compute.OfflineAfterFromEnv() // COMPUTE_OFFLINE_AFTER_SECONDS，默认 180s（TDD §6.1：60s×3）
 	computeH := &compute.Handler{Store: computeStore, OfflineAfter: computeOfflineAfter}

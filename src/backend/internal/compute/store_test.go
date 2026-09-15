@@ -46,6 +46,7 @@ func TestAllNodeSQLMustNotStorePlaintextToken(t *testing.T) {
 		"submitResultSQL":        submitResultSQL,
 		"probeJobStatusSQL":      probeJobStatusSQL,
 		"reclaimJobsSQL":         reclaimJobsSQL,
+		"exhaustJobsSQL":         exhaustJobsSQL,
 		"publishHLSMasterSQL":    publishHLSMasterSQL,
 	}
 	for name, sql := range stmts {
@@ -152,7 +153,7 @@ func TestHeartbeatSQLSetsStatusWhenUnlocked(t *testing.T) {
 	}
 }
 
-// TestPollJobsSQLIsAtomicAndScoped 认领必须原子、必须锁定跳过、且**不得抢 hls 任务**。
+// TestPollJobsSQLIsAtomicAndScoped 认领必须原子、必须锁定跳过、且**必须带认领次数上限**。
 func TestPollJobsSQLIsAtomicAndScoped(t *testing.T) {
 	for _, want := range []string{"FOR UPDATE SKIP LOCKED", "status = 'pending'", "kind = ANY(", "LIMIT $2"} {
 		if !strings.Contains(pollJobsSQL, want) {
@@ -161,6 +162,86 @@ func TestPollJobsSQLIsAtomicAndScoped(t *testing.T) {
 	}
 	if !strings.Contains(pollJobsSQL, "node_id = $1::uuid") {
 		t.Fatalf("认领语句必须把 node_id 落到本节点（这是 node_id 从恒 NULL 变为真实的唯一入口）：\n%s", pollJobsSQL)
+	}
+
+	// 认领次数（迁移 00022）：认领时自增 + 认领条件带上限。
+	//
+	// ⚠️ 这两条是「回收重派不会无限循环」的唯一保障：没有 `attempts = attempts + 1`
+	// 就永远数不清试过几次；没有 `attempts < $4` 则上限形同虚设。
+	// 且自增必须发生在**认领**（而不是回传）时 —— 一个领了就崩的节点永远不会回传，
+	// 只有认领时计数才抓得住它。
+	compact := strings.Join(strings.Fields(pollJobsSQL), "")
+	if !strings.Contains(compact, "attempts=attempts+1") {
+		t.Fatalf("认领语句必须在认领时自增 attempts（否则数不清试过几次）：\n%s", pollJobsSQL)
+	}
+	if !strings.Contains(compact, "attempts<$4") {
+		t.Fatalf("认领语句必须带 attempts < 上限 条件（否则上限形同虚设）：\n%s", pollJobsSQL)
+	}
+	if !strings.Contains(pollJobsSQL, "j.attempts") {
+		t.Fatalf("认领语句必须回传 attempts（供节点在日志里打出第几次尝试）：\n%s", pollJobsSQL)
+	}
+}
+
+// TestExhaustJobsSQLOnlyTouchesAbandoned 结算语句的边界必须精确。
+//
+// 它会把任务永久判失败，所以只能命中"再也不可能被认领"的行：
+// pending（不是在跑）+ node_id IS NULL（无人持有）+ attempts >= 上限。
+// 少任何一个条件都可能把**正在跑**或**还有机会重试**的任务判死。
+func TestExhaustJobsSQLOnlyTouchesAbandoned(t *testing.T) {
+	compact := strings.Join(strings.Fields(exhaustJobsSQL), "")
+
+	if !strings.Contains(compact, "SETstatus='failed'") {
+		t.Fatalf("结算语句应把任务判为 failed：\n%s", exhaustJobsSQL)
+	}
+	if !strings.Contains(compact, "status='pending'") {
+		t.Fatalf("结算语句必须限定 status='pending'（running 的任务正在被跑，不能判死）：\n%s", exhaustJobsSQL)
+	}
+	if !strings.Contains(compact, "node_idISNULL") {
+		t.Fatalf("结算语句必须限定 node_id IS NULL（被别人持有的任务不属于它）：\n%s", exhaustJobsSQL)
+	}
+	if !strings.Contains(exhaustJobsSQL, "attempts >= $1") {
+		t.Fatalf("结算语句必须按 attempts >= 上限 判定（阈值可注入）：\n%s", exhaustJobsSQL)
+	}
+	// 不得顺手改归属或结果路径：判失败只该动 status。
+	for _, bad := range []string{"node_id =", "result_path"} {
+		if strings.Contains(compact, bad) {
+			t.Fatalf("结算语句不该动 %q（只改 status）：\n%s", bad, exhaustJobsSQL)
+		}
+	}
+}
+
+// TestMaxAttemptsNormalization 认领上限的归一化：非正值必须回落默认，而不是"多少就是多少"。
+//
+// 0 会让认领条件 `attempts < 0` 恒假 → **任何任务都永远领不到**，
+// 且症状是"节点在轮询、队列里有任务、但什么也不发生"，极难定位。故这里钉死。
+func TestMaxAttemptsNormalization(t *testing.T) {
+	if DefaultMaxAttempts <= 0 {
+		t.Fatal("DefaultMaxAttempts 必须为正")
+	}
+	var zero Store
+	if got := zero.maxAttempts(); got != DefaultMaxAttempts {
+		t.Fatalf("零值 Store 应回落默认上限 %d，实际 %d", DefaultMaxAttempts, got)
+	}
+	neg := Store{MaxAttempts: -5}
+	if got := neg.maxAttempts(); got != DefaultMaxAttempts {
+		t.Fatalf("负值应回落默认上限 %d，实际 %d", DefaultMaxAttempts, got)
+	}
+	custom := Store{MaxAttempts: 7}
+	if got := custom.maxAttempts(); got != 7 {
+		t.Fatalf("显式配置应被采纳，实际 %d", got)
+	}
+}
+
+// TestReclaimResultEmpty Empty 是"本轮什么都没发生"的判定，供调用方决定要不要打日志。
+func TestReclaimResultEmpty(t *testing.T) {
+	if !(ReclaimResult{}).Empty() {
+		t.Fatal("零值应判为空")
+	}
+	if (ReclaimResult{Requeued: []string{"a"}}).Empty() {
+		t.Fatal("有回收行时不应判为空")
+	}
+	if (ReclaimResult{Exhausted: []string{"b"}}).Empty() {
+		t.Fatal("有耗尽行时不应判为空")
 	}
 }
 

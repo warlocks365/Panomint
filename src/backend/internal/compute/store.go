@@ -112,15 +112,20 @@ var (
 	// 保证多个节点并发拉取时不会领到同一条任务，也不会互相阻塞（SKIP LOCKED）。
 	// 认领同时把 status 置 running、node_id 落到本节点——这就是 transcode_jobs.node_id
 	// 从"永远 NULL"变成真实归属的地方。
-	pollJobsSQL = `UPDATE transcode_jobs j SET status = 'running', node_id = $1::uuid
+	//
+	// attempts 在**认领时**自增（$4 是次数上限，认领条件为 attempts < 上限）：
+	// 这样"最多被尝试几次"的语义与"任务本身有多长"解耦 —— 一个跑 3 小时的长转码
+	// 只要节点一直活着就不会被回收，attempts 也停在 1；反之每次回收重派都会 +1。
+	// 回传 attempts 供节点在日志里打出"第 N 次尝试"。
+	pollJobsSQL = `UPDATE transcode_jobs j SET status = 'running', node_id = $1::uuid, attempts = attempts + 1
 		WHERE j.id IN (
 			SELECT id FROM transcode_jobs
-			WHERE status = 'pending' AND kind = ANY($3::text[])
+			WHERE status = 'pending' AND kind = ANY($3::text[]) AND attempts < $4
 			ORDER BY created_at, id
 			LIMIT $2
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING j.id::text, j.kind, j.media_id::text, COALESCE(j.profile,'')`
+		RETURNING j.id::text, j.kind, j.media_id::text, COALESCE(j.profile,''), j.attempts`
 
 	// pollInputPathsSQL 补输入路径。media.path 是库内相对路径，
 	// 真实绝对路径解析（MediaRoot / UploadDir 回退，同 internal/transcode）留待接入 ffmpeg 时落地。
@@ -180,6 +185,18 @@ var (
 			   OR COALESCE(last_heartbeat, created_at) < now() - ($1::int * interval '1 second')
 		  )
 		RETURNING j.id::text`
+
+	// exhaustJobsSQL 把"再也不可能被认领"的任务判为 failed。
+	//
+	// 为什么必须显式做这一步：认领条件含 `attempts < 上限`，所以一条已经被领过 上限 次、
+	// 又被回收成 pending 的任务，**永远不会再被任何节点领走**。不判失败它就会静静躺在
+	// pending 里 —— 管理端看到的是"排队中"，实际是"永远不动"，这种沉默的卡死比 failed 难查得多。
+	//
+	// 守卫 `node_id IS NULL`：只处理无人持有的行。若某节点正拿着它（node_id 非空），
+	// 说明那是"正在跑"的任务，不该被这条语句碰。
+	exhaustJobsSQL = `UPDATE transcode_jobs SET status = 'failed'
+		WHERE status = 'pending' AND node_id IS NULL AND attempts >= $1
+		RETURNING id::text`
 )
 
 // Store 算力节点存取。
@@ -194,6 +211,19 @@ type Store struct {
 	// 产出互相覆盖。所以切换是**显式**的运维动作：先把 transcodectl 的消费下线
 	// （停 transcode-worker 或停止入队），再给节点加 `-kinds noop,hls`。
 	ClaimableKinds []string
+
+	// MaxAttempts 单条任务被**认领**的次数上限（见 DefaultMaxAttempts）。
+	// <= 0 时取 DefaultMaxAttempts —— 0 会让认领条件 `attempts < 0` 恒假、任何任务都领不到，
+	// 属危险配置，故不允许多少就是多少地照搬。
+	MaxAttempts int
+}
+
+// maxAttempts 归一化重试上限。
+func (s *Store) maxAttempts() int {
+	if s.MaxAttempts <= 0 {
+		return DefaultMaxAttempts
+	}
+	return s.MaxAttempts
 }
 
 // claimableKinds 归一化可认领集合：空 → 默认（仅 noop）。
@@ -530,7 +560,7 @@ func (s *Store) PollJobs(ctx context.Context, nodeID string, max int) ([]JobSpec
 		max = MaxPollJobs
 	}
 
-	rows, err := s.Pool.Query(ctx, pollJobsSQL, nodeID, max, s.claimableKinds())
+	rows, err := s.Pool.Query(ctx, pollJobsSQL, nodeID, max, s.claimableKinds(), s.maxAttempts())
 	if err != nil {
 		return nil, fmt.Errorf("拉取任务失败: %w", err)
 	}
@@ -540,7 +570,7 @@ func (s *Store) PollJobs(ctx context.Context, nodeID string, max int) ([]JobSpec
 	mediaIDs := []string{}
 	for rows.Next() {
 		var j JobSpec
-		if err := rows.Scan(&j.JobID, &j.Kind, &j.MediaID, &j.Profile); err != nil {
+		if err := rows.Scan(&j.JobID, &j.Kind, &j.MediaID, &j.Profile, &j.Attempts); err != nil {
 			return nil, fmt.Errorf("读取任务行失败: %w", err)
 		}
 		// OutputSpec 留空：output_spec 是 TDD §6.1 的 poll 字段，但本交付项没有真实
@@ -657,25 +687,71 @@ func (s *Store) classifySubmitMiss(ctx context.Context, jobID string) error {
 	return ErrJobNotFound
 }
 
-// ReclaimStale 回收僵死节点名下仍在 running 的任务，返回被回收的任务 id。
+// ReclaimResult 一次「回收 + 结算」的结果。
+type ReclaimResult struct {
+	// Requeued 被放回 pending 的任务 id（原节点僵死 / 被强制下线）。
+	Requeued []string
+	// Exhausted 因**认领次数达上限**而被判 failed 的任务 id（见 exhaustJobsSQL）。
+	Exhausted []string
+}
+
+// Empty 本次没有发生任何变化。
+func (r ReclaimResult) Empty() bool { return len(r.Requeued) == 0 && len(r.Exhausted) == 0 }
+
+// ReclaimStale 回收僵死节点名下仍在 running 的任务，并结算「重试次数已耗尽」的任务。
 //
 // 触发方式是**惰性的**：由节点拉取任务时顺带执行（见 agentapi.Poll），不引入常驻定时任务。
 // 与 offline.go「离线判定只在查询侧做」的既有选择一致，理由是——没有任何节点来拉任务时，
 // 回收出来的任务也没有节点会去执行，回收本身没有收益；反过来，只要有健康节点在轮询，
 // 它每一轮都会把僵死节点遗留的任务捞回队列，无需额外的调度器。
 //
-// 本方法是幂等的：重复执行只会命中"仍然 running 且归属僵死节点"的行。
-func (s *Store) ReclaimStale(ctx context.Context, offlineAfter time.Duration) ([]string, error) {
+// 两步的顺序**必须**是先回收、再结算：回收把 running 放回 pending，结算才可能看到
+// "已达上限且无人持有"的行（见 exhaustJobsSQL）。反过来做会漏掉本轮刚回收出来的那些。
+//
+// 本方法是幂等的：回收只命中"仍然 running 且归属僵死节点"的行；
+// 结算只命中"仍然 pending 且无人持有且已达上限"的行，二者都不会重复处理同一行。
+func (s *Store) ReclaimStale(ctx context.Context, offlineAfter time.Duration) (ReclaimResult, error) {
+	var res ReclaimResult
+
 	secs := int(ReclaimAfter(offlineAfter).Seconds())
 	if secs <= 0 {
 		// 阈值非正会让 `now() - 0s` 退化成"回收所有 running 任务"，属危险配置，
 		// 这里直接跳过而不是带着危险语义执行。
-		return nil, nil
+		return res, nil
 	}
 
 	rows, err := s.Pool.Query(ctx, reclaimJobsSQL, secs)
 	if err != nil {
-		return nil, fmt.Errorf("回收僵死任务失败: %w", err)
+		return res, fmt.Errorf("回收僵死任务失败: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return res, fmt.Errorf("读取回收任务 id 失败: %w", err)
+		}
+		res.Requeued = append(res.Requeued, id)
+	}
+	if err := rows.Err(); err != nil {
+		return res, fmt.Errorf("遍历回收任务失败: %w", err)
+	}
+
+	// 结算：把"已达认领上限、再也不可能被领走"的任务判 failed。
+	// 失败只影响本轮结算（回收已经生效），下一轮 Poll 会重试 —— 故不在此处中断整个拉取。
+	exhausted, err := s.exhaustAttempted(ctx)
+	if err != nil {
+		return res, err
+	}
+	res.Exhausted = exhausted
+	return res, nil
+}
+
+// exhaustAttempted 把认领次数达上限、且无人持有的 pending 任务判为 failed。
+func (s *Store) exhaustAttempted(ctx context.Context) ([]string, error) {
+	rows, err := s.Pool.Query(ctx, exhaustJobsSQL, s.maxAttempts())
+	if err != nil {
+		return nil, fmt.Errorf("结算耗尽重试次数的任务失败: %w", err)
 	}
 	defer rows.Close()
 
@@ -683,12 +759,12 @@ func (s *Store) ReclaimStale(ctx context.Context, offlineAfter time.Duration) ([
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("读取回收任务 id 失败: %w", err)
+			return nil, fmt.Errorf("读取耗尽任务 id 失败: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("遍历回收任务失败: %w", err)
+		return nil, fmt.Errorf("遍历耗尽任务失败: %w", err)
 	}
 	return ids, nil
 }

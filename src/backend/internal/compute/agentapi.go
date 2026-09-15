@@ -163,12 +163,20 @@ func (h *AgentHandler) Poll(c *gin.Context) {
 	}
 
 	// 回收僵死任务（见 Store.ReclaimStale）。触发点是"有节点来拉任务"，不引入定时任务。
-	if ids, err := h.Store.ReclaimStale(c.Request.Context(), h.offlineAfter()); err != nil {
+	// 同一趟还会结算"认领次数已耗尽"的任务（判 failed），否则它们会永远停在 pending。
+	if res, err := h.Store.ReclaimStale(c.Request.Context(), h.offlineAfter()); err != nil {
 		// 回收失败**不阻断**本次拉取：它只影响"僵尸任务能否被重派"，
 		// 而阻断拉取会让本来健康的节点也一起停摆 —— 故障面被放大。
 		log.Printf("compute: 回收僵死任务失败（不影响本次拉取）: %v", err)
-	} else if len(ids) > 0 {
-		log.Printf("compute: 回收 %d 个僵死任务（原节点心跳静默超时 / 被管理员下线）: %v", len(ids), ids)
+	} else {
+		if len(res.Requeued) > 0 {
+			log.Printf("compute: 回收 %d 个僵死任务（原节点心跳静默超时 / 被管理员下线）: %v",
+				len(res.Requeued), res.Requeued)
+		}
+		if len(res.Exhausted) > 0 {
+			log.Printf("compute: %d 个任务认领次数达上限，已判 failed（不再无限重派）: %v",
+				len(res.Exhausted), res.Exhausted)
+		}
 	}
 
 	jobs, err := h.Store.PollJobs(c.Request.Context(), nodeID(c), req.Max)

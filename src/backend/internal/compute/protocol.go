@@ -48,6 +48,17 @@ const (
 	// 任务执行解耦（见 agent.go 的 pollAndRun），健康节点跑几小时的大转码时心跳照常发，
 	// 因此长任务不会被误回收；只有"节点不再报到了"才会被回收。
 	DefaultReclaimAfter = 2 * DefaultOfflineAfter
+
+	// DefaultMaxAttempts 单条转码任务被**认领**的次数上限（迁移 00022 的 transcode_jobs.attempts）。
+	//
+	// 存在意义：回收重派没有上限时，一个反复"领了任务就死"的节点会让同一条任务被无限重派，
+	// 每次白烧一遍算力。取 3 与 TDD §6.1「3 次未收到心跳 → offline」同源 ——
+	// 一次失败可能是网络抖动，三次都失败就基本可以判定这条任务在这个集群里跑不通，
+	// 应当变成一条**看得见**的 failed 记录，而不是永远 pending。
+	//
+	// 可用 COMPUTE_MAX_ATTEMPTS 覆盖；<= 0 会被归一到本默认值（0 会让认领条件
+	// `attempts < 0` 恒假、任何任务都领不到，属危险配置）。
+	DefaultMaxAttempts = 3
 )
 
 // ReclaimAfter 由离线阈值推出回收阈值：2 × offlineAfter；offlineAfter <= 0 时取默认值。
@@ -98,6 +109,10 @@ type JobSpec struct {
 	Kind    string `json:"kind"`     // noop | hls | thumbnail | memories
 	MediaID string `json:"media_id"` // 关联 media.id（UUID 文本）
 	Profile string `json:"profile,omitempty"`
+
+	// Attempts 这是第几次被认领（1-based，认领时自增）。节点据此在日志里打出
+	// "第 2/3 次尝试"，让"某条任务总在重试"这类问题不必翻数据库就能看出来。
+	Attempts int `json:"attempts,omitempty"`
 
 	// InputPath 输入素材路径。当前为 media.path 的库内取值（相对路径），
 	// 真实绝对路径解析（MediaRoot / UploadDir 回退，同 internal/transcode）留待接入

@@ -130,6 +130,41 @@ func TestMigration00021DropsPlaintextToken(t *testing.T) {
 	}
 }
 
+// TestMigration00022AddsAttempts 迁移 00022 必须为 transcode_jobs 增 attempts 计数，且不得改既有结构。
+//
+// 该列是"回收重派有上限"的落地物：没有它，一个反复领了就死的节点会让同一条任务被无限重派。
+// 断言要点：
+//   - NOT NULL DEFAULT 0 —— 存量行必须自动为 0。若缺默认值，既有 17 行会变成 NULL，
+//     而认领条件 `attempts < 上限` 对 NULL 求值为 NULL（非 true）→ **这些任务再也领不到**；
+//   - 只加列，不改类型/不加约束，否则重建库或回滚都可能失败。
+func TestMigration00022AddsAttempts(t *testing.T) {
+	sql := readMigration(t, "00022_transcode_jobs_attempts.sql")
+
+	for _, want := range []string{"-- +goose Up", "-- +goose Down", "-- +goose StatementBegin"} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("00022 缺少 goose 标记 %q：\n%s", want, sql)
+		}
+	}
+	if strings.Count(sql, "-- +goose StatementBegin") != 2 {
+		t.Fatalf("00022 的 Up/Down 各需一个 StatementBegin（共 2 个）：\n%s", sql)
+	}
+
+	code := stripSQLComments(sql)
+	if !strings.Contains(code, "ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0") {
+		t.Fatalf("00022 必须加 NOT NULL DEFAULT 0 的 attempts 列（缺默认值会让存量行变成 NULL，进而永远领不到）：\n%s", code)
+	}
+	if !strings.Contains(code, "DROP COLUMN IF EXISTS attempts") {
+		t.Fatalf("00022 的 Down 必须可回滚（DROP COLUMN IF EXISTS attempts）：\n%s", code)
+	}
+	// 本次只处理 attempts：不得顺手改其它列。
+	for _, bad := range []string{"DROP COLUMN IF EXISTS status", "DROP COLUMN IF EXISTS node_id",
+		"DROP COLUMN IF EXISTS kind", "ALTER COLUMN", "SET NOT NULL", "ADD CONSTRAINT"} {
+		if strings.Contains(code, bad) {
+			t.Fatalf("00022 越界改动了 %q（本次只加 attempts 一列）：\n%s", bad, code)
+		}
+	}
+}
+
 // stripSQLComments 删掉 `--` 行注释，只留可执行语句文本，供上面的约束断言使用。
 func stripSQLComments(sql string) string {
 	var b strings.Builder
