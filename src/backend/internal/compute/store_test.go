@@ -104,19 +104,46 @@ func TestListSQLUsesRealColumnNames(t *testing.T) {
 	}
 }
 
-// TestHeartbeatSQLKeepsUnreportedFields COALESCE 保证"未上报的字段不覆盖"。
+// TestHeartbeatSQLKeepsUnreportedFields 能力字段仍由 COALESCE 保证"未上报的不覆盖"。
 //
-// 断言前先把空白压掉：SQL 里的列名对齐空格会随字段名长度变化，
-// 对它做字面匹配的测试只会在改排版时碎掉，反而掩盖了真正的语义。
+// ⚠️ 本测试在 T6.2 缺陷修复中改过：status 从列表里移除了。
+// 原因：status 原来也是 `COALESCE($2, status)`，但那正是缺陷——新登记节点落库 status 为
+// DDL 默认 'offline'，COALESCE 保留它 → 心跳永远无法把节点变成 online。
+// 改为 `CASE WHEN status_locked ... END` 后不再使用该形式，其行为由
+// TestHeartbeatSQLSetsStatusWhenUnlocked 专门覆盖。
 func TestHeartbeatSQLKeepsUnreportedFields(t *testing.T) {
 	compact := strings.Join(strings.Fields(heartbeatSQL), "")
-	for _, col := range []string{"status", "codecs", "has_nvenc", "vram_mb", "concurrency"} {
+	for _, col := range []string{"codecs", "has_nvenc", "vram_mb", "concurrency"} {
 		if !strings.Contains(compact, col+"=COALESCE(") {
 			t.Fatalf("心跳语句缺少 %s 的 COALESCE 保护：\n%s", col, heartbeatSQL)
 		}
 	}
 	if !strings.Contains(compact, "last_heartbeat=now()") {
 		t.Fatalf("心跳语句必须更新 last_heartbeat（服务端时钟为准）：\n%s", heartbeatSQL)
+	}
+}
+
+// TestHeartbeatSQLSetsStatusWhenUnlocked 心跳必须能把未加锁的节点置为 online。
+//
+// 这是 T6.2 缺陷的**直接回归断言**（缺陷现象：登记后心跳成功，节点仍 forever offline）：
+//   - 未加锁时用节点自报状态，缺省 'online' —— 否则新登记节点（落库默认 offline）永不上线；
+//   - 已加锁时保持原值 —— 否则"管理员强制下线"会被心跳推翻，等于没有强制下线能力。
+// 保留 COALESCE($2, ...) 是为了**不把节点自报的 busy 抹成 online**：
+// cmd/nodeagent 在 active_tasks>0 时上报 busy，无条件写 'online' 会让 busy 永远不可见。
+func TestHeartbeatSQLSetsStatusWhenUnlocked(t *testing.T) {
+	compact := strings.Join(strings.Fields(heartbeatSQL), "")
+
+	if !strings.Contains(compact, "status=CASEWHENstatus_lockedTHENstatusELSE") {
+		t.Fatalf("心跳语句必须按 status_locked 分支改写 status（未加锁才写自报状态）：\n%s", heartbeatSQL)
+	}
+	if !strings.Contains(compact, "'online'") {
+		t.Fatalf("心跳语句未加锁分支缺省值必须是 'online'（这是新节点能上线的原因）：\n%s", heartbeatSQL)
+	}
+	if !strings.Contains(compact, "COALESCE($2,'online')") {
+		t.Fatalf("未加锁分支应保留节点自报的 busy（COALESCE($2,'online')），不得无条件写 'online'：\n%s", heartbeatSQL)
+	}
+	if !strings.Contains(compact, "status_locked") {
+		t.Fatalf("心跳语句必须读 status_locked：\n%s", heartbeatSQL)
 	}
 }
 
@@ -171,6 +198,11 @@ func TestFindByTokenHashSQLUsesIndex(t *testing.T) {
 }
 
 // TestApplyEffectiveStatus 查询侧的生效状态填充（List 用的就是它）。
+//
+// ⚠️ 本测试在 T6.2 缺陷修复中改过：原来 nodes[3] 是「未加锁的 offline + 新鲜心跳 → offline」，
+// 那正是缺陷本身（新登记节点落库即 offline，永不上线）。改法：把它标为**加锁**的 offline
+// （仍期望 offline），并新增一条未加锁的同形数据期望 online —— 两者并存才能证明
+// 「区分初始 offline 与强制 offline」这件事真的做到了。
 func TestApplyEffectiveStatus(t *testing.T) {
 	now := time.Now()
 	fresh := now.Add(-time.Second)
@@ -180,11 +212,12 @@ func TestApplyEffectiveStatus(t *testing.T) {
 		{Name: "a", Status: StatusOnline, LastHeartbeat: &fresh},
 		{Name: "b", Status: StatusBusy, LastHeartbeat: &stale},
 		{Name: "c", Status: StatusOnline, LastHeartbeat: nil},
-		{Name: "d", Status: StatusOffline, LastHeartbeat: &fresh},
+		{Name: "d", Status: StatusOffline, StatusLocked: true, LastHeartbeat: &fresh}, // 管理员强制下线
+		{Name: "e", Status: StatusOffline, LastHeartbeat: &fresh},                     // 初始 offline，心跳新鲜
 	}
 	applyEffectiveStatus(nodes, DefaultOfflineAfter, now)
 
-	want := []Status{StatusOnline, StatusOffline, StatusOffline, StatusOffline}
+	want := []Status{StatusOnline, StatusOffline, StatusOffline, StatusOffline, StatusOnline}
 	for i := range nodes {
 		if nodes[i].EffectiveStatus != want[i] {
 			t.Fatalf("nodes[%d] (%s) EffectiveStatus = %q，期望 %q", i, nodes[i].Name, nodes[i].EffectiveStatus, want[i])
@@ -197,16 +230,21 @@ func TestApplyEffectiveStatus(t *testing.T) {
 // 关注点：占位符必须从 $1 连续编号（pgx 靠个数匹配参数，错位会静默写错列）、
 // args 与 sets 一一对应、未提供的字段绝不出现在 SET 里、轮换时必写 hash 且不写明文列。
 func TestBuildNodeUpdate(t *testing.T) {
-	t.Run("仅 status：一条 SET、一个参数、不轮换", func(t *testing.T) {
+	t.Run("仅 status：两条 SET（status + status_locked）、两个参数、不轮换", func(t *testing.T) {
+		// ⚠️ 本条在 T6.2 修复中由「1 条 SET / 1 个参数」改为 2 条：
+		// 显式带 status 现在同时写状态锁（offline → status_locked=true），见 buildNodeUpdate。
 		sets, args, plain, err := buildNodeUpdate(PatchInput{Status: ptrStatus(StatusOffline)})
 		if err != nil {
 			t.Fatalf("不应报错: %v", err)
 		}
-		if len(sets) != 1 || len(args) != 1 {
-			t.Fatalf("应恰好 1 条 SET / 1 个参数，实际 sets=%v args=%v", sets, args)
+		if len(sets) != 2 || len(args) != 2 {
+			t.Fatalf("应恰好 2 条 SET / 2 个参数，实际 sets=%v args=%v", sets, args)
 		}
 		if sets[0] != "status = $1" {
 			t.Fatalf("SET 子句应为 status = $1，实际 %q", sets[0])
+		}
+		if sets[1] != "status_locked = $2" {
+			t.Fatalf("SET 子句应为 status_locked = $2，实际 %q", sets[1])
 		}
 		if plain != "" {
 			t.Fatal("未请求轮换时不应返回明文令牌")
@@ -216,7 +254,7 @@ func TestBuildNodeUpdate(t *testing.T) {
 	t.Run("未提供的字段绝不进 SET", func(t *testing.T) {
 		sets, _, _, _ := buildNodeUpdate(PatchInput{Codecs: ptrStr("h264,hevc")})
 		joined := strings.Join(sets, ", ")
-		for _, bad := range []string{"status =", "has_nvenc =", "vram_mb =", "concurrency =", "name =", "host ="} {
+		for _, bad := range []string{"status =", "status_locked", "has_nvenc =", "vram_mb =", "concurrency =", "name =", "host ="} {
 			if strings.Contains(joined, bad) {
 				t.Fatalf("未提供的字段 %q 不该出现在 SET 里：%s", bad, joined)
 			}
@@ -224,6 +262,8 @@ func TestBuildNodeUpdate(t *testing.T) {
 	})
 
 	t.Run("多字段：占位符连续且 args 对齐", func(t *testing.T) {
+		// ⚠️ 本条在 T6.2 修复中由 7 条 SET 改为 8 条：显式 status 额外带一条 status_locked。
+		// name=$1 host=$2 status=$3 status_locked=$4 codecs=$5 has_nvenc=$6 vram_mb=$7 concurrency=$8
 		sets, args, _, err := buildNodeUpdate(PatchInput{
 			Name: ptrStr("n"), Host: ptrStr("h"), Status: ptrStatus(StatusBusy),
 			Codecs: ptrStr("h264"), HasNVENC: ptrBool(true), VRAMMB: ptrInt(24576), Concurrency: ptrInt(2),
@@ -231,10 +271,10 @@ func TestBuildNodeUpdate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("不应报错: %v", err)
 		}
-		if len(sets) != 7 || len(args) != 7 {
-			t.Fatalf("应有 7 条 SET / 7 个参数，实际 sets=%d args=%d", len(sets), len(args))
+		if len(sets) != 8 || len(args) != 8 {
+			t.Fatalf("应有 8 条 SET / 8 个参数，实际 sets=%d args=%d", len(sets), len(args))
 		}
-		for i := 0; i < 7; i++ {
+		for i := 0; i < 8; i++ {
 			want := "$" + strconv.Itoa(i+1)
 			if !strings.Contains(sets[i], want) {
 				t.Fatalf("第 %d 条 SET 应使用占位符 %s，实际 %q", i, want, sets[i])
@@ -274,18 +314,71 @@ func TestBuildNodeUpdate(t *testing.T) {
 	})
 
 	t.Run("轮换 + 其它字段：占位符不冲突", func(t *testing.T) {
+		// ⚠️ 本条在 T6.2 修复中由 3 条 SET 改为 4 条：显式 status 额外带一条 status_locked。
+		// status=$1 status_locked=$2 agent_token_hash=$3 agent_token_expires_at=$4
 		sets, args, plain, err := buildNodeUpdate(PatchInput{Status: ptrStatus(StatusOnline), RotateToken: true})
 		if err != nil {
 			t.Fatalf("不应报错: %v", err)
 		}
-		if len(sets) != 3 || len(args) != 3 {
-			t.Fatalf("应有 3 条 SET / 3 个参数，实际 sets=%v args=%v", sets, args)
+		if len(sets) != 4 || len(args) != 4 {
+			t.Fatalf("应有 4 条 SET / 4 个参数，实际 sets=%v args=%v", sets, args)
 		}
 		if plain == "" {
 			t.Fatal("应返回明文令牌")
 		}
-		if sets[2] != "agent_token_expires_at = $3" {
-			t.Fatalf("最后一条应为 agent_token_expires_at = $3，实际 %q", sets[2])
+		if sets[3] != "agent_token_expires_at = $4" {
+			t.Fatalf("最后一条应为 agent_token_expires_at = $4，实际 %q", sets[3])
+		}
+	})
+}
+
+// TestBuildNodeUpdateStatusLock 显式改状态时的「状态锁」写入行为。
+//
+// 这是本次缺陷修复里最容易写错的一处（占位符与 args 下标错位会静默写错列），
+// 所以直接测生产代码用的 buildNodeUpdate 纯函数，而不是复刻一份。
+//
+// 语义（见迁移 00019 与 offline.go）：
+//   - offline / busy = 管理员的强制意图 → status_locked = true（心跳不得改写）；
+//   - online         = 解除锁定，交还给心跳自治 → status_locked = false；
+//   - 未带 status     = 与状态无关的更新（改名/改 codecs）→ 绝不动 status_locked。
+func TestBuildNodeUpdateStatusLock(t *testing.T) {
+	cases := []struct {
+		name       string
+		in         PatchInput
+		wantLocked bool
+	}{
+		{"显式 offline → 加锁", PatchInput{Status: ptrStatus(StatusOffline)}, true},
+		{"显式 busy → 加锁（busy 也是管理员的显式意图）", PatchInput{Status: ptrStatus(StatusBusy)}, true},
+		{"显式 online → 解锁（交还心跳自治）", PatchInput{Status: ptrStatus(StatusOnline)}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sets, args, _, err := buildNodeUpdate(tc.in)
+			if err != nil {
+				t.Fatalf("不应报错: %v", err)
+			}
+			if len(sets) != 2 || len(args) != 2 {
+				t.Fatalf("应恰好 2 条 SET / 2 个参数（status + status_locked），实际 sets=%v args=%v", sets, args)
+			}
+			if sets[1] != "status_locked = $2" {
+				t.Fatalf("第二条 SET 应为 status_locked = $2，实际 %q", sets[1])
+			}
+			if args[1] != tc.wantLocked {
+				t.Fatalf("status_locked 实参应为 %v，实际 %v", tc.wantLocked, args[1])
+			}
+		})
+	}
+
+	t.Run("未带 status：绝不触碰 status_locked", func(t *testing.T) {
+		sets, args, _, err := buildNodeUpdate(PatchInput{Codecs: ptrStr("h264,hevc")})
+		if err != nil {
+			t.Fatalf("不应报错: %v", err)
+		}
+		if len(sets) != 1 || len(args) != 1 {
+			t.Fatalf("应恰好 1 条 SET / 1 个参数，实际 sets=%v args=%v", sets, args)
+		}
+		if strings.Contains(strings.Join(sets, ", "), "status_locked") {
+			t.Fatalf("只改 codecs 时不得写 status_locked（否则会静默改变节点的锁状态）：%v", sets)
 		}
 	})
 }
@@ -294,5 +387,9 @@ func TestBuildNodeUpdate(t *testing.T) {
 func TestNodeColsHasNoPlaintextToken(t *testing.T) {
 	if columnUsed(nodeCols, "agent_token") {
 		t.Fatalf("nodeCols 不得包含明文令牌列：%s", nodeCols)
+	}
+	// T6.2：状态锁必须被读出来（否则 effectiveStatus 无从区分初始 offline 与强制 offline）。
+	if !strings.Contains(nodeCols, "status_locked") {
+		t.Fatalf("nodeCols 必须包含 status_locked（否则 Node.StatusLocked 恒为 false，强制下线会被心跳推翻）：%s", nodeCols)
 	}
 }

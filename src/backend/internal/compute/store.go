@@ -26,6 +26,7 @@ import (
 //	compute_nodes.vram_mb                  INTEGER，可空
 //	compute_nodes.concurrency              INTEGER，默认 1
 //	compute_nodes.status                   VARCHAR，online|busy|offline（存储态，可能陈旧）
+//	compute_nodes.status_locked            BOOLEAN，迁移 00019 新增；true = 管理员强制上/下线，心跳不得改写 status
 //	compute_nodes.last_heartbeat           TIMESTAMPTZ —— ⚠️ 列名是 last_heartbeat，不是 last_heartbeat_at
 //	compute_nodes.updated_at               TIMESTAMPTZ —— 迁移 00018 新增
 //	transcode_jobs.id / media_id / node_id / kind / status / profile / result_path / created_at
@@ -42,7 +43,7 @@ import (
 // nodeCols compute_nodes 的读取列。因为要同时用于 SELECT 与 UPDATE ... RETURNING，
 // 注意 RETURNING 里不能带表别名前缀（调用方拼 SELECT 时也不加别名）。
 const nodeCols = `id::text, name, kind::text, COALESCE(host,''), codecs, has_nvenc,
-	vram_mb, concurrency, status::text, last_heartbeat, created_at`
+	vram_mb, concurrency, status::text, last_heartbeat, created_at, status_locked`
 
 // DefaultClaimableKinds 本交付项允许节点认领的任务类型。
 //
@@ -88,9 +89,14 @@ var (
 	// heartbeatSQL 用 COALESCE 实现「未上报的字段不覆盖」：
 	// 能力字段只在节点显式声明（首个心跳/重连后重声明）时才更新，
 	// 平时的心跳只续 last_heartbeat 与 status。
+	//
+	// status 单独用 CASE WHEN 处理（缺陷修复点，见迁移 00019 的 status_locked）：
+	//   - 未加锁（status_locked = false）→ 取节点自报的 online/busy；未上报时缺省 online。
+	//     缺省 online 是「新登记节点（落库取 DDL 默认 'offline'）心跳后必须变 online」的落地点。
+	//   - 已加锁（status_locked = true，管理员显式置过 offline/busy）→ 保持原值，心跳不得改写。
 	heartbeatSQL = `UPDATE compute_nodes SET
 			last_heartbeat = now(),
-			status         = COALESCE($2, status),
+			status         = CASE WHEN status_locked THEN status ELSE COALESCE($2, 'online') END,
 			codecs         = COALESCE($3, codecs),
 			has_nvenc      = COALESCE($4, has_nvenc),
 			vram_mb        = COALESCE($5, vram_mb),
@@ -132,7 +138,7 @@ type Store struct {
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
 	if err := row.Scan(&n.ID, &n.Name, &n.Kind, &n.Host, &n.Codecs, &n.HasNVENC,
-		&n.VRAMMB, &n.Concurrency, &n.Status, &n.LastHeartbeat, &n.CreatedAt); err != nil {
+		&n.VRAMMB, &n.Concurrency, &n.Status, &n.LastHeartbeat, &n.CreatedAt, &n.StatusLocked); err != nil {
 		return nil, err
 	}
 	return &n, nil
@@ -141,7 +147,7 @@ func scanNode(row pgx.Row) (*Node, error) {
 // applyEffectiveStatus 就地按心跳超时修正生效状态（见 offline.go 的规则说明）。
 func applyEffectiveStatus(nodes []Node, offlineAfter time.Duration, now time.Time) {
 	for i := range nodes {
-		nodes[i].EffectiveStatus = EffectiveStatus(nodes[i].Status, nodes[i].LastHeartbeat, now, offlineAfter)
+		nodes[i].EffectiveStatus = EffectiveStatus(nodes[i].Status, nodes[i].StatusLocked, nodes[i].LastHeartbeat, now, offlineAfter)
 	}
 }
 
@@ -183,7 +189,7 @@ func (s *Store) Get(ctx context.Context, id string, offlineAfter time.Duration) 
 	if err != nil {
 		return nil, fmt.Errorf("查询节点失败: %w", err)
 	}
-	n.EffectiveStatus = EffectiveStatus(n.Status, n.LastHeartbeat, time.Now(), offlineAfter)
+	n.EffectiveStatus = EffectiveStatus(n.Status, n.StatusLocked, n.LastHeartbeat, time.Now(), offlineAfter)
 	return n, nil
 }
 
@@ -212,7 +218,7 @@ func (s *Store) Register(ctx context.Context, in RegisterInput) (*Node, string, 
 	if err != nil {
 		return nil, "", fmt.Errorf("登记节点失败: %w", err)
 	}
-	n.EffectiveStatus = EffectiveStatus(n.Status, n.LastHeartbeat, time.Now(), DefaultOfflineAfter)
+	n.EffectiveStatus = EffectiveStatus(n.Status, n.StatusLocked, n.LastHeartbeat, time.Now(), DefaultOfflineAfter)
 	return n, plain, nil
 }
 
@@ -238,6 +244,14 @@ func buildNodeUpdate(in PatchInput) (sets []string, args []any, plain string, er
 	}
 	if in.Status != nil {
 		add("status = $%d", string(*in.Status))
+		// 显式带 status = 管理员的显式意图 → 打/解状态锁（迁移 00019）：
+		//   offline / busy = 强制状态，心跳不得改写 → status_locked = true
+		//   online         = 解除锁定，交还给心跳自治 → status_locked = false
+		// 未带 status 的 PATCH（只改 name/codecs 等）绝不触碰 status_locked。
+		//
+		// ⚠️ 必须先 add status 再 add status_locked：add 用 len(args) 生成占位符，
+		// 顺序反了会让 status_locked 抢走 status 的 $N。
+		add("status_locked = $%d", *in.Status != StatusOnline)
 	}
 	if in.Codecs != nil {
 		add("codecs = $%d", *in.Codecs)
@@ -288,7 +302,7 @@ func (s *Store) Patch(ctx context.Context, id string, in PatchInput) (*Node, str
 	if err != nil {
 		return nil, "", fmt.Errorf("更新节点失败: %w", err)
 	}
-	n.EffectiveStatus = EffectiveStatus(n.Status, n.LastHeartbeat, time.Now(), DefaultOfflineAfter)
+	n.EffectiveStatus = EffectiveStatus(n.Status, n.StatusLocked, n.LastHeartbeat, time.Now(), DefaultOfflineAfter)
 	return n, plain, nil
 }
 
@@ -334,7 +348,7 @@ func (s *Store) FindByTokenHash(ctx context.Context, hash string, offlineAfter t
 	)
 	err := s.Pool.QueryRow(ctx, findNodeByTokenHashSQL, hash).Scan(
 		&n.ID, &n.Name, &n.Kind, &n.Host, &n.Codecs, &n.HasNVENC,
-		&n.VRAMMB, &n.Concurrency, &n.Status, &n.LastHeartbeat, &n.CreatedAt,
+		&n.VRAMMB, &n.Concurrency, &n.Status, &n.LastHeartbeat, &n.CreatedAt, &n.StatusLocked,
 		&gotHash, &expires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, "", nil, ErrNotFound
@@ -342,7 +356,7 @@ func (s *Store) FindByTokenHash(ctx context.Context, hash string, offlineAfter t
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("按令牌查询节点失败: %w", err)
 	}
-	n.EffectiveStatus = EffectiveStatus(n.Status, n.LastHeartbeat, time.Now(), offlineAfter)
+	n.EffectiveStatus = EffectiveStatus(n.Status, n.StatusLocked, n.LastHeartbeat, time.Now(), offlineAfter)
 	return &n, gotHash, expires, nil
 }
 
@@ -351,6 +365,11 @@ func (s *Store) FindByTokenHash(ctx context.Context, hash string, offlineAfter t
 // 状态处理：节点**只能**自报 online / busy。offline 是"人的决定"（管理端 PATCH 下线）
 // 或"心跳超时的推论"，不允许节点自己声明——否则一个卡死的 agent 会把自己标成 offline
 // 而又继续发心跳，状态自相矛盾。非法状态值直接忽略（保持心跳可用，不因脏字段阻断续命）。
+//
+// 未加锁（status_locked=false）时，心跳即使没上报 status 也会把状态落为 online
+// ——这是「新登记节点（落库取 DDL 默认 'offline'）心跳后必须变 online」的落地点，
+// 由 heartbeatSQL 的 CASE WHEN 完成。已加锁时（管理员 PATCH 显式置过 offline/busy）
+// 心跳只续 last_heartbeat，不改写 status。
 func (s *Store) Heartbeat(ctx context.Context, nodeID string, hb HeartbeatRequest, offlineAfter time.Duration) (*Node, error) {
 	if offlineAfter <= 0 {
 		offlineAfter = DefaultOfflineAfter
@@ -387,7 +406,7 @@ func (s *Store) Heartbeat(ctx context.Context, nodeID string, hb HeartbeatReques
 	if err != nil {
 		return nil, fmt.Errorf("更新心跳失败: %w", err)
 	}
-	n.EffectiveStatus = EffectiveStatus(n.Status, n.LastHeartbeat, time.Now(), offlineAfter)
+	n.EffectiveStatus = EffectiveStatus(n.Status, n.StatusLocked, n.LastHeartbeat, time.Now(), offlineAfter)
 	return n, nil
 }
 

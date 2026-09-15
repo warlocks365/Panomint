@@ -32,9 +32,12 @@ func ValidKind(k Kind) bool {
 
 // Status 节点状态。与 compute_nodes.status 的取值域一致。
 //
-// 注意区分「存储状态」与「生效状态」：库里的 status 是最后一次显式写入的值，
+// 注意区分「存储状态」与「生效状态」：库里的 status 是最后一次写入的值，
 // 可能是陈旧的 online（节点已崩溃但没人改过）。对外一律看 Node.EffectiveStatus
-// ——它由 EffectiveStatus() 在**查询侧**按心跳超时修正，不需要任何定时任务。
+// ——它由 EffectiveStatus() 在**查询侧**按「状态锁 + 心跳新鲜度」修正，不需要任何定时任务。
+//
+// 「初始 offline」与「管理员强制 offline」靠 compute_nodes.status_locked 区分（迁移 00019）：
+// 未加锁的 offline 只是默认值/陈旧值，新鲜心跳即可翻正为 online；加锁的 offline 才是强制下线。
 type Status string
 
 const (
@@ -73,9 +76,13 @@ type Node struct {
 	Concurrency int  `json:"concurrency"` // 并发任务数
 
 	Status          Status     `json:"status"`           // 库中存储的原始状态（可能是陈旧的 online）
-	EffectiveStatus Status     `json:"effective_status"` // 查询侧按心跳超时修正后的状态，对外以此为准
+	EffectiveStatus Status     `json:"effective_status"` // 查询侧按「状态锁 + 心跳新鲜度」修正后的状态，对外以此为准
 	LastHeartbeat   *time.Time `json:"last_heartbeat"`   // 最后一次心跳时刻；nil = 从未心跳
 	CreatedAt       time.Time  `json:"created_at"`
+
+	// StatusLocked 状态锁：true = 管理员显式置过状态（强制上/下线），心跳不得改写 status；
+	// false = 心跳自治（心跳把 status 置 online/busy）。见迁移 00019 与 offline.go。
+	StatusLocked bool `json:"status_locked"`
 }
 
 // RegisterInput 登记节点（POST /compute-nodes，契约 §15）。

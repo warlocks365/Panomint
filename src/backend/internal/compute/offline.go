@@ -16,17 +16,23 @@ import (
 // 而收益仅仅是让库里的 status 更"实时"。改为每次读节点时按 last_heartbeat 现算，
 // 一个纯函数即可，状态天然收敛、无并发写、无重启迁移问题。
 
-// EffectiveStatus 按心跳超时把「存储状态」修正为「生效状态」。
+// EffectiveStatus 按「状态锁 + 心跳新鲜度」把「存储状态」修正为「生效状态」。
 //
 // 规则（顺序即优先级）：
-//  1. stored == offline → offline。管理端显式下线是最高优先级：即便节点还在心跳，
-//     也不该因为它的心跳就"自己复活"——下线是人的决定，必须由人（或再次 PATCH）解除。
+//  1. locked && stored == offline → offline。**管理员强制下线**（PATCH 显式置 offline 时打锁，
+//     见迁移 00019 与 Store.buildNodeUpdate）是最高优先级：即便节点还在心跳，也不该自己复活
+//     ——下线是人的决定，必须由人（或再次 PATCH status='online'）解除。
 //  2. lastHeartbeat == nil → offline。登记过但从未心跳，等价于没上线。
 //  3. now - lastHeartbeat > offlineAfter → offline。取严格大于：恰好落在阈值上视为仍在线，
 //     避免边界抖动（时钟精度 + 网络抖动下，">=" 会让一个刚好准时的节点随机闪断）。
-//  4. 否则保持 stored（online 或 busy）。
-func EffectiveStatus(stored Status, lastHeartbeat *time.Time, now time.Time, offlineAfter time.Duration) Status {
-	if stored == StatusOffline {
+//  4. 否则心跳新鲜：stored 为 offline 但**未加锁**时归一为 online。
+//     这一条是 T6.2 缺陷修复的核心：Register 落库时 status 取 DDL 默认值 'offline'，
+//     若仍让存储态 offline 直接决定结果，新登记节点将永远无法变为 online。
+//     加锁的 offline 已被规则 1 拦下，故此处只需处理「未加锁」。
+//  5. 其余情况保持 stored（online 或 busy）——节点自报的 busy 是有意义的信息，
+//     不应被心跳无条件抹成 online（cmd/nodeagent 在 active_tasks>0 时报 busy）。
+func EffectiveStatus(stored Status, locked bool, lastHeartbeat *time.Time, now time.Time, offlineAfter time.Duration) Status {
+	if locked && stored == StatusOffline {
 		return StatusOffline
 	}
 	if lastHeartbeat == nil {
@@ -34,6 +40,9 @@ func EffectiveStatus(stored Status, lastHeartbeat *time.Time, now time.Time, off
 	}
 	if now.Sub(*lastHeartbeat) > offlineAfter {
 		return StatusOffline
+	}
+	if stored == StatusOffline {
+		return StatusOnline
 	}
 	return stored
 }
