@@ -129,6 +129,8 @@ func main() {
 	authed.POST("/media/trash/:id/restore", permWrite, mediaH.Restore)
 	authed.DELETE("/media/trash/:id", permWrite, mediaH.Purge)
 	authed.GET("/media/date-histogram", permRead, mediaH.DateHistogram) // Job000005 日期密度直方图
+	// PRD §6.16 工具箱：重复项目（pHash 去重，阈值默认 10；只读，不自动删）。静态段同上优先于 /media/:id。
+	authed.GET("/media/duplicates", permRead, mediaH.Duplicates)
 	authed.GET("/media/:id", permRead, mediaH.Detail)
 	authed.PATCH("/media/:id", permWrite, mediaH.Patch) // Job000005 备注（仅 notes 字段）
 	authed.POST("/media/upload", permWrite, mediaH.Upload)

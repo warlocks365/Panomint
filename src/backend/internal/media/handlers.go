@@ -1,6 +1,7 @@
 package media
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -46,6 +47,34 @@ func (h *Handler) List(c *gin.Context) {
 	res, err := h.Store.List(c.Request.Context(), p)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// Duplicates GET /media/duplicates?threshold=10&limit=50&space=（PRD §6.16 工具箱：重复项目）。
+//
+// 作用域与 List 完全一致：owner 过滤仅在 space=personal 时生效（见上方 List 的说明，
+// 谓词本体在 duplicateUniverseWhere，与 timeline.go 的 buildWhere 逐字对应）。
+// 阈值/limit 的解析与钳制见 ParseDuplicateParams；候选超 5000 拒绝而非挂起，见 MaxPhashUniverse。
+func (h *Handler) Duplicates(c *gin.Context) {
+	threshold, limit, err := ParseDuplicateParams(c.Query("threshold"), c.Query("limit"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		return
+	}
+	p := DuplicateParams{Space: c.Query("space"), Threshold: threshold, Limit: limit}
+	if p.Space == "personal" {
+		p.OwnerID = c.GetString("user_id")
+	}
+	res, err := h.Store.FindDuplicates(c.Request.Context(), p)
+	var tooMany *TooManyMediaError
+	if errors.As(err, &tooMany) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "TOO_MANY_MEDIA", "message": tooMany.Error()}})
+		return
+	}
+	if err != nil {
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, res)
