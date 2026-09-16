@@ -164,6 +164,27 @@ services:
       db:
         condition: service_healthy
 
+  # ---- 感知哈希去重（TDD §381）：复用 app 镜像，但**不需要**任何模型 ----
+  # 清扫式增量：周期性扫描「已有 MD 缩略图且 media.phash_scanned_at 为空」的媒体，
+  # 解码缩略图 → DCT pHash → 回填 media.phash（64 位，供后续按汉明距离分组找重复）。
+  # 与 embed/tag/faces worker 同理不接队列：把 phash_scanned_at 复位即等价入队。
+  # 纯 Go 实现（标准库 image + golang.org/x/image），故无需 ONNX/模型环境变量，
+  # 也因此不需要挂 EMBED_*/FACE_* 那一堆配置。
+  # MD（宽 640）已是 pHash 的充足输入（内部只缩到 32×32），无需 LG。
+  phash-worker:
+    image: panomint-app:latest
+    container_name: pano-phash-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/phashgen", "-mode", "watch", "-interval", "30"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
   # ---- 人脸检测 / 聚类（Job000011）：复用 api 镜像（含 ONNX Runtime + YuNet/SFace 模型）----
   # 清扫式增量：周期性扫描「已有 LG 缩略图且 media.faces_scanned_at 为空」的媒体 →
   # YuNet 检出人脸 → SFace 出 128 维特征 → 与既有簇质心比余弦相似度，

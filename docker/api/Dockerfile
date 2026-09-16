@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # 全景相册 API 镜像：cmd/api（gin 服务，TDD §8.1）+ cmd/embedgen（CLIP 向量工具，Job000010）
 #                  + cmd/taggen（零样本 AI 打标，Phase 4）+ cmd/facesgen（人脸检测/聚类，Job000011）
+#                  + cmd/phashgen（DCT 感知哈希，TDD §381）
 # 构建上下文 = 仓库根（见 docker-compose.yml 中 api.build.context）
 #
 # 为什么不是 alpine：CLIP 向量能力经 CGO 绑定 ONNX Runtime，而官方 Linux 预编译库是
@@ -26,13 +27,16 @@ COPY src/backend/cmd ./cmd
 COPY src/backend/internal ./internal
 # 挂载 Go 构建缓存：CGO 全量编译较慢（4 核 VM 上首次约 20 分钟），
 # 缓存后增量重建只需编译变更部分
+# phashgen 与 migrateplan 都是纯 Go，用 CGO_ENABLED=0 编译：不必等 C 工具链，
+# 产物也不依赖 libonnxruntime（pHash 只用标准库 image + golang.org/x/image）。
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -trimpath -o /out/api ./cmd/api \
  && CGO_ENABLED=1 go build -trimpath -o /out/embedgen ./cmd/embedgen \
  && CGO_ENABLED=1 go build -trimpath -o /out/taggen ./cmd/taggen \
  && CGO_ENABLED=1 go build -trimpath -o /out/facesgen ./cmd/facesgen \
- && CGO_ENABLED=0 go build -trimpath -o /out/migrateplan ./cmd/migrateplan
+ && CGO_ENABLED=0 go build -trimpath -o /out/migrateplan ./cmd/migrateplan \
+ && CGO_ENABLED=0 go build -trimpath -o /out/phashgen ./cmd/phashgen
 
 # ---- 阶段 2：运行时 ----
 # 工作目录保持 /：config 默认 ./data/* 解析到挂载卷 /data（健康检查 DiskCheckDir=./data）
@@ -49,6 +53,7 @@ COPY --from=build /out/embedgen /usr/local/bin/embedgen
 COPY --from=build /out/taggen /usr/local/bin/taggen
 COPY --from=build /out/facesgen /usr/local/bin/facesgen
 COPY --from=build /out/migrateplan /usr/local/bin/migrateplan
+COPY --from=build /out/phashgen /usr/local/bin/phashgen
 
 # ONNX Runtime 原生库（1.29.0，须与 Go 绑定头文件版本一致）
 COPY assets/lib/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so* /opt/onnxruntime/lib/
