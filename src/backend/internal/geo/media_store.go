@@ -105,6 +105,49 @@ func appendTimeRange(conds []string, args []any, from, to *time.Time) ([]string,
 	return conds, args
 }
 
+// 媒体分类过滤（地图筛选栏）。
+//
+// 三种取值与 Histogram 的四类计数**恰好构成一个划分**：
+//
+//	photo = type='photo' 且非 360
+//	video = type='video' 且非 360
+//	pano  = 360（含全景照片与全景视频）
+//
+// 于是 photo ∪ video ∪ pano = 全部，且两两不相交 —— 这一点很重要：
+// 否则筛选栏的"全部"计数会不等于三类之和，用户会以为有数据丢了。
+// （Histogram 仍返回四类细分，两者是不同粒度的视图，不冲突。）
+const (
+	KindAll   = "all"
+	KindPhoto = "photo"
+	KindVideo = "video"
+	KindPano  = "pano"
+)
+
+// ValidKind 校验筛选取值。
+func ValidKind(k string) bool {
+	switch k {
+	case KindAll, KindPhoto, KindVideo, KindPano:
+		return true
+	}
+	return false
+}
+
+// appendKind 追加分类过滤条件。kind 为空或 all 时不加任何条件。
+//
+// 刻意用**字面量条件**而不是拼参数：这三个条件是固定枚举，不是用户数据，
+// 拼进 SQL 无注入面（值已过 ValidKind），且能让语句保持可读、便于 EXPLAIN 时复现。
+func appendKind(conds []string, args []any, kind string) ([]string, []any) {
+	switch kind {
+	case KindPhoto:
+		conds = append(conds, "type = 'photo' AND NOT COALESCE(is_360, false)")
+	case KindVideo:
+		conds = append(conds, "type = 'video' AND NOT COALESCE(is_360, false)")
+	case KindPano:
+		conds = append(conds, "COALESCE(is_360, false)")
+	}
+	return conds, args
+}
+
 // convert 按 provider 决定是否转 GCJ-02（详见 WGS84ToGCJ02；境外坐标原样返回）。
 func convert(lng, lat float64, provider string) (float64, float64) {
 	if provider == "amap" {
@@ -113,11 +156,12 @@ func convert(lng, lat float64, provider string) (float64, float64) {
 	return lng, lat
 }
 
-// Clusters 按 bbox + zoom 做网格聚合，支持时间范围过滤（时间轴 → 地图 联动）。
+// Clusters 按 bbox + zoom 做网格聚合，支持时间范围与分类过滤（时间轴 → 地图 联动）。
 // 返回质心 + 计数，坐标按 provider 转换。
-func (s *MediaStore) Clusters(ctx context.Context, b BBox, zoom int, provider string, from, to *time.Time) ([]Cluster, error) {
+func (s *MediaStore) Clusters(ctx context.Context, b BBox, zoom int, provider, kind string, from, to *time.Time) ([]Cluster, error) {
 	conds, args := baseCond(b)
 	conds, args = appendTimeRange(conds, args, from, to)
+	conds, args = appendKind(conds, args, kind)
 	args = append(args, GridSize(zoom))
 	grid := fmt.Sprintf("$%d", len(args))
 
@@ -148,9 +192,10 @@ func (s *MediaStore) Clusters(ctx context.Context, b BBox, zoom int, provider st
 
 // Items 列出 bbox 内的媒体条目（点击簇 / 框选后展开用），按拍摄时间倒序。
 // limit 由调用方收敛（handler 层做上下界校验）。
-func (s *MediaStore) Items(ctx context.Context, b BBox, provider string, from, to *time.Time, limit int) ([]MediaPoint, error) {
+func (s *MediaStore) Items(ctx context.Context, b BBox, provider, kind string, from, to *time.Time, limit int) ([]MediaPoint, error) {
 	conds, args := baseCond(b)
 	conds, args = appendTimeRange(conds, args, from, to)
+	conds, args = appendKind(conds, args, kind)
 	args = append(args, limit)
 
 	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
@@ -224,9 +269,10 @@ type Place struct {
 
 // Places 列出 bbox 内出现的地名（place 非空、去重、按计数降序）。
 // taken_at 时间过滤可选；用于地图底部"地理位置罗列"（横向滑动 + 点击定位）。
-func (s *MediaStore) Places(ctx context.Context, b BBox, provider string, from, to *time.Time, limit int) ([]Place, error) {
+func (s *MediaStore) Places(ctx context.Context, b BBox, provider, kind string, from, to *time.Time, limit int) ([]Place, error) {
 	conds, args := baseCond(b)
 	conds, args = appendTimeRange(conds, args, from, to)
+	conds, args = appendKind(conds, args, kind)
 	args = append(args, limit)
 	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT COALESCE(place, '') AS name, count(*)::int,

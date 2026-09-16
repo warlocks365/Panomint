@@ -149,9 +149,28 @@ func (h *Handler) bboxFor(c *gin.Context) (BBox, bool) {
 	return b, true
 }
 
-// Clusters GET /geo/clusters?min_lng=&min_lat=&max_lng=&max_lat=&zoom=&provider=&from=&to=
+// parseKind 解析并校验分类过滤参数（空串 = all）。
+// 非法取值一律 400 而不是静默当成 all —— 静默降级会让"筛选没生效"看起来像"这些媒体本来就没有"。
+func parseKind(c *gin.Context) (string, bool) {
+	v := strings.ToLower(strings.TrimSpace(c.Query("kind")))
+	if v == "" {
+		return KindAll, true
+	}
+	if !ValidKind(v) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
+			"code": "INVALID_PARAMS", "message": "kind 仅支持 all|photo|video|pano"}})
+		return "", false
+	}
+	return v, true
+}
+
+// Clusters GET /geo/clusters?min_lng=&min_lat=&max_lng=&max_lat=&zoom=&provider=&kind=&from=&to=
 func (h *Handler) Clusters(c *gin.Context) {
 	b, ok := h.bboxFor(c)
+	if !ok {
+		return
+	}
+	kind, ok := parseKind(c)
 	if !ok {
 		return
 	}
@@ -171,7 +190,7 @@ func (h *Handler) Clusters(c *gin.Context) {
 		return
 	}
 
-	clusters, err := h.Media.Clusters(c.Request.Context(), b, zoom, h.provider(c), from, to)
+	clusters, err := h.Media.Clusters(c.Request.Context(), b, zoom, h.provider(c), kind, from, to)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
 		return
@@ -179,10 +198,14 @@ func (h *Handler) Clusters(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"clusters": clusters})
 }
 
-// Items GET /geo/items?min_lng=&...&from=&to=&limit=
+// Items GET /geo/items?min_lng=&...&kind=&from=&to=&limit=
 // 返回 bbox 内媒体条目（含缩略图所需 id），供点击簇/框选后展开网格。
 func (h *Handler) Items(c *gin.Context) {
 	b, ok := h.bboxFor(c)
+	if !ok {
+		return
+	}
+	kind, ok := parseKind(c)
 	if !ok {
 		return
 	}
@@ -204,7 +227,7 @@ func (h *Handler) Items(c *gin.Context) {
 		return
 	}
 
-	items, err := h.Media.Items(c.Request.Context(), b, h.provider(c), from, to, limit)
+	items, err := h.Media.Items(c.Request.Context(), b, h.provider(c), kind, from, to, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
 		return
@@ -242,6 +265,10 @@ func (h *Handler) Places(c *gin.Context) {
 	if !ok {
 		return
 	}
+	kind, ok := parseKind(c)
+	if !ok {
+		return
+	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	if limit <= 0 {
 		limit = 50
@@ -259,7 +286,7 @@ func (h *Handler) Places(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
 		return
 	}
-	places, err := h.Media.Places(c.Request.Context(), b, h.provider(c), from, to, limit)
+	places, err := h.Media.Places(c.Request.Context(), b, h.provider(c), kind, from, to, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
 		return
