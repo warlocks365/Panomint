@@ -5,12 +5,28 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// MinPasswordLen 密码最短长度（与 POST /admin/users 的绑定校验一致）。
+const MinPasswordLen = 8
+
+// 用户状态取值。⚠️ users.status **没有 CHECK 约束**（实测 pg_constraint 里只有主键/唯一/外键），
+// 所以"合法状态"这件事只能由应用层把关 —— 任何新写入路径都必须过 ValidUserStatus。
+const (
+	StatusActive   = "active"
+	StatusDisabled = "disabled"
+)
+
+// ValidUserStatus 校验用户状态取值。
+func ValidUserStatus(s string) bool { return s == StatusActive || s == StatusDisabled }
 
 // Store 账户数据访问。
 type Store struct {
@@ -51,7 +67,100 @@ var (
 	ErrMFANotPending = errors.New("没有待确认的二次验证设置")
 	// ErrMFANotEnabled 二次验证尚未启用（无需关闭）。
 	ErrMFANotEnabled = errors.New("二次验证未启用")
+
+	// ErrUserNotFound 目标用户不存在。
+	ErrUserNotFound = errors.New("用户不存在")
+	// ErrRoleNotFound 指定的角色不存在。
+	ErrRoleNotFound = errors.New("角色不存在")
+	// ErrSelfLockout 不允许修改自己的角色或状态。
+	//
+	// 这条守卫的意义：管理员一旦把自己改成非 owner 或禁用，就可能**当场失去管理权限**
+	// （甚至立刻登不进来），而恢复只能靠直接改库。把自己关在门外是纯自伤，没有正当场景。
+	// 注意只拦"角色/状态"：改自己的昵称与密码是正常需求。
+	ErrSelfLockout = errors.New("不能修改自己的角色或状态")
+	// ErrLastOwner 不能移除最后一个可用的 owner。
+	//
+	// 系统里 owner 是唯一拥有 admin:system 的角色（实测 seed：admin/owner 两个角色有 admin:*，
+	// 但默认只给 owner 建账号）。把最后一个 active owner 降级或禁用，会导致**再没有人能管理这台服务器**，
+	// 且同样只能靠改库恢复。故必须在"改动会减少可用 owner 数"且"减完为 0"时拒绝。
+	ErrLastOwner = errors.New("不能移除最后一个可用的 owner（否则系统将无人可管理）")
+	// ErrUserHasAssets 该用户仍被业务数据引用，无法硬删除。
+	ErrUserHasAssets = errors.New("该用户仍拥有媒体 / 相册 / 分享 / 审计等数据，无法删除")
+
+	// ErrInvalidInput 入参非法（校验失败）。handler 据此映射 400，与其它包的同类错误语义一致。
+	ErrInvalidInput = errors.New("输入非法")
 )
+
+// UserUpdate 用户部分更新（全部指针：nil = 不改动）。
+type UserUpdate struct {
+	DisplayName *string `json:"display_name"`
+	Role        *string `json:"role"`
+	Status      *string `json:"status"`
+	Password    *string `json:"password"`
+}
+
+// Empty 是否没有任何实际改动。
+func (u UserUpdate) Empty() bool {
+	return u.DisplayName == nil && u.Role == nil && u.Status == nil && u.Password == nil
+}
+
+// ChangesRoleOrStatus 本次改动是否触及角色或状态（自锁守卫只针对这两项）。
+func (u UserUpdate) ChangesRoleOrStatus() bool { return u.Role != nil || u.Status != nil }
+
+// NormalizeUserUpdate 校验并归一化部分更新输入（纯函数，便于穷举单测）。
+func NormalizeUserUpdate(in UserUpdate) (UserUpdate, error) {
+	var out UserUpdate
+	if in.DisplayName != nil {
+		v := strings.TrimSpace(*in.DisplayName)
+		out.DisplayName = &v
+	}
+	if in.Role != nil {
+		v := strings.ToLower(strings.TrimSpace(*in.Role))
+		if v == "" {
+			return out, errors.New("role 不能为空")
+		}
+		out.Role = &v
+	}
+	if in.Status != nil {
+		v := strings.ToLower(strings.TrimSpace(*in.Status))
+		if !ValidUserStatus(v) {
+			return out, fmt.Errorf("status 仅支持 %s|%s", StatusActive, StatusDisabled)
+		}
+		out.Status = &v
+	}
+	if in.Password != nil {
+		if len(*in.Password) < MinPasswordLen {
+			return out, fmt.Errorf("密码至少 %d 位", MinPasswordLen)
+		}
+		out.Password = in.Password
+	}
+	return out, nil
+}
+
+// CheckUserPatch 判定这次改动是否被允许（纯函数）。
+//
+// 入参 otherActiveOwners = **除目标用户之外**还有几个 active 的 owner（由调用方查库得到）。
+// 之所以把判定抽成纯函数：这两条守卫（自锁、最后 owner）是"改错了就再也进不去"的那类逻辑，
+// 必须能穷举单测，而不是靠"部署后手动试一次"。
+func CheckUserPatch(actorID string, target *User, in UserUpdate, otherActiveOwners int) error {
+	if target == nil {
+		return ErrUserNotFound
+	}
+	// 自锁：不许改自己的角色/状态（改昵称、改密码不受限）
+	if in.ChangesRoleOrStatus() && target.ID == actorID {
+		return ErrSelfLockout
+	}
+	// 最后 owner：仅当"目标当前是 active owner"且"本次改动会让它不再是 active owner"时判定
+	if !(target.Role == "owner" && target.Status == StatusActive) {
+		return nil
+	}
+	willLoseOwner := (in.Role != nil && *in.Role != "owner") ||
+		(in.Status != nil && *in.Status != StatusActive)
+	if willLoseOwner && otherActiveOwners <= 0 {
+		return ErrLastOwner
+	}
+	return nil
+}
 
 // FindByEmail 按邮箱查用户。
 func (s *Store) FindByEmail(ctx context.Context, email string) (*User, error) {
@@ -247,6 +356,190 @@ func (s *Store) DisableMFA(ctx context.Context, userID string) error {
 		return ErrMFANotEnabled
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// 用户与角色管理（管理端）
+// ---------------------------------------------------------------------------
+
+// Role 角色及其权限（GET /admin/roles）。
+type Role struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Perms       []string `json:"permissions"`
+	// Users 该角色下的用户数。带上它是因为"能不能改/删这个角色"先要看有没有人还在用，
+	// 让管理界面不必再单独发一次请求去数。
+	Users int `json:"users"`
+}
+
+// GetUser 按 id 取用户，找不到时返回 ErrUserNotFound（FindByID 不区分，故单列一个）。
+func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {
+	u, err := s.FindByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// RoleExists 角色名是否存在（用于在 UPDATE 之前给出干净的 400，而不是等外键/NOT NULL 报错）。
+func (s *Store) RoleExists(ctx context.Context, name string) (bool, error) {
+	var ok bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM roles WHERE name = $1)`, name).Scan(&ok)
+	return ok, err
+}
+
+// CountActiveOwnersExcept 统计**除 excludeID 之外**还有几个 active 的 owner。
+//
+// 供"最后 owner"守卫使用：传目标用户 id，得到的就是"改完还剩几个"。
+func (s *Store) CountActiveOwnersExcept(ctx context.Context, excludeID string) (int, error) {
+	var n int
+	err := s.Pool.QueryRow(ctx, `
+		SELECT count(*) FROM users u JOIN roles r ON r.id = u.role_id
+		WHERE r.name = 'owner' AND u.status = $1 AND u.id <> $2::uuid`,
+		StatusActive, excludeID).Scan(&n)
+	return n, err
+}
+
+// buildUserUpdate 拼 SET 子句与参数（纯函数）。
+//
+// 与 compute.buildNodeUpdate 同思路：占位符由"append 之后取 len(args)"生成，
+// 编号与下标同源，杜绝两处各算一次导致的错位（那类错误 pgx 只会报参数个数不匹配，
+// 或者更糟——静默写错列）。
+//
+// passwordHash 非空时才写 password_hash：密码哈希由调用方（handler 层）生成，
+// 因为 bcrypt 是 CPU 开销，不该让纯拼装函数承担。
+func buildUserUpdate(in UserUpdate, passwordHash string) (sets []string, args []any) {
+	add := func(expr string, v any) {
+		args = append(args, v)
+		sets = append(sets, fmt.Sprintf(expr, len(args)))
+	}
+	if in.DisplayName != nil {
+		add("display_name = $%d", *in.DisplayName)
+	}
+	if in.Role != nil {
+		add("role_id = (SELECT id FROM roles WHERE name = $%d)", *in.Role)
+	}
+	if in.Status != nil {
+		add("status = $%d", *in.Status)
+	}
+	if in.Password != nil && passwordHash != "" {
+		add("password_hash = $%d", passwordHash)
+	}
+	return sets, args
+}
+
+// UpdateUser 部分更新用户。**不做守卫判定**（自锁 / 最后 owner 由 handler 用
+// CheckUserPatch 判定后再调用），因为守卫需要"操作者是谁"这个 handler 才有的信息。
+func (s *Store) UpdateUser(ctx context.Context, id string, in UserUpdate) (*User, error) {
+	in, err := NormalizeUserUpdate(in)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if in.Empty() {
+		return nil, fmt.Errorf("%w: 没有任何待更新字段", ErrInvalidInput)
+	}
+	if in.Role != nil {
+		ok, err := s.RoleExists(ctx, *in.Role)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrRoleNotFound
+		}
+	}
+
+	var hash string
+	if in.Password != nil {
+		if hash, err = HashPassword(*in.Password); err != nil {
+			return nil, err
+		}
+	}
+
+	sets, args := buildUserUpdate(in, hash)
+	args = append(args, id)
+	q := fmt.Sprintf(`UPDATE users SET %s, updated_at = now() WHERE id = $%d::uuid
+		RETURNING id, email, COALESCE(display_name,''), '', (SELECT name FROM roles WHERE id = role_id), status,
+		          COALESCE(mfa_secret,''), mfa_enabled`,
+		strings.Join(sets, ", "), len(args))
+
+	var u User
+	err = s.Pool.QueryRow(ctx, q, args...).Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash,
+		&u.Role, &u.Status, &u.MFASecret, &u.MFAEnabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
+	return &u, nil
+}
+
+// RevokeAllSessions 吊销某用户的全部会话。
+//
+// 为什么禁用用户时必须连带吊销：access token 在签出后到过期前是**自证**的（服务端不查库），
+// 单靠 status 拦不住手上已有令牌的人；更要命的是 refresh 会不断换出新的 access token。
+// 只改状态而不清会话，等于"禁用"要等最长 7 天（refresh TTL）才真正生效。
+func (s *Store) RevokeAllSessions(ctx context.Context, userID string) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE sessions SET revoked = true WHERE user_id = $1::uuid AND revoked = false`, userID)
+	return err
+}
+
+// DeleteUser 硬删除用户。
+//
+// ⚠️ **多数情况下会被外键拒绝，这是刻意的**：media / albums / audit_log / index_jobs /
+// memories / share_links / shared_space 七处都以 NO ACTION 引用 users(id)，
+// 意思是"这些数据必须继续可归属到某个人"（审计尤其不能因为删掉用户就失去主体）。
+// 因此真正可行的"删除"是**禁用**（status=disabled）；本方法只在用户确实没有任何归属数据时
+// （例如建错的账号）才会成功，否则返回 ErrUserHasAssets 让调用方改用禁用。
+//
+// sessions / user_preferences / user_ui_prefs / shared_space_members 是 CASCADE，会随删。
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM users WHERE id = $1::uuid`, id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" { // foreign_key_violation
+		return ErrUserHasAssets
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
+// ListRoles 角色与权限列表（GET /admin/roles）。
+func (s *Store) ListRoles(ctx context.Context) ([]Role, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT r.name, COALESCE(r.description,''),
+		       COALESCE(string_agg(rp.perm, ',' ORDER BY rp.perm), ''),
+		       (SELECT count(*) FROM users u WHERE u.role_id = r.id)
+		FROM roles r LEFT JOIN role_permissions rp ON rp.role_id = r.id
+		GROUP BY r.id, r.name, r.description
+		ORDER BY r.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []Role{}
+	for rows.Next() {
+		var r Role
+		var perms string
+		if err := rows.Scan(&r.Name, &r.Description, &perms, &r.Users); err != nil {
+			return nil, err
+		}
+		r.Perms = []string{}
+		if perms != "" {
+			r.Perms = strings.Split(perms, ",")
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // EnsureSeedAdmin 确保 owner 管理员存在（首次启动种子；默认密码仅开发用，生产必须改）。

@@ -328,6 +328,16 @@ func main() {
 	admin.POST("/users", authH.CreateUser)
 	admin.GET("/users", authH.ListUsers)
 
+	// ===== Phase 5：管理后台完整化（用户与角色）=====
+	// 契约 §2「管理端点（需 admin:users）」：PATCH 改角色/状态/重置密码；DELETE 禁用/删除；
+	// GET /admin/roles 角色与权限列表。
+	// ⚠️ 权限点仍取库中实际存在的 admin:users，不新造（与 /admin/audit 同级）。
+	// 两条硬守卫在 handler 里（auth.CheckUserPatch，纯函数可穷举单测）：不许改自己的角色/状态、
+	// 不许移除最后一个可用 owner —— 这两件事都会让系统**当场失去管理入口**且只能靠改库恢复。
+	admin.PATCH("/users/:id", authH.UpdateUser)
+	admin.DELETE("/users/:id", authH.DeleteUser)
+	admin.GET("/roles", authH.ListRoles)
+
 	// ===== Phase 5 精选第一项：审计日志 + 管理端只读端点 =====
 	// 契约 §2 `GET /admin/audit`（分页）、§14 `GET /admin/stats`、§12 `GET /admin/jobs`。
 	// 权限点一律取自库中**实际存在**的种子权限（实测只有 admin:system / admin:users 两个 admin 前缀），不新造权限名：
