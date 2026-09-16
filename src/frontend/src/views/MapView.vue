@@ -124,6 +124,7 @@
     <div
       v-else-if="filterOpen"
       class="map-filter-overlay"
+      data-testid="map-filter-overlay"
       :class="{ 'map-filter-overlay--right': uiPrefs.map_filter_side === 'right' }"
     >
       <MapFilterBar
@@ -733,15 +734,23 @@ onBeforeUnmount(() => {
   padding: 12px 12px 12px 0;
 }
 
-/* 移动端筛选浮层：覆盖在地图上方，按偏好靠左/靠右 */
+/* 移动端筛选浮层：覆盖在地图上方，按偏好靠左/靠右
+   ⚠️ top 必须让开顶栏与搜索框所在的浮层行，否则浮层会压住顶栏里的「筛选」按钮 ——
+   按钮是本浮层的开关，被自己盖住就意味着再点一次关不掉（实测 elementFromPoint 命中 mf-head）。
+   390×844 实测（相对 .map-view 顶边）：顶栏行底边 51px、搜索框 59~93px，故取 100px 同时让开两者。 */
 .map-filter-overlay {
   position: absolute;
-  top: 12px;
+  top: 100px;
   left: 12px;
   right: 12px;
+  /* 矮屏（横屏 390px 高）放不下 434px 的面板 → 限定高度并允许浮层自身滚动，
+     否则底部控件够不到（此时靠 align-items 保持面板自身高度，不被拉满） */
+  bottom: 12px;
   z-index: 8;
   display: flex;
+  align-items: flex-start;
   justify-content: flex-start;
+  overflow-y: auto;
   pointer-events: none;
 }
 
