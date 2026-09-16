@@ -285,6 +285,7 @@ let hoverTimer = null
 let hoverRequestId = 0
 let touchStartInfo = null
 let prefsSaveTimer = null // 界面偏好防抖写入（与 reloadTimer 同为手写定时器，项目内无防抖工具）
+let prefDirty = false // 有尚未落到服务端的偏好改动
 
 // 高德栅格瓦片（经本站反代，Key 不下发浏览器）
 const rasterStyle = {
@@ -383,6 +384,7 @@ async function loadUiPrefs() {
 // 先落本地（界面立刻响应），再防抖写服务端
 function patchPrefs(partial) {
   uiPrefs.value = { ...uiPrefs.value, ...partial }
+  prefDirty = true
   clearTimeout(prefsSaveTimer)
   prefsSaveTimer = setTimeout(saveUiPrefs, 500)
 }
@@ -390,8 +392,10 @@ function patchPrefs(partial) {
 async function saveUiPrefs() {
   try {
     await putUiPrefs({ ...uiPrefs.value })
+    prefDirty = false
   } catch {
     // 保存失败保留本地值：界面与用户的选择保持一致，仅非阻塞提示
+    // 不清 prefDirty：留给卸载时的补写重试
     err.value = '界面偏好已本地生效，服务端同步失败'
   }
 }
@@ -687,7 +691,10 @@ onBeforeUnmount(() => {
   clearTimeout(reloadTimer)
   clearTimeout(hoverTimer)
   clearTimeout(hoverCloseTimer)
+  // 500ms 防抖窗口内离开页面会静默丢掉用户最后一次选择，故卸载时补写一次；
+  // 不 await：组件已在卸载，没有界面可更新，请求发出即可
   clearTimeout(prefsSaveTimer)
+  if (prefDirty) saveUiPrefs()
   map?.remove()
   map = null
 })
