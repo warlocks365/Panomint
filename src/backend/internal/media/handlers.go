@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/audit"
 	"panoalbum/internal/queue"
 	"panoalbum/internal/tags"
 )
@@ -20,6 +21,34 @@ type Handler struct {
 	MediaRoot string       // 既有索引媒体根目录（media.path 相对它解析）
 	// Tagger 可空：AI 零样本分类器（Phase 4）。未接线时 /ai/tags 预览仅返回已落库结果。
 	Tagger *tags.Classifier
+	// Audit 审计写入器；可为 nil（测试/灰度时静默跳过，见 record）。
+	Audit *audit.Recorder
+}
+
+// record 写一条审计（**尽力而为**）。Audit 为 nil 时静默跳过。
+//
+// 与 auth / geo 的同名方法是同一形状，三个坑在这里同样成立：
+//
+//  1. **公开端点要显式传 actor**。`/media/**` 全部挂在 AuthRequired 之后，
+//     所以这里从上下文取 `user_id` 是可靠的；将来若要给某个公开媒体端点写审计，
+//     必须改成 auth 那样的 recordAs(c, actor, ...) —— 否则 FromGin 取到空串、
+//     落库成 NULL，且**不报错**。
+//  2. **detail 的键名要避开 audit.RedactDetail 的敏感子串**
+//     （password/passwd/pwd/secret/credential/apikey/api_key/private_key/signature/
+//     hash/token/jwt/bearer/session/cookie/authorization/otp/totp/mfa）。
+//     命中就**整键剔除**，detail 会静默变成 `{}`。下方各调用点只用中性键名。
+//  3. **不要为了"清理"删审计行**。本包只写不删；验证用的临时行也留在表里，
+//     基线一律用增量 c0→c1（审计表是只追加的，删行本身就是最该被审计的行为）。
+func (h *Handler) record(c *gin.Context, action, targetType, targetID string, detail map[string]any) {
+	if h.Audit == nil {
+		return
+	}
+	e := audit.FromGin(c)
+	e.Action = action
+	e.TargetType = targetType
+	e.TargetID = targetID
+	e.Detail = detail
+	h.Audit.Record(c.Request.Context(), e)
 }
 
 // List GET /media（API v1.1 §3：时间轴分页 + 筛选 + 时间桶）。

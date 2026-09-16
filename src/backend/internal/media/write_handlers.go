@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/audit"
 	"panoalbum/internal/queue"
 )
 
@@ -269,7 +270,8 @@ func (h *Handler) enqueueThumbRegen(c *gin.Context, id string) {
 // Delete DELETE /media/:id（软删入回收站）
 func (h *Handler) Delete(c *gin.Context) {
 	id := c.Param("id")
-	if _, ok := h.checkAccess(c, id); !ok {
+	ownerID, ok := h.checkAccess(c, id)
+	if !ok {
 		return
 	}
 	if err := h.Store.SoftDelete(c.Request.Context(), id); errors.Is(err, ErrNotFound) {
@@ -279,6 +281,10 @@ func (h *Handler) Delete(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
 		return
 	}
+	// 审计在**成功落库之后**：软删失败（404/500）不写，否则审计里会出现
+	// "谁删了 X" 而 X 其实还在 —— 记录错误的审计比不记录更危险（见 audit.Recorder 的注释）。
+	// detail 只记 owner_id（中性键名，不带任何敏感子串），用于按"某人名下被删的媒体"追查。
+	h.record(c, audit.ActionMediaDelete, audit.TargetMedia, id, map[string]any{"owner_id": ownerID})
 	c.JSON(http.StatusOK, gin.H{"id": id, "deleted": true})
 }
 
@@ -311,7 +317,8 @@ func (h *Handler) Restore(c *gin.Context) {
 // Purge DELETE /media/trash/:id（永久删除：行删除 + 上传目录内文件清理）
 func (h *Handler) Purge(c *gin.Context) {
 	id := c.Param("id")
-	if _, ok := h.checkAccess(c, id); !ok {
+	ownerID, ok := h.checkAccess(c, id)
+	if !ok {
 		return
 	}
 	path, err := h.Store.Purge(c.Request.Context(), id)
@@ -322,6 +329,16 @@ func (h *Handler) Purge(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
 		return
 	}
+	// ⭐ 本动作**不可恢复**，是全部动作里唯一"事后无从补救"的一个，所以审计行必须落在
+	// DELETE 之后、且在下面删磁盘文件**之前** —— 反过来的话，进程若在写审计前挂掉，
+	// 文件已经没了而审计里没有这条记录。
+	//
+	// detail 记 path 的理由：purge 会把 media 行**整行删除**，此后 target_id 再也查不回
+	// 任何东西（GetDetail 只会说"不存在或已删除"）。path 是这条媒体在库里最后的痕迹，
+	// 也是事后唯一能回答"到底销毁了什么"的线索 —— 行没了，审计还在，这才是审计的意义。
+	// 键名 path / owner_id 均不含敏感子串，不会被 RedactDetail 剔除。
+	h.record(c, audit.ActionMediaPurge, audit.TargetMedia, id,
+		map[string]any{"owner_id": ownerID, "path": path})
 	// 尽力清理磁盘文件（仅允许删除已知根目录下的文件）
 	if abs, ok := h.ResolvePath(path); ok {
 		_ = removeFile(abs)

@@ -119,6 +119,7 @@ func main() {
 		UploadDir: cfg.UploadDir,
 		UploadTmp: cfg.UploadTmp,
 		MediaRoot: cfg.MediaRoot,
+		Audit:     auditRec, // 写操作审计：media.delete / media.purge（后者不可恢复）
 	}
 	permRead := auth.RequirePerm(authStore, "media:read")
 	permWrite := auth.RequirePerm(authStore, "media:write")
