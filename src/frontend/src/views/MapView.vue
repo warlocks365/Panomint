@@ -1,94 +1,151 @@
 <template>
   <div class="map-view" :class="{ 'map-view--mobile': isMobile }">
-    <div ref="mapRef" class="map-canvas"></div>
+    <!-- 地图主区：浮层与时间轴都挂在这里（.map-main 为 relative，绝对定位于其上的浮层仍能正确锚定） -->
+    <div class="map-main">
+      <div ref="mapRef" class="map-canvas"></div>
 
-    <!-- 浮层容器：顶栏 + 地名搜索框纵向排列；容器自身不吃鼠标事件，地图交互不受遮挡 -->
-    <div class="map-float">
-      <div class="map-topbar">
-        <span class="mt-title">地图</span>
-        <span class="mt-stat">{{ clusterCount }} 个位置 · {{ pointCount }} 项</span>
-        <span v-if="err" class="mt-err">{{ err }}</span>
-        <button class="mt-icon-btn" type="button" @click="iconPickerOpen = !iconPickerOpen">图标</button>
-      </div>
+      <!-- 浮层容器：顶栏 + 地名搜索框纵向排列；容器自身不吃鼠标事件，地图交互不受遮挡 -->
+      <div class="map-float">
+        <div class="map-topbar">
+          <span class="mt-title">地图</span>
+          <span class="mt-stat">{{ clusterCount }} 个位置 · {{ pointCount }} 项</span>
+          <span v-if="err" class="mt-err">{{ err }}</span>
+          <button class="mt-icon-btn" type="button" @click="iconPickerOpen = !iconPickerOpen">图标</button>
+          <!-- 移动端筛选栏平时收起，点此按钮以浮层展开（桌面端常驻侧栏，无需开关） -->
+          <button
+            v-if="isMobile"
+            class="mt-icon-btn"
+            type="button"
+            data-testid="map-filter-toggle"
+            @click="filterOpen = !filterOpen"
+          >筛选</button>
+        </div>
 
-      <!-- 地图内置地名搜索：回车 → /map/search → 候选下拉 → flyTo 定位（不再跳 /search） -->
-      <div ref="searchRef" class="map-search" @keydown.esc="closeSearch">
-        <div class="ms-box">
-          <svg class="ms-icon" viewBox="0 0 16 16" width="14" height="14" fill="none">
-            <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" />
-            <path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-          </svg>
-          <input
-            v-model="q"
-            class="ms-input"
-            type="text"
-            placeholder="搜索地名，回车定位"
-            @keyup.enter="runSearch"
-          />
-          <button v-if="q" class="ms-clear" type="button" title="清空" @click="clearSearch">
-            <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
-              <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+        <!-- 地图内置地名搜索：回车 → /map/search → 候选下拉 → flyTo 定位（不再跳 /search） -->
+        <div ref="searchRef" class="map-search" @keydown.esc="closeSearch">
+          <div class="ms-box">
+            <svg class="ms-icon" viewBox="0 0 16 16" width="14" height="14" fill="none">
+              <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" />
+              <path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             </svg>
-          </button>
-        </div>
+            <input
+              v-model="q"
+              class="ms-input"
+              type="text"
+              placeholder="搜索地名，回车定位"
+              @keyup.enter="runSearch"
+            />
+            <button v-if="q" class="ms-clear" type="button" title="清空" @click="clearSearch">
+              <svg viewBox="0 0 12 12" width="10" height="10" fill="none">
+                <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
 
-        <div v-if="searchOpen" class="ms-panel">
-          <div v-if="searching" class="ms-hint">搜索中…</div>
-          <div v-else-if="searchErr" class="ms-hint ms-hint--err">{{ searchErr }}</div>
-          <div v-else-if="searchMsg" class="ms-hint">{{ searchMsg }}</div>
-          <ul v-else class="ms-list">
-            <li v-for="(c, i) in candidates" :key="`${c.name}-${i}`">
-              <button class="ms-item" type="button" @click="pickCandidate(c)">
-                <span class="ms-name">{{ c.name }}</span>
-                <span v-if="c.provider" class="ms-provider">{{ providerLabel(c.provider) }}</span>
-              </button>
-            </li>
-          </ul>
+          <div v-if="searchOpen" class="ms-panel">
+            <div v-if="searching" class="ms-hint">搜索中…</div>
+            <div v-else-if="searchErr" class="ms-hint ms-hint--err">{{ searchErr }}</div>
+            <div v-else-if="searchMsg" class="ms-hint">{{ searchMsg }}</div>
+            <ul v-else class="ms-list">
+              <li v-for="(c, i) in candidates" :key="`${c.name}-${i}`">
+                <button class="ms-item" type="button" @click="pickCandidate(c)">
+                  <span class="ms-name">{{ c.name }}</span>
+                  <span v-if="c.provider" class="ms-provider">{{ providerLabel(c.provider) }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
+
+      <!-- 贴顶时用 order 上移而非挪动 DOM：MapLibre 需要画布容器保持既有尺寸行为 -->
+      <MapTimeline
+        :class="{ 'map-timeline--top': uiPrefs.map_slider_pos === 'top' }"
+        :buckets="buckets"
+        :range="range"
+        :loading="timelineLoading"
+        :granularity="granularity"
+        :places="places"
+        :position="uiPrefs.map_slider_pos"
+        @change="onRangeChange"
+        @zoom="onZoomChange"
+        @place="onPlaceClick"
+      />
+
+      <!-- 三个浮层按 left/right 锚定，放进主区才不会压到侧栏（.map-main 同为 relative） -->
+      <MapIconPicker
+        v-if="iconPickerOpen"
+        :pref="iconPref"
+        @update="onIconPrefUpdate"
+        @close="iconPickerOpen = false"
+      />
+
+      <MapItemList
+        v-if="listOpen"
+        :items="items"
+        :loading="listLoading"
+        @close="closeList"
+        @open="openItem"
+      />
+
+      <MapHoverCard
+        v-if="hoverOpen"
+        :items="hoverItems"
+        :loading="hoverLoading"
+        :place="hoverPlace"
+        :pos="hoverPos"
+        @open="openItem"
+        @enter="onHoverCardEnter"
+        @leave="onHoverCardLeave"
+      />
     </div>
 
-    <MapIconPicker
-      v-if="iconPickerOpen"
-      :pref="iconPref"
-      @update="onIconPrefUpdate"
-      @close="iconPickerOpen = false"
-    />
+    <!-- 桌面端：筛选栏常驻侧栏。左右切换只换 CSS order，DOM 结构不变以免 Vue 重建组件 -->
+    <div
+      v-if="!isMobile"
+      class="map-dock"
+      :class="{ 'map-dock--right': uiPrefs.map_filter_side === 'right' }"
+    >
+      <MapFilterBar
+        :kind="kind"
+        :side="uiPrefs.map_filter_side"
+        :slider-pos="uiPrefs.map_slider_pos"
+        :provider="uiPrefs.map_default_provider"
+        :default-zoom="uiPrefs.map_default_zoom"
+        @update:kind="kind = $event"
+        @update:side="patchPrefs({ map_filter_side: $event })"
+        @update:slider-pos="patchPrefs({ map_slider_pos: $event })"
+        @update:provider="patchPrefs({ map_default_provider: $event })"
+        @update:default-zoom="patchPrefs({ map_default_zoom: $event })"
+      />
+    </div>
 
-    <MapItemList
-      v-if="listOpen"
-      :items="items"
-      :loading="listLoading"
-      @close="closeList"
-      @open="openItem"
-    />
-
-    <MapHoverCard
-      v-if="hoverOpen"
-      :items="hoverItems"
-      :loading="hoverLoading"
-      :place="hoverPlace"
-      :pos="hoverPos"
-      @open="openItem"
-      @enter="onHoverCardEnter"
-      @leave="onHoverCardLeave"
-    />
-
-    <MapTimeline
-      :buckets="buckets"
-      :range="range"
-      :loading="timelineLoading"
-      :granularity="granularity"
-      :places="places"
-      @change="onRangeChange"
-      @zoom="onZoomChange"
-      @place="onPlaceClick"
-    />
+    <!-- 移动端：筛选栏以浮层形式展开（顶栏「筛选」按钮开关） -->
+    <div
+      v-else-if="filterOpen"
+      class="map-filter-overlay"
+      :class="{ 'map-filter-overlay--right': uiPrefs.map_filter_side === 'right' }"
+    >
+      <MapFilterBar
+        :kind="kind"
+        :side="uiPrefs.map_filter_side"
+        :slider-pos="uiPrefs.map_slider_pos"
+        :provider="uiPrefs.map_default_provider"
+        :default-zoom="uiPrefs.map_default_zoom"
+        mobile
+        @update:kind="kind = $event"
+        @update:side="patchPrefs({ map_filter_side: $event })"
+        @update:slider-pos="patchPrefs({ map_slider_pos: $event })"
+        @update:provider="patchPrefs({ map_default_provider: $event })"
+        @update:default-zoom="patchPrefs({ map_default_zoom: $event })"
+        @close="filterOpen = false"
+      />
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl' // v6 纯 ESM
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -99,7 +156,9 @@ import {
   fetchItems,
   fetchPlaces,
   getMapIconPref,
+  getUiPrefs,
   putMapIconPref,
+  putUiPrefs,
   searchPlaces
 } from '../api/map'
 import { useResponsive } from '../composables/useResponsive'
@@ -107,6 +166,7 @@ import MapTimeline from '../components/map/MapTimeline.vue'
 import MapItemList from '../components/map/MapItemList.vue'
 import MapIconPicker from '../components/map/MapIconPicker.vue'
 import MapHoverCard from '../components/map/MapHoverCard.vue'
+import MapFilterBar from '../components/map/MapFilterBar.vue'
 
 // 地图模式（Job000009 优化）：全屏地图 + 时间轴缩放滑块 + 图标可配置 + 悬停预览
 const router = useRouter()
@@ -127,6 +187,17 @@ const listLoading = ref(false)
 
 const iconPickerOpen = ref(false)
 const iconPref = ref({ shape: 'circle', color: '#ef4444' })
+
+// ---- 界面偏好（Job：筛选栏 + 布局记忆）----
+// 先以默认值渲染，拉到服务端偏好后再覆盖；服务端不可达时保持默认，地图照常可用
+const uiPrefs = ref({
+  map_slider_pos: 'bottom',
+  map_filter_side: 'left',
+  map_default_provider: 'auto',
+  map_default_zoom: null
+})
+const kind = ref('all') // 媒体类型过滤 all|photo|video|pano
+const filterOpen = ref(false) // 移动端筛选浮层开关（桌面端常驻，不用此项）
 
 const hoverOpen = ref(false)
 const hoverItems = ref([])
@@ -213,6 +284,7 @@ let reloadTimer = null
 let hoverTimer = null
 let hoverRequestId = 0
 let touchStartInfo = null
+let prefsSaveTimer = null // 界面偏好防抖写入（与 reloadTimer 同为手写定时器，项目内无防抖工具）
 
 // 高德栅格瓦片（经本站反代，Key 不下发浏览器）
 const rasterStyle = {
@@ -292,6 +364,46 @@ async function onIconPrefUpdate(pref) {
   }
 }
 
+// ---- 界面偏好：账户级持久化 ----
+// 偏好接口失败绝不能拦住地图渲染，故整体吞掉异常、退回默认值
+async function loadUiPrefs() {
+  try {
+    const d = (await getUiPrefs()).data || {}
+    uiPrefs.value = {
+      map_slider_pos: d.map_slider_pos || 'bottom',
+      map_filter_side: d.map_filter_side || 'left',
+      map_default_provider: d.map_default_provider || 'auto',
+      map_default_zoom: typeof d.map_default_zoom === 'number' ? d.map_default_zoom : null
+    }
+  } catch {
+    // 保持默认值即可，不提示（用户没做任何操作，弹错误只会困惑）
+  }
+}
+
+// 先落本地（界面立刻响应），再防抖写服务端
+function patchPrefs(partial) {
+  uiPrefs.value = { ...uiPrefs.value, ...partial }
+  clearTimeout(prefsSaveTimer)
+  prefsSaveTimer = setTimeout(saveUiPrefs, 500)
+}
+
+async function saveUiPrefs() {
+  try {
+    await putUiPrefs({ ...uiPrefs.value })
+  } catch {
+    // 保存失败保留本地值：界面与用户的选择保持一致，仅非阻塞提示
+    err.value = '界面偏好已本地生效，服务端同步失败'
+  }
+}
+
+// 媒体类型变化 → 重新查询（直方图不受 kind 影响，后端恒返四类计数）
+watch(kind, () => reload())
+
+// 侧栏出现/消失或换边会改变画布宽度，必须让 MapLibre 重算画布尺寸，否则会拉伸或留白
+watch([isMobile, () => uiPrefs.value.map_filter_side], () => {
+  nextTick(() => map?.resize())
+})
+
 function bboxOf() {
   const b = map.getBounds()
   return {
@@ -324,9 +436,10 @@ async function reload() {
   timelineLoading.value = true
   try {
     const [cs, hs, ps] = await Promise.all([
-      fetchClusters(bbox, zoom, from, to),
+      fetchClusters(bbox, zoom, from, to, kind.value),
+      // 直方图刻意不下发 kind：后端恒返四类计数，切类型时统计条不应跟着跳
       fetchHistogram(bbox, granularity.value).catch(() => []),
-      fetchPlaces(bbox, from, to).catch(() => [])
+      fetchPlaces(bbox, from, to, 50, kind.value).catch(() => [])
     ])
     clusters.value = cs
     buckets.value = hs
@@ -385,7 +498,7 @@ async function openCluster(props, lngLat) {
   items.value = []
   closeHover()
   try {
-    items.value = await fetchItems(bbox, range.value?.from || '', range.value?.to || '')
+    items.value = await fetchItems(bbox, range.value?.from || '', range.value?.to || '', 60, kind.value)
   } catch (e) {
     err.value = '条目加载失败'
   } finally {
@@ -436,7 +549,7 @@ function showHover(feature, clientX, clientY) {
 
   const reqId = ++hoverRequestId
   // limit 提高，支持翻书与缩略图条
-  fetchItems(bbox, range.value?.from || '', range.value?.to || '', 60)
+  fetchItems(bbox, range.value?.from || '', range.value?.to || '', 60, kind.value)
     .then((list) => {
       if (reqId !== hoverRequestId) return // 过期请求丢弃
       hoverItems.value = list
@@ -469,13 +582,14 @@ onMounted(async () => {
   setWorkerUrl('/maplibre-gl-worker.mjs')
   // 点击地图（或页面其他区域）关闭候选下拉
   document.addEventListener('click', onSearchOutside)
-  await loadIconPref()
+  // 偏好必须在建图前拿到：默认缩放是建图参数。两者各自兜底，任一失败都不影响建图
+  await Promise.all([loadIconPref(), loadUiPrefs()])
 
   map = new MapLibreMap({
     container: mapRef.value,
     style: rasterStyle,
     center: [116.397, 39.909],
-    zoom: 4,
+    zoom: uiPrefs.value.map_default_zoom ?? 4,
     transformRequest: (url) => {
       if (url.includes('/tiles/')) {
         const token = getAccessToken()
@@ -573,18 +687,68 @@ onBeforeUnmount(() => {
   clearTimeout(reloadTimer)
   clearTimeout(hoverTimer)
   clearTimeout(hoverCloseTimer)
+  clearTimeout(prefsSaveTimer)
   map?.remove()
   map = null
 })
 </script>
 
 <style scoped>
+/* 横向排布：左/右筛选栏 + 地图主区；靠 order 换边，DOM 保持不变 */
 .map-view {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   min-height: 0;
+}
+
+/* 主区自成一列（浮层/时间轴），order 恒为 1，介于左右侧栏之间 */
+.map-main {
+  position: relative;
+  order: 1;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* 桌面端筛选栏侧栏：左侧 order:0，右侧 order:2 */
+.map-dock {
+  order: 0;
+  flex: 0 0 auto;
+  padding: 12px 0 12px 12px;
+  background: var(--color-bg);
+}
+
+.map-dock--right {
+  order: 2;
+  padding: 12px 12px 12px 0;
+}
+
+/* 移动端筛选浮层：覆盖在地图上方，按偏好靠左/靠右 */
+.map-filter-overlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 8;
+  display: flex;
+  justify-content: flex-start;
+  pointer-events: none;
+}
+
+.map-filter-overlay--right {
+  justify-content: flex-end;
+}
+
+.map-filter-overlay > * {
+  pointer-events: auto;
+}
+
+/* 时间轴贴顶：order 上移（不改 DOM，MapLibre 画布容器的尺寸行为不受影响） */
+.map-timeline--top {
+  order: -1;
 }
 
 .map-canvas {
@@ -769,5 +933,10 @@ onBeforeUnmount(() => {
 .mt-icon-btn:hover {
   border-color: rgba(15, 23, 42, 0.28);
   color: #0f172a;
+}
+
+/* 顶栏第二个按钮（移动端「筛选」）不再抢 auto 外边距，与「图标」并排靠右 */
+.mt-icon-btn + .mt-icon-btn {
+  margin-left: 0;
 }
 </style>

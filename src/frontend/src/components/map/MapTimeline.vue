@@ -1,5 +1,5 @@
 <template>
-  <div class="map-timeline" :class="{ 'tl--collapsed': detailHidden }">
+  <div class="map-timeline" :class="{ 'tl--collapsed': detailHidden, 'tl--top': position === 'top' }">
     <div class="tl-head">
       <span class="tl-title">时间轴</span>
       <span v-if="!detailHidden" class="tl-range">{{ rangeLabel }}</span>
@@ -102,7 +102,8 @@ const props = defineProps({
   range: { type: Object, default: null }, // { from: ISO, to: ISO } 或 null
   loading: { type: Boolean, default: false },
   granularity: { type: String, default: 'month' }, // year|month|day（由父组件控制）
-  places: { type: Array, default: () => [] } // GET /geo/places → [{ name, count }]（底部位置罗列）
+  places: { type: Array, default: () => [] }, // GET /geo/places → [{ name, count }]（底部位置罗列）
+  position: { type: String, default: 'bottom' } // bottom|top（时间轴贴底/贴顶，由用户偏好控制）
 })
 const emit = defineEmits(['change', 'zoom', 'place'])
 
@@ -300,6 +301,12 @@ function bucketEnd(key) {
   border-top: 1px solid rgba(15, 23, 42, 0.08);
   padding: 8px 14px 10px;
   user-select: none;
+}
+
+/* 贴顶时描边翻到下方，与画布的分界线始终朝向地图 */
+.tl--top {
+  border-top: none;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .tl-head {
