@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/audit"
 	"panoalbum/internal/auth"
 )
 
@@ -18,6 +19,29 @@ import (
 type Handler struct {
 	Store  *Store
 	HLSDir string // HLS 输出根目录（./data/hls）
+	// Audit 审计写入器；可为 nil（测试/灰度时静默跳过，见 record）。
+	Audit *audit.Recorder
+}
+
+// record 写一条审计（**尽力而为**）。Audit 为 nil 时静默跳过。
+//
+// 三个坑与 media / auth / geo 的同名方法一致：公开端点要显式传 actor（本包的公开
+// 端点 token 即凭证、无 user_id，**不要**给它们写这里的 action）、detail 键名要避开
+// audit.RedactDetail 的敏感子串、不要为了清理删审计行。
+//
+// ⚠️ 本包特有的红线：**share token 绝不能进 detail**。它本身就是访问凭证
+// （公开端点无鉴权，token 即凭证），写进永久保留的审计表等于复制一份凭证；
+// 而且键名含 "token" 会被 RedactDetail 整键剔除、静默变成 {}。detail 只记非敏感元信息。
+func (h *Handler) record(c *gin.Context, action, targetType, targetID string, detail map[string]any) {
+	if h.Audit == nil {
+		return
+	}
+	e := audit.FromGin(c)
+	e.Action = action
+	e.TargetType = targetType
+	e.TargetID = targetID
+	e.Detail = detail
+	h.Audit.Record(c.Request.Context(), e)
 }
 
 // errResp 统一错误格式 {"error":{"code","message"}}。
@@ -107,6 +131,20 @@ func (h *Handler) Create(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
 		return
 	}
+	// 审计在创建成功之后。target 是**分享本身**（share/<id>）；被分享的相册/媒体 id
+	// 放在 detail 的 shared_id 里 —— 两者刻意不混用，否则"查这个分享被做了哪些操作"
+	// 与"查这个媒体被分享过几次"两个问句会互相污染。
+	//
+	// detail 里**没有 token**（它是访问凭证，且键名会命中脱敏名单被整键剔除）；
+	// passcode 用中性键名，不叫 has_password —— "password" 是脱敏子串，撞上就整键消失。
+	h.record(c, audit.ActionShareCreate, audit.TargetShare, id, map[string]any{
+		"kind":           req.Kind,
+		"shared_id":      req.TargetID,
+		"wechat":         req.IsWechat,
+		"allow_download": allowDownload,
+		"passcode":       pwdHash != nil,
+		"owner_id":       userID,
+	})
 	c.JSON(http.StatusCreated, gin.H{"id": id, "token": token, "url": shareURL(c, token)})
 }
 
@@ -156,6 +194,14 @@ func (h *Handler) Delete(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
 		return
 	}
+	// 审计在吊销成功之后（失败不写）。
+	// 吊销 = 删除 share_links 行，此后 target_id 查不回任何东西，所以 detail 要带上
+	// 能说明"吊销了谁的什么分享"的非敏感字段；**token 一律不记**（凭证 + 会被脱敏剔除）。
+	h.record(c, audit.ActionShareRevoke, audit.TargetShare, id, map[string]any{
+		"kind":      sh.Kind,
+		"shared_id": sh.TargetID,
+		"owner_id":  sh.OwnerID,
+	})
 	c.Status(http.StatusNoContent)
 }
 

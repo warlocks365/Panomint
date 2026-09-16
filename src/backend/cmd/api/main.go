@@ -195,7 +195,7 @@ func main() {
 	authed.DELETE("/albums/:id/comments/:cid", permAlbumWrite, albumsH.DeleteComment)
 
 	// Stage 2 分享（种子无 share:write，member 角色持 share:create，owner/admin 由 share:* 通配覆盖）
-	sharesH := &shares.Handler{Store: &shares.Store{Pool: pool, Albums: &albums.Store{Pool: pool}}, HLSDir: cfg.HLSDir}
+	sharesH := &shares.Handler{Store: &shares.Store{Pool: pool, Albums: &albums.Store{Pool: pool}}, HLSDir: cfg.HLSDir, Audit: auditRec}
 	permShare := auth.RequirePerm(authStore, "share:create")
 	authed.POST("/shares", permShare, sharesH.Create)
 	authed.GET("/shares", permShare, sharesH.List)
