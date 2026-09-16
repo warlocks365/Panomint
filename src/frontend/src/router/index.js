@@ -79,6 +79,12 @@ const routes = [
         path: 'people',
         name: 'people',
         component: () => import('../views/PeopleView.vue')
+      },
+      // Phase 5：账号设置（二次验证 TOTP 的启用/关闭）
+      {
+        path: 'settings',
+        name: 'settings',
+        component: () => import('../views/SettingsView.vue')
       }
     ]
   },

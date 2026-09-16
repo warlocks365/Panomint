@@ -27,6 +27,24 @@
           />
         </label>
 
+        <!-- 动态口令：仅在服务端明确要求时才出现（MFA_REQUIRED）。
+             不在页面加载时就摆出一个空格子，免得没开二次验证的人以为自己漏填了什么。
+             autocomplete="one-time-code" 让 iOS/Android 能从短信/验证码自动填充里认出它；
+             inputmode="numeric" 在手机上直接弹数字键盘。 -->
+        <label v-if="needCode" class="field">
+          <span class="field-label">动态口令</span>
+          <input
+            ref="codeInput"
+            v-model.trim="totpCode"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="7"
+            placeholder="认证器中的 6 位数字"
+          />
+          <span class="field-hint">打开认证器 App，输入当前显示的 6 位数字</span>
+        </label>
+
         <label class="remember">
           <input v-model="remember" type="checkbox" />
           <span>记住我</span>
@@ -43,9 +61,9 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
+import { useAuthStore, errCode, errMessage, MFA_REQUIRED, MFA_INVALID } from '../stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -53,18 +71,38 @@ const auth = useAuthStore()
 const email = ref('')
 const password = ref('')
 const remember = ref(true)
+const totpCode = ref('')
+const needCode = ref(false)
 const loading = ref(false)
 const errorMsg = ref('')
+const codeInput = ref(null)
 
 async function onSubmit() {
   errorMsg.value = ''
   loading.value = true
   try {
-    await auth.login(email.value, password.value, remember.value)
+    // 未要求二次验证时不传 totp_code（后端字段可选，老流程完全不受影响）
+    await auth.login(email.value, password.value, remember.value, needCode.value ? totpCode.value : '')
     router.push('/timeline')
   } catch (e) {
-    const msg = e.response?.data?.error?.message
-    errorMsg.value = msg || '登录失败，请检查网络后重试'
+    const code = errCode(e)
+    if (code === MFA_REQUIRED) {
+      // 服务端说"该账户已启用二次验证"：展开口令框并把焦点送过去，
+      // 用户不必再去猜自己为什么登不上。
+      needCode.value = true
+      errorMsg.value = errMessage(e, '该账户已启用二次验证，请输入动态口令')
+      await nextTick()
+      codeInput.value?.focus()
+    } else if (code === MFA_INVALID) {
+      // 口令错/过期：保留输入框，清空并重新聚焦，避免用户把旧码再提交一次。
+      needCode.value = true
+      totpCode.value = ''
+      errorMsg.value = errMessage(e, '动态口令不正确或已过期，请重试')
+      await nextTick()
+      codeInput.value?.focus()
+    } else {
+      errorMsg.value = errMessage(e, '登录失败，请检查网络后重试')
+    }
   } finally {
     loading.value = false
   }
@@ -130,6 +168,11 @@ async function onSubmit() {
 
 .field input:focus {
   border-color: var(--color-primary);
+}
+
+.field-hint {
+  font-size: var(--font-size-xs, 12px);
+  color: var(--color-text-secondary);
 }
 
 .remember {

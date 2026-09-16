@@ -160,7 +160,7 @@ const navItems = [
   { label: '地点', ready: false, icon: icons.place },
   { label: '标签', to: '/tags', ready: true, icon: icons.tag },
   { label: '文件夹', ready: false, icon: icons.folder },
-  { label: '设置', ready: false, icon: icons.settings }
+  { label: '设置', to: '/settings', ready: true, icon: icons.settings }
 ]
 
 function onClickOutside(e) {
