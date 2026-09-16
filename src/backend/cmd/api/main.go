@@ -350,6 +350,11 @@ func main() {
 	admin.PATCH("/users/:id", authH.UpdateUser)
 	admin.DELETE("/users/:id", authH.DeleteUser)
 	admin.GET("/roles", authH.ListRoles)
+	// 契约 §2「POST /admin/roles 新建角色 + 权限」。
+	// ⚠️ 本端点带**提权守卫**：只能授予调用者自己已拥有的权限 ——
+	// 否则只持 admin:users 的人可建含 admin:system 的角色、再建账号用它登录，完成自我提权
+	// （因为 POST /admin/users 允许按名字指定任意角色）。见 auth.PermCovered。
+	admin.POST("/roles", authH.CreateRole)
 
 	// ===== Phase 5 精选第一项：审计日志 + 管理端只读端点 =====
 	// 契约 §2 `GET /admin/audit`（分页）、§14 `GET /admin/stats`、§12 `GET /admin/jobs`。

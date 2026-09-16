@@ -2,8 +2,10 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -421,6 +423,65 @@ func (h *Handler) ListRoles(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"roles": roles, "total": len(roles)})
+}
+
+// CreateRole POST /admin/roles（需 admin:users）← {name, description?, permissions[]}
+//
+// ⚠️ **提权守卫是本端点的核心**：本端点挂在 admin:users 下（与契约一致），而
+// `POST /admin/users` 允许**按名字指定任意角色**。两者一叠加，只持 admin:users 的人就能
+// 建一个含 admin:system 的新角色 → 建一个用该角色的账号 → 登录 → 拿到 admin:system。
+// 因此这里强制一条不变量：**只能授予调用者自己已拥有的权限**（通配符展开后比较）。
+// 于是 admin:users 无法自我提权，而 owner/admin（都有 admin:*）仍可自由建角色。
+func (h *Handler) CreateRole(c *gin.Context) {
+	var in RoleInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "请求格式错误")
+		return
+	}
+	norm, err := NormalizeRoleInput(in)
+	if err != nil {
+		errResp(c, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		return
+	}
+
+	ctx := c.Request.Context()
+	callerPerms, err := h.Store.PermsOfRole(ctx, c.GetString("role"))
+	if err != nil {
+		log.Printf("auth: 查询调用者权限失败: %v", err)
+		errResp(c, http.StatusInternalServerError, "INTERNAL", "校验失败")
+		return
+	}
+	var denied []string
+	for _, p := range norm.Permissions {
+		if !PermCovered(callerPerms, p) {
+			denied = append(denied, p)
+		}
+	}
+	if len(denied) > 0 {
+		errResp(c, http.StatusForbidden, "PERM_NOT_GRANTABLE",
+			fmt.Sprintf("%s（你缺少：%s）", ErrPermNotGrantable.Error(), strings.Join(denied, ",")))
+		return
+	}
+
+	role, err := h.Store.CreateRole(ctx, norm)
+	switch {
+	case errors.Is(err, ErrRoleExists):
+		errResp(c, http.StatusConflict, "ROLE_EXISTS", ErrRoleExists.Error())
+		return
+	case errors.Is(err, ErrInvalidInput):
+		errResp(c, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		return
+	case err != nil:
+		log.Printf("auth: 创建角色失败: %v", err)
+		errResp(c, http.StatusInternalServerError, "INTERNAL", "创建失败")
+		return
+	}
+
+	// 审计：把授予的权限列表记下来 —— "谁在什么时候造了一个能删东西的角色"是权限审计最常问的问题。
+	// 键名 "permissions" 不含敏感子串，不会被 RedactDetail 剔除。
+	h.record(c, audit.ActionRoleChange, audit.TargetRole, role.Name,
+		map[string]any{"permissions": role.Perms})
+	c.JSON(http.StatusCreated, gin.H{"role": role})
 }
 
 // guardUserChange 施加"自锁 / 最后 owner"两条守卫；被拒时已写好响应并返回 false。
