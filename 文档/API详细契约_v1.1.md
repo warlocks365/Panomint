@@ -118,7 +118,7 @@ OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`
 ### GET /media
 
 时间轴分页（年/月/日/全部 + 筛选）。
-- 查询：`space=personal|shared`、`view=year|month|day|all`、`date=2026-08`、`type=photo|video|360`、`favorites=true`、`tag=`、`person=`、`cursor=`、`limit=`
+- 查询：`space=personal|shared`、`view=year|month|day|all`、`date=2026-08`、`type=photo|video|360`、`favorites=true`、`tag=`、`person=`、`cursor=`、`limit=`- **作用域（安全不变量，2026-09-16 修复跨用户越权后确立）**：`space` **缺省 = `personal` = 仅本人**，绝不等于「全部」；`space=shared` 限「该共享空间的成员或属主」（失败关闭：两者都不是则返回**空结果**，而不是所有 shared 媒体）；`space` 取枚举外值 → **400 `INVALID_PARAMS`**（且不回显 PostgreSQL 枚举原文）；无 `user_id` 身份 → **401 `UNAUTHENTICATED`**。谓词本体见 `internal/media/scope.go` 的 `scopeConds`；`GET /media`、`GET /media/date-histogram`、`GET /media/duplicates` 三处**共用同一函数**，不接受各写一份而漂移。
 
 - 响应：`{ "items": [MediaRef...], "next_cursor", "total", "buckets": [{"key":"2026-08","count":N}] }`
 
@@ -177,7 +177,8 @@ OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`
 
 工具箱·重复项目（PRD §6.16「工具箱：重复项目 / 最近删除 / 已恢复」）。按感知哈希（pHash，`media.phash`，见迁移 00024）找出**观感相同**的副本，整组返回，由用户在 UI 上确认后删除多余的。**本端点只读**：不自动删除，也不写 `media.duplicate_of`。
 
-- 权限：`media:read`（`permRead`）。作用域与 `GET /media` **完全一致**：`deleted_at IS NULL`；`space=personal` 时限定 `owner_id = 当前登录者`；`space=shared` 或省略 `space` 时不限属主（与 `GET /media` 同源口径，非本端点新增）。
+- 权限：`media:read`（`permRead`）。作用域与 `GET /media` **完全一致，且是同一个函数**（`internal/media/scope.go` 的 `scopeConds`，两端点共用而非各写一份）：`deleted_at IS NULL`；`space` 缺省 = `personal` = `owner_id = 当前登录者`；`space=shared` 限共享空间成员/属主（否则空结果）；枚举外 `space` → 400 `INVALID_PARAMS`；无身份 → 401 `UNAUTHENTICATED`。
+  > ⚠️ 历史修正：本行此前写作「`space=shared` 或省略 `space` 时不限属主」——那描述的正是**当时的越权实现**（省略 `space` 即可读到全站他人 personal 媒体，实测 viewer 账号一次拿到 95 条），已于 2026-09-16 修复。该端点原先把 `GET /media` 的谓词**抄了一份**，所以 List 侧改作用域时它不跟着改；现改为共用函数，从结构上消除这类漂移。
 
 - 查询：`threshold=`（汉明距离阈值，默认 **10**，越界钳制到 0..20）、`limit=`（返回组数上限，默认 50，越界钳制到 1..200）、`space=personal|shared`
 
