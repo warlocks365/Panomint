@@ -18,8 +18,8 @@ import (
 // Color: 色卡十六进制（仅矢量形状生效）。
 // DataURL: 自定义 PNG 的 data URL（仅 shape=custom 生效，前端限制 ≤ 512KB）。
 type MapIconPref struct {
-	Shape  string `json:"shape"`
-	Color  string `json:"color"`
+	Shape   string `json:"shape"`
+	Color   string `json:"color"`
 	DataURL string `json:"data_url,omitempty"`
 }
 

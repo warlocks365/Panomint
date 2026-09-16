@@ -21,8 +21,8 @@ import (
 
 // AmapTileProxy 高德栅格瓦片反代。
 type AmapTileProxy struct {
-	Key    string        // 可选：高德 Web 服务 Key（未配置则不附加 key 参数）
-	Client *http.Client  // 未配置时用默认 10s 超时客户端
+	Key    string       // 可选：高德 Web 服务 Key（未配置则不附加 key 参数）
+	Client *http.Client // 未配置时用默认 10s 超时客户端
 	// Style 高德瓦片样式：7=矢量无标注，8=矢量带标注（中文路网）。
 	Style string
 	// CacheDir 磁盘缓存目录（空=不缓存）。命中后不再请求上游，
@@ -76,7 +76,7 @@ func (p *AmapTileProxy) Serve(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_TILE", "message": "瓦片坐标非法"}})
 		return
 	}
-	if y >= (1 << z) || x >= (1<<z) { // 该 zoom 下的瓦片索引上界
+	if y >= (1<<z) || x >= (1<<z) { // 该 zoom 下的瓦片索引上界
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_TILE", "message": "瓦片坐标越界"}})
 		return
 	}

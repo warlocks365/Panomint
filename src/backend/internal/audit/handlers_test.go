@@ -32,6 +32,7 @@ func newTestRouter(h *Handler) *gin.Engine {
 	g.GET("/admin/audit", h.ListAudit)
 	g.GET("/admin/stats", h.Stats)
 	g.GET("/admin/jobs", h.Jobs)
+	g.GET("/admin/jobs/:id", h.GetJob)
 	return r
 }
 

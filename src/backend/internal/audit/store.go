@@ -17,9 +17,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
+
+// ErrJobNotFound 任务不存在（既不在 index_jobs 也不在 transcode_jobs）。
+// handler 据此返回 404：这是正常结果，不是服务故障。
+var ErrJobNotFound = errors.New("audit: 任务不存在")
 
 // ---------------------------------------------------------------------------
 // 对外模型
@@ -100,6 +105,7 @@ type QueryStore interface {
 	Query(ctx context.Context, f Filter) (*Page, error)
 	Stats(ctx context.Context) (*Stats, error)
 	Jobs(ctx context.Context, q JobQuery) ([]Job, error)
+	GetJob(ctx context.Context, id string) (*Job, error)
 }
 
 // PGStore PostgreSQL 实现（同时满足 RecorderStore 与 QueryStore）。
@@ -275,16 +281,41 @@ func (s *PGStore) Jobs(ctx context.Context, q JobQuery) ([]Job, error) {
 
 	out := []Job{}
 	for rows.Next() {
-		var j Job
-		if err := rows.Scan(&j.JobType, &j.ID, &j.Kind, &j.Status, &j.UserID,
-			&j.MediaID, &j.NodeID, &j.Profile, &j.ResultPath,
-			&j.Total, &j.Processed, &j.StartedAt, &j.FinishedAt, &j.CreatedAt); err != nil {
-			return nil, fmt.Errorf("audit: 扫描任务行失败: %w", err)
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
 		}
-		j.Progress = jobProgress(j.Total, j.Processed)
-		out = append(out, j)
+		out = append(out, *j)
 	}
 	return out, rows.Err()
+}
+
+// GetJob 按 id 取单条任务（契约 §12 GET /admin/jobs/:id）。
+//
+// 任务不在任何一张表里时返回 ErrJobNotFound —— handler 据此返回 404，
+// 而不是 500（"查不到"是正常结果，不是服务故障）。
+func (s *PGStore) GetJob(ctx context.Context, id string) (*Job, error) {
+	row := s.Pool.QueryRow(ctx, JobByIDSQL(), id)
+	j, err := scanJob(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrJobNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return j, nil
+}
+
+// scanJob 扫描一行任务（列表与单条查询**共用**，避免两处列顺序漂移）。
+func scanJob(row pgx.Row) (*Job, error) {
+	var j Job
+	if err := row.Scan(&j.JobType, &j.ID, &j.Kind, &j.Status, &j.UserID,
+		&j.MediaID, &j.NodeID, &j.Profile, &j.ResultPath,
+		&j.Total, &j.Processed, &j.StartedAt, &j.FinishedAt, &j.CreatedAt); err != nil {
+		return nil, fmt.Errorf("audit: 扫描任务行失败: %w", err)
+	}
+	j.Progress = jobProgress(j.Total, j.Processed)
+	return &j, nil
 }
 
 // jobProgress 计算进度（纯函数）。total 缺失或为 0 时返回 nil（不返回 0，

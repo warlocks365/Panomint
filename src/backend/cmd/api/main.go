@@ -225,6 +225,11 @@ func main() {
 		Media:    &geo.MediaStore{Pool: pool},
 		Tiles:    &geo.AmapTileProxy{Key: cfg.AmapKey, CacheDir: cfg.TileCacheDir},
 		Provider: "amap", // 底图为高德 → 对外输出 GCJ-02（库内仍存 WGS-84）
+		// GET/PUT /admin/map-config 需要：读 system_map_config 以显示"Key 从哪来、能不能用"
+		// （只暴露状态，不回显密钥），以及系统配置变更写审计。
+		MapCfg:     &geo.MapConfigStore{Pool: pool},
+		AmapKeyEnv: cfg.AmapKey,
+		Audit:      auditRec,
 	}
 	authed.GET("/geo/clusters", permRead, geoH.Clusters)
 	authed.GET("/geo/items", permRead, geoH.Items)
@@ -233,6 +238,14 @@ func main() {
 	authed.GET("/tiles/amap/:z/:x/:y", permRead, geoH.Tiles.Serve) // Key 服务端注入，前端不持 Key
 	authed.GET("/preferences/map", permRead, geoH.GetMapIconPref)  // Job000009 图标配置（账户级）
 	authed.PUT("/preferences/map", permRead, geoH.PutMapIconPref)
+
+	// 契约 §7：用户地图 UI 偏好（账户级，需登录）+ 系统地图配置（管理端）。
+	// ⚠️ `/user` 是**新前缀**，已同步加进 docker/web/Dockerfile 的纯 API 正则组 ——
+	// 漏配的话浏览器直连该路径会拿到 index.html（本项目已因此踩坑三次）。
+	authed.GET("/user/ui-prefs", permRead, geoH.GetUIPrefs) // {map_slider_pos,map_filter_side,map_default_provider,map_default_zoom}
+	authed.PUT("/user/ui-prefs", permRead, geoH.PutUIPrefs)
+	authed.GET("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.GetMapConfig)
+	authed.PUT("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.PutMapConfig)
 
 	// 契约 §7：模糊地理搜索 + 可用底图（读 media:read）。
 	// ⚠️ 该端点会打上游（中国走高德 / 国际走 Nominatim）并按 q 落 geo_cache ——
@@ -350,6 +363,8 @@ func main() {
 	admin.GET("/audit", auditH.ListAudit)
 	authed.GET("/admin/stats", auth.RequirePerm(authStore, "admin:system"), auditH.Stats)
 	authed.GET("/admin/jobs", auth.RequirePerm(authStore, "admin:system"), auditH.Jobs)
+	// 契约 §12 的 `GET /admin/jobs/:id`（此前只是契约里的悬空引用，本轮补上实现）
+	authed.GET("/admin/jobs/:id", auth.RequirePerm(authStore, "admin:system"), auditH.GetJob)
 
 	h := &health.Handler{Pool: pool, Queue: q, DiskCheckDir: "./data"}
 	r.GET("/health", h.Live)

@@ -275,6 +275,31 @@ func (h *Handler) Jobs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": jobs, "limit": clampJobsLimit(q.Limit)})
 }
 
+// GetJob GET /admin/jobs/:id（需 admin:system）→ 单条任务（契约 §12）。
+//
+// 与列表端点同权限：能看整张任务表的人，当然也能看其中一条。
+//
+// ⚠️ 先校验 UUID 格式：id 进 SQL 时带 `::uuid` 转换，格式不对会让 PG 抛类型错误
+// → 落进 default 分支变成 **500**。那会把"调用方传错 id"伪装成"服务故障"。
+func (h *Handler) GetJob(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if !uuidRe.MatchString(id) {
+		fail(c, http.StatusBadRequest, CodeInvalidInput, "任务 id 必须是 UUID")
+		return
+	}
+	j, err := h.Store.GetJob(c.Request.Context(), id)
+	if errors.Is(err, ErrJobNotFound) {
+		fail(c, http.StatusNotFound, "JOB_NOT_FOUND", "任务不存在")
+		return
+	}
+	if err != nil {
+		log.Printf("audit: 查询任务失败: %v", err)
+		fail(c, http.StatusInternalServerError, CodeInternal, "查询任务失败")
+		return
+	}
+	c.JSON(http.StatusOK, j)
+}
+
 // parseJobQuery 解析并校验 /admin/jobs 的查询参数。
 func parseJobQuery(c *gin.Context) (JobQuery, error) {
 	var q JobQuery

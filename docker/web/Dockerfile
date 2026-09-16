@@ -77,7 +77,7 @@ server {
     # compute-nodes：T6.2 算力节点。⚠️ 节点侧 /compute-nodes/agent/* 也在同一前缀下，
     #   必须整体透传（否则 POST 落到静态目录 → nginx 返回 405，实测踩过）
     # tags / map 不在此列——它们同时是前端路由，已上移到上面的导航判别组
-    location ~ ^/(auth|media|transcode|shares|public|admin|health|ready|metrics|geo|tiles|preferences|ai|bandwidth|compute-nodes)(/|$) {
+    location ~ ^/(auth|media|transcode|shares|public|admin|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes)(/|$) {
         proxy_pass http://api:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

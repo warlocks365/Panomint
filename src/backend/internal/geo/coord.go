@@ -5,7 +5,7 @@ package geo
 import "math"
 
 const (
-	earthA  = 6378245.0             // 克拉索夫斯基椭球长半轴
+	earthA  = 6378245.0              // 克拉索夫斯基椭球长半轴
 	earthEE = 0.00669342162296594323 // 偏心率平方
 )
 

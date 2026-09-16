@@ -154,9 +154,18 @@ CREATE TABLE system_map_config (
 
     intl_tile_url       TEXT,                               -- 国际瓦片/样式 URL
 
+    -- ⚠️ 恒为 true，配合下面的唯一索引把本表钉成**单行**配置（迁移 00023 引入）。
+    -- 缺了它，"单行"就只是读侧靠 ORDER BY updated_at DESC LIMIT 1 维持的隐式约定：
+    -- 一旦出现两行，"哪条生效"取决于 updated_at 精度与写入顺序，极难排查。
+    singleton           BOOLEAN NOT NULL DEFAULT true,
+
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 
 );
+
+-- 把 system_map_config 钉成单行（迁移 00023）：写侧据此用 ON CONFLICT (singleton) 做原子 upsert，
+-- 不必"先查再改"（那在并发下会竞态）。
+CREATE UNIQUE INDEX idx_system_map_config_singleton ON system_map_config(singleton);
 
 
 

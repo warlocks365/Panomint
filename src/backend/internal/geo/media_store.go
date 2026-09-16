@@ -60,12 +60,12 @@ type MediaPoint struct {
 
 // Bucket 时间直方图桶（Job000009 扩展：四类媒体分类计数，count=四类之和保持向后兼容）。
 type Bucket struct {
-	Bucket      string `json:"bucket"`
-	Count       int    `json:"count"`        // 四类之和（向后兼容旧前端）
-	Photos      int    `json:"photos"`       // type=photo && !is_360
-	Videos      int    `json:"videos"`       // type=video && !is_360
-	PanoPhotos  int    `json:"pano_photos"`  // type=photo && is_360
-	PanoVideos  int    `json:"pano_videos"`  // type=video && is_360
+	Bucket     string `json:"bucket"`
+	Count      int    `json:"count"`       // 四类之和（向后兼容旧前端）
+	Photos     int    `json:"photos"`      // type=photo && !is_360
+	Videos     int    `json:"videos"`      // type=video && !is_360
+	PanoPhotos int    `json:"pano_photos"` // type=photo && is_360
+	PanoVideos int    `json:"pano_videos"` // type=video && is_360
 }
 
 // MediaStore 媒体库空间数据访问（数据源：media.gps）。

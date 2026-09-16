@@ -169,6 +169,32 @@ type JobQuery struct {
 	Limit int
 }
 
+// 两个 UNION 分支的列形状 —— **单一事实来源**。
+//
+// 列表查询（BuildJobsSQL）与单条查询（JobByIDSQL）共用这两个常量：
+// 14 列的 UNION 写错一列或错一个类型，只会在**运行时**报错（不是编译期），
+// 因此刻意只维护一份，避免两处漂移。
+const (
+	indexJobBranch = `SELECT 'index'::text AS job_type, id::text AS id, kind, status, user_id::text AS user_id,
+       NULL::text AS media_id, NULL::text AS node_id, NULL::text AS profile, NULL::text AS result_path,
+       total, processed, started_at, finished_at, created_at
+FROM index_jobs`
+
+	transcodeJobBranch = `SELECT 'transcode'::text AS job_type, id::text AS id, kind, status, NULL::text AS user_id,
+       media_id::text AS media_id, node_id::text AS node_id, profile, result_path,
+       NULL::int AS total, NULL::int AS processed, NULL::timestamptz AS started_at, NULL::timestamptz AS finished_at, created_at
+FROM transcode_jobs`
+)
+
+// JobByIDSQL 按 id 取**单条**任务（契约 §12 的 GET /admin/jobs/:id）。
+//
+// 两张表的 id 各自独立生成（uuid_generate_v4），理论上可能撞号，故 UNION ALL 后 LIMIT 1；
+// 撞号概率可忽略，且真撞上也只是取到其中一条而非报错。
+func JobByIDSQL() string {
+	return "SELECT * FROM (" + indexJobBranch + " WHERE id = $1::uuid" +
+		" UNION ALL " + transcodeJobBranch + " WHERE id = $1::uuid" + ") j LIMIT 1"
+}
+
 // BuildJobsSQL 生成 index_jobs / transcode_jobs 的 UNION ALL 视图查询。
 //
 // 两张表的列集不同（index 有 total/processed 与触发者 user_id；transcode 有
@@ -187,23 +213,14 @@ func BuildJobsSQL(q JobQuery) (string, []any) {
 		statusCond = fmt.Sprintf(" WHERE status = $%d", len(args))
 	}
 
-	const indexBranch = `SELECT 'index'::text AS job_type, id::text AS id, kind, status, user_id::text AS user_id,
-       NULL::text AS media_id, NULL::text AS node_id, NULL::text AS profile, NULL::text AS result_path,
-       total, processed, started_at, finished_at, created_at
-FROM index_jobs`
-	const transcodeBranch = `SELECT 'transcode'::text AS job_type, id::text AS id, kind, status, NULL::text AS user_id,
-       media_id::text AS media_id, node_id::text AS node_id, profile, result_path,
-       NULL::int AS total, NULL::int AS processed, NULL::timestamptz AS started_at, NULL::timestamptz AS finished_at, created_at
-FROM transcode_jobs`
-
 	var branches []string
 	switch q.JobType {
 	case "index":
-		branches = []string{indexBranch + statusCond}
+		branches = []string{indexJobBranch + statusCond}
 	case "transcode":
-		branches = []string{transcodeBranch + statusCond}
+		branches = []string{transcodeJobBranch + statusCond}
 	default: // "" / "all"
-		branches = []string{indexBranch + statusCond, transcodeBranch + statusCond}
+		branches = []string{indexJobBranch + statusCond, transcodeJobBranch + statusCond}
 	}
 
 	args = append(args, clampJobsLimit(q.Limit))

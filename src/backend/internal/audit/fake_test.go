@@ -49,6 +49,8 @@ type fakeStore struct {
 	jobsErr    error
 	lastFilter Filter
 	lastJobQ   JobQuery
+	// lastJobID 记录 GetJob 收到的 id，供单条端点测试断言参数传递。
+	lastJobID string
 
 	page  *Page
 	stats *Stats
@@ -127,6 +129,30 @@ func (f *fakeStore) Jobs(_ context.Context, q JobQuery) ([]Job, error) {
 		return f.jobs, nil
 	}
 	return []Job{}, nil
+}
+
+// GetJob 单条任务（GET /admin/jobs/:id）。与 Jobs 共用 jobsErr/jobs 注入点，
+// 便于同一套假数据同时驱动"列表"与"单条"两条路径。
+func (f *fakeStore) GetJob(_ context.Context, id string) (*Job, error) {
+	f.mu.Lock()
+	f.lastJobID = id
+	f.mu.Unlock()
+	if f.jobsErr != nil {
+		return nil, f.jobsErr
+	}
+	for i := range f.jobs {
+		if f.jobs[i].ID == id {
+			return &f.jobs[i], nil
+		}
+	}
+	return nil, ErrJobNotFound
+}
+
+// jobID 取最近一次 GetJob 的入参。
+func (f *fakeStore) jobID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastJobID
 }
 
 func (f *fakeStore) entries() []Entry {
