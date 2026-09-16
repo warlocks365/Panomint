@@ -400,6 +400,12 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		errResp(c, http.StatusConflict, "CREATE_FAILED", "创建失败（邮箱可能已存在）")
 		return
 	}
+	// 审计在创建成功之后（失败不写：会给"谁建了这个账号"留下不存在的账号）。
+	// detail **只记邮箱与角色，绝不记 password** —— 审计表永久保留，
+	// 密码即便被 bcrypt 散列也不该在这里出现第二份。
+	// email / role 两个键名都不含脱敏子串，不会被 RedactDetail 剔除。
+	h.record(c, audit.ActionUserCreate, audit.TargetUser, id,
+		map[string]any{"email": req.Email, "role": req.Role})
 	c.JSON(http.StatusCreated, gin.H{"id": id})
 }
 
