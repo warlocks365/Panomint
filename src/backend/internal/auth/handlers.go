@@ -39,10 +39,24 @@ func (h *Handler) issuer() string {
 // 且 internal/audit.RedactDetail 只会剔除"键名命中敏感词"的项 —— 与其依赖它兜住，
 // 不如从一开始就不传（下方各调用点都只传非敏感元信息）。
 func (h *Handler) record(c *gin.Context, action, targetType, targetID string, detail map[string]any) {
+	h.recordAs(c, "", action, targetType, targetID, detail)
+}
+
+// recordAs 同 record，但可**显式指定触发者**。
+//
+// ⚠️ 公开端点必须用它：`/auth/login` 没有鉴权中间件，上下文里根本没有 `user_id`
+// （FromGin 取到的是空串 → 落库为 NULL）。不显式传的话，"谁登录了"在审计里就是 NULL，
+// 按 actor 查"某人的全部登录记录"永远查不到 —— 审计表里全是 target_id 而没有主体。
+// 这个问题不会报错、只会静默丢字段（同 "mfa" 键被脱敏吃掉那类），所以单列一个方法并在
+// verify_admin_users.py 里钉了断言。
+func (h *Handler) recordAs(c *gin.Context, actor, action, targetType, targetID string, detail map[string]any) {
 	if h.Audit == nil {
 		return
 	}
 	e := audit.FromGin(c)
+	if actor != "" {
+		e.ActorUserID = actor
+	}
 	e.Action = action
 	e.TargetType = targetType
 	e.TargetID = targetID
@@ -131,10 +145,14 @@ func (h *Handler) Login(c *gin.Context) {
 	// 登录成功写审计（**失败登录刻意不写**：那是日志与限流的职责，
 	// 且写失败登录会让"任何人可写审计表"成为一个滥用面 —— 见 internal/audit 的既有决定）。
 	//
+	// ⚠️ 必须用 recordAs 显式传 actor：本端点是**公开**的（没有 AuthRequired），
+	// 上下文里没有 user_id —— 用 record 会把触发者记成 NULL。
+	//
 	// ⚠️ 键名不能叫 "mfa"：audit.RedactDetail 按**键名子串**脱敏，而 "mfa" 在敏感词表里，
 	// 于是 detail 会被整键剔除、只剩 `{}`（实测确认过）。这类"合法元数据被脱敏吃掉"的问题
 	// 不会报错、只会静默丢字段，所以审计 detail 的键名要避开敏感子串。
-	h.record(c, audit.ActionLogin, audit.TargetUser, u.ID, map[string]any{"second_factor": u.MFAEnabled})
+	h.recordAs(c, u.ID, audit.ActionLogin, audit.TargetUser, u.ID,
+		map[string]any{"second_factor": u.MFAEnabled})
 	c.JSON(http.StatusOK, tokenPair{access, refresh, int64(AccessTTL.Seconds()), "Bearer"})
 }
 
