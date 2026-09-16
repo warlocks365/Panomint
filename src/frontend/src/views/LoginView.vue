@@ -36,6 +36,7 @@
           <input
             ref="codeInput"
             v-model.trim="totpCode"
+            data-testid="login-totp"
             type="text"
             inputmode="numeric"
             autocomplete="one-time-code"
@@ -50,9 +51,9 @@
           <span>记住我</span>
         </label>
 
-        <p v-if="errorMsg" class="error-msg">{{ errorMsg }}</p>
+        <p v-if="errorMsg" class="error-msg" data-testid="login-error">{{ errorMsg }}</p>
 
-        <button class="submit-btn" type="submit" :disabled="loading">
+        <button class="submit-btn" data-testid="login-submit" type="submit" :disabled="loading">
           {{ loading ? '登录中…' : '登录' }}
         </button>
       </form>

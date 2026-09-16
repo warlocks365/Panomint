@@ -28,14 +28,14 @@
     <section class="card">
       <div class="card-head">
         <h2 class="card-title">二次验证（TOTP）</h2>
-        <span class="state" :class="stateClass">{{ stateLabel }}</span>
+        <span class="state" :class="stateClass" data-testid="mfa-state">{{ stateLabel }}</span>
       </div>
       <p class="card-desc">
         在认证器 App（Google Authenticator / Authy / 1Password / Bitwarden 等）里添加本账号，
         之后登录时除密码外还需输入 App 显示的 6 位动态口令。即使密码泄漏，攻击者仍进不来。
       </p>
 
-      <p v-if="msg" class="msg" :class="msgKind === 'error' ? 'msg--error' : 'msg--ok'">{{ msg }}</p>
+      <p v-if="msg" class="msg" :class="msgKind === 'error' ? 'msg--error' : 'msg--ok'" data-testid="mfa-msg">{{ msg }}</p>
 
       <!-- ① 已启用：关闭入口 -->
       <template v-if="auth.mfaEnabled">
@@ -44,6 +44,7 @@
             <span class="inline-label">当前动态口令</span>
             <input
               v-model.trim="code"
+              data-testid="mfa-disable-code"
               type="text"
               inputmode="numeric"
               autocomplete="one-time-code"
@@ -51,7 +52,7 @@
               placeholder="6 位数字"
             />
           </label>
-          <button class="btn btn--danger" :disabled="busy || !code" @click="onDisable">
+          <button class="btn btn--danger" data-testid="mfa-disable" :disabled="busy || !code" @click="onDisable">
             {{ busy ? '处理中…' : '关闭二次验证' }}
           </button>
         </div>
@@ -64,7 +65,7 @@
       <template v-else>
         <!-- 密钥只在生成时下发一次；刷新后拿不到，必须让用户能重新生成，否则会卡死在这里 -->
         <div v-if="!setup" class="actions">
-          <button class="btn" :disabled="busy" @click="onStartSetup">
+          <button class="btn" data-testid="mfa-setup" :disabled="busy" @click="onStartSetup">
             {{ busy ? '生成中…' : (auth.mfaPending ? '重新生成密钥' : '启用二次验证') }}
           </button>
           <p v-if="auth.mfaPending" class="hint hint--warn">
@@ -78,7 +79,7 @@
             <li>
               <span class="step-label">在认证器里手动输入这个密钥</span>
               <div class="secret-box">
-                <code class="secret" ref="secretEl">{{ groupedSecret }}</code>
+                <code class="secret" ref="secretEl" data-testid="mfa-secret">{{ groupedSecret }}</code>
                 <button class="btn btn--ghost" type="button" @click="onCopy">{{ copyLabel }}</button>
               </div>
               <p class="hint">
@@ -96,16 +97,17 @@
               <div class="actions">
                 <input
                   v-model.trim="code"
+                  data-testid="mfa-confirm-code"
                   type="text"
                   inputmode="numeric"
                   autocomplete="one-time-code"
                   maxlength="7"
                   placeholder="6 位数字"
                 />
-                <button class="btn" :disabled="busy || !code" @click="onConfirm">
+                <button class="btn" data-testid="mfa-confirm" :disabled="busy || !code" @click="onConfirm">
                   {{ busy ? '校验中…' : '确认启用' }}
                 </button>
-                <button class="btn btn--ghost" :disabled="busy" @click="onCancelSetup">取消</button>
+                <button class="btn btn--ghost" data-testid="mfa-cancel" :disabled="busy" @click="onCancelSetup">取消</button>
               </div>
               <p class="hint">
                 确认前二次验证<b>不会生效</b>，所以就算这一步失败，你依然可以用密码正常登录。
