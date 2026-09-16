@@ -19,38 +19,37 @@ type Store struct {
 
 // ListParams GET /media 查询参数（对齐 API §3 契约）。
 type ListParams struct {
-	Space     string // personal|shared
-	View      string // year|month|day|all
-	Date      string // YYYY / YYYY-MM / YYYY-MM-DD
-	Type      string // photo|video|360
+	Scope     MediaScope // 空间作用域（唯一真源，见 scope.go；零值会被收敛为空结果）
+	View      string     // year|month|day|all
+	Date      string     // YYYY / YYYY-MM / YYYY-MM-DD
+	Type      string     // photo|video|360
 	Favorites bool
 	Tag       string
 	Person    string
 	Place     string
 	Cursor    string
 	Limit     int
-	OwnerID   string
 	Folder    string // 目录前缀过滤（folder_path = Folder 或 Folder/ 前缀子目录）
 }
 
 // MediaRef 时间轴条目（契约 MediaRef 轻量结构）。
 type MediaRef struct {
-	ID          string     `json:"id"`
-	Type        string     `json:"type"`
-	Filename    string     `json:"filename"`
-	FolderPath  string     `json:"folder_path"`
-	TakenAt     time.Time  `json:"taken_at"`
-	Width       *int       `json:"width,omitempty"`
-	Height      *int       `json:"height,omitempty"`
-	Duration    *float64   `json:"duration,omitempty"`
-	Codec       *string    `json:"codec,omitempty"`
-	Is360       bool       `json:"is_360"`
-	Place       *string    `json:"place,omitempty"`
-	Rating      *int       `json:"rating,omitempty"`
-	ThumbnailSM *string    `json:"thumbnail_sm,omitempty"`
-	ThumbnailMD *string    `json:"thumbnail_md,omitempty"`
-	ThumbnailLG *string    `json:"thumbnail_lg,omitempty"`
-	Score       *float64   `json:"score,omitempty"` // 搜索相关度（仅 /search 带 q 时挂载）
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	Filename    string    `json:"filename"`
+	FolderPath  string    `json:"folder_path"`
+	TakenAt     time.Time `json:"taken_at"`
+	Width       *int      `json:"width,omitempty"`
+	Height      *int      `json:"height,omitempty"`
+	Duration    *float64  `json:"duration,omitempty"`
+	Codec       *string   `json:"codec,omitempty"`
+	Is360       bool      `json:"is_360"`
+	Place       *string   `json:"place,omitempty"`
+	Rating      *int      `json:"rating,omitempty"`
+	ThumbnailSM *string   `json:"thumbnail_sm,omitempty"`
+	ThumbnailMD *string   `json:"thumbnail_md,omitempty"`
+	ThumbnailLG *string   `json:"thumbnail_lg,omitempty"`
+	Score       *float64  `json:"score,omitempty"` // 搜索相关度（仅 /search 带 q 时挂载）
 	// SemanticOnly 仅由语义召回命中（未命中任何文本 token 条件）。
 	// 仅 /search 且启用语义召回时挂载；前端据此标注"语义匹配"。
 	SemanticOnly bool `json:"semantic_only,omitempty"`
@@ -83,12 +82,12 @@ func (p *ListParams) buildWhere() (string, []any) {
 	}
 
 	conds = append(conds, "m.deleted_at IS NULL")
-	if p.OwnerID != "" {
-		add("m.owner_id = $%d", p.OwnerID)
-	}
-	if p.Space != "" {
-		add("m.space = $%d", p.Space)
-	}
+	// 空间作用域：**必须最先追加**，因为 scopeConds 的占位符从 $1 起编号；
+	// 其余条件靠 len(args) 续编，故顺序是正确性的一部分，不是风格问题。
+	// 谓词本体与安全规则见 scope.go（唯一真源，三个端点共用，避免各写一份而漂移）。
+	scopeWhere, scopeArgs := scopeConds(p.Scope)
+	args = append(args, scopeArgs...)
+	conds = append(conds, scopeWhere...)
 	if p.Folder != "" {
 		// 目录过滤：精确匹配或子目录前缀（G3 文件夹视图需求）
 		args = append(args, p.Folder)

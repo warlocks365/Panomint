@@ -62,8 +62,7 @@ func (e *TooManyMediaError) Error() string {
 
 // DuplicateParams GET /media/duplicates 查询参数（作用域字段语义与 ListParams 一致）。
 type DuplicateParams struct {
-	Space     string // personal|shared；空=不过滤空间
-	OwnerID   string // 仅 space=personal 时由 handler 填入，与 List 同口径
+	Scope     MediaScope // 空间作用域（唯一真源，见 scope.go；零值会被收敛为空结果）
 	Threshold int
 	Limit     int
 }
@@ -238,25 +237,20 @@ func groupDuplicates(items []dupCandidate, threshold int) []DuplicateGroup {
 
 // duplicateUniverseWhere 组装候选宇宙过滤条件。
 //
-// ⚠️ 作用域谓词**与 media.List 的 buildWhere 逐字一致**
-// （timeline.go:85 `m.deleted_at IS NULL`、:86-88 `m.owner_id = $N`、:89-91 `m.space = $N`），
-// 只在末尾追加 `m.phash IS NOT NULL`（本端点特有的"必须已算出指纹"）。
-// 必须与 List 同步演进：若那边加了共享空间可见性规则而这里没跟上，
-// 就是一个用户的媒体出现在另一个用户去重结果里的越权泄漏。
+// 作用域谓词**直接复用 scopeConds**（scope.go 的唯一真源），只在末尾追加
+// `m.phash IS NOT NULL`（本端点特有的"必须已算出指纹"）。
 //
-// 已知的继承口径：List 仅在 space=personal 时按 owner 过滤（handlers.go:38-42 记录的决策），
-// 故 space 为空或 shared 时不限属主 —— 与 List 同源，非本端点新引入的规则。
+// 这里曾经是"逐字抄一份 List 的谓词"，并在注释里写下"必须与 List 同步演进"——
+// 事实证明了那句警告不够用：List 侧修改作用域时这里很容易被漏掉，而漏掉的后果是
+// 一个用户的媒体出现在另一个用户的去重结果里（实测 viewer 账号确实拿到了
+// owner 的 3 个重复组 / 6 条媒体 ID）。现在改为**共用同一个函数**，
+// 从结构上消除漂移的可能，而不是靠注释提醒。
 func duplicateUniverseWhere(p DuplicateParams) (string, []any) {
-	conds := []string{"m.deleted_at IS NULL", "m.phash IS NOT NULL"}
-	var args []any
-	if p.OwnerID != "" {
-		args = append(args, p.OwnerID)
-		conds = append(conds, fmt.Sprintf("m.owner_id = $%d", len(args)))
-	}
-	if p.Space != "" {
-		args = append(args, p.Space)
-		conds = append(conds, fmt.Sprintf("m.space = $%d", len(args)))
-	}
+	conds := []string{"m.deleted_at IS NULL"}
+	// 作用域谓词最先追加，占位符从 $1 起编号（见 scopeConds 的调用约定）
+	scopeWhere, args := scopeConds(p.Scope)
+	conds = append(conds, scopeWhere...)
+	conds = append(conds, "m.phash IS NOT NULL")
 	return strings.Join(conds, " AND "), args
 }
 
