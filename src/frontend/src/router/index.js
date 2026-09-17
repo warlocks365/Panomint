@@ -80,6 +80,12 @@ const routes = [
         name: 'people',
         component: () => import('../views/PeopleView.vue')
       },
+      // PRD §6.16 工具箱（重复项目 / 最近删除 / 已恢复）
+      {
+        path: 'toolbox',
+        name: 'toolbox',
+        component: () => import('../views/ToolboxView.vue')
+      },
       // Phase 5：账号设置（二次验证 TOTP 的启用/关闭）
       {
         path: 'settings',

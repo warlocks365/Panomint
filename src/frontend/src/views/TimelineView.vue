@@ -55,12 +55,13 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import TimelineGrid from '../components/timeline/TimelineGrid.vue'
 import MediaViewer from '../components/viewer/MediaViewer.vue'
 import TrashPanel from '../components/timeline/TrashPanel.vue'
 
+const route = useRoute()
 const router = useRouter()
 
 const typeFilter = ref('')
@@ -100,6 +101,11 @@ function onDeleted(id) {
 function onRestored() {
   gridRef.value?.reload()
 }
+
+// 工具箱「最近删除」标签带 ?trash=1 进来，直接展开面板（否则用户还得在工具栏里再找一次按钮）
+onMounted(() => {
+  if (route.query.trash === '1') trashOpen.value = true
+})
 </script>
 
 <style scoped>

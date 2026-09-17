@@ -149,7 +149,9 @@ const icons = {
   settings:
     '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6L11 5M5 11l-1.4 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   map:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 4l4-1.5 4 1.5 4-1.5v10L10 14l-4-1.5L2 14V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 2.5v11M10 4v11" stroke="currentColor" stroke-width="1.4"/></svg>'
+    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 4l4-1.5 4 1.5 4-1.5v10L10 14l-4-1.5L2 14V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 2.5v11M10 4v11" stroke="currentColor" stroke-width="1.4"/></svg>',
+  toolbox:
+    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><rect x="2" y="5.5" width="12" height="8.5" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M6 5.5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5M2 9h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'
 }
 
 const navItems = [
@@ -160,6 +162,7 @@ const navItems = [
   { label: '地点', ready: false, icon: icons.place },
   { label: '标签', to: '/tags', ready: true, icon: icons.tag },
   { label: '文件夹', ready: false, icon: icons.folder },
+  { label: '工具箱', to: '/toolbox', ready: true, icon: icons.toolbox },
   { label: '设置', to: '/settings', ready: true, icon: icons.settings }
 ]
 
