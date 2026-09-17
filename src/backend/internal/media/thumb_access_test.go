@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // 缩略图越权修复的回归网。
@@ -114,6 +115,42 @@ func TestThumbAccessDBErrorIs500(t *testing.T) {
 	}
 	if code, _ := errEnvelope(t, rec); code != "QUERY_FAILED" {
 		t.Fatalf("错误码应为 QUERY_FAILED，实际 %q", code)
+	}
+}
+
+// 回归：media.id 是 UUID 列，畸形 id 会让 PG 报 22P02。
+// 改造前 Thumb 对这个错误走的是 `err != nil → 404`；若现在变成 500，不但行为回退，
+// 还会把 `invalid input syntax for type uuid` 连同类型线索写进响应。
+func TestThumbMalformedIDIs404Not500(t *testing.T) {
+	c, rec := thumbCtx()
+	writeThumbAccessError(c, &pgconn.PgError{
+		Code:    "22P02",
+		Message: `invalid input syntax for type uuid: "garbage"`,
+	})
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("畸形 id 应 404（改造前即如此），实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	// 与「不存在」逐字节同形，且不得透出 PG 原文
+	cb, rb := thumbCtx()
+	thumbNotFound(cb)
+	if rec.Body.String() != rb.Body.String() {
+		t.Fatalf("畸形 id 的响应必须与「不存在」同形\n畸形=%s\n不存在=%s", rec.Body.String(), rb.Body.String())
+	}
+	for _, leak := range []string{"uuid", "invalid input", "22P02", "syntax", "QUERY_FAILED"} {
+		if strings.Contains(rec.Body.String(), leak) {
+			t.Fatalf("响应泄露 PG 原文（%q）: %s", leak, rec.Body.String())
+		}
+	}
+}
+
+func TestIsMalformedID(t *testing.T) {
+	if !isMalformedID(&pgconn.PgError{Code: "22P02"}) {
+		t.Fatal("22P02 应判为畸形 id")
+	}
+	for _, err := range []error{nil, errors.New("db down"), &pgconn.PgError{Code: "23505"}} {
+		if isMalformedID(err) {
+			t.Fatalf("%v 不该判为畸形 id（否则真实故障会被伪装成 404）", err)
+		}
 	}
 }
 
