@@ -307,20 +307,50 @@ func (s *Store) SetTagReviewed(ctx context.Context, id string, confirmed bool) (
 	return ct.RowsAffected() > 0, nil
 }
 
-// ListMediaByTag 按标签分页浏览媒体（仅已确认关联）；复合游标风格与时间轴一致。
-func (s *Store) ListMediaByTag(ctx context.Context, tagID, cursor string, limit int) (*ListResult, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	where := "m.deleted_at IS NULL AND mt.tag_id = $1 AND mt.confirmed = true"
-	args := []any{tagID}
+// buildTagMediaWhere 组装 GET /tags/:id/media 的 WHERE 与参数。
+//
+// 可见性：tags 表**全局无 owner**（见文件头注释），所以不能按标签归属过滤，
+// 必须按 **media 的可见性**过滤 —— 谓词直接复用 scopeConds（scope.go 的唯一真源），
+// 与 GET /media 完全同口径：space 缺省 = personal；枚举外取值在 handler 层 400；
+// 零值/未解析作用域收敛为恒假（fail-closed），后果是**空列表**而不是全库。
+//
+// 修复前这里只有 `deleted_at + tag_id + confirmed`，**没有任何可见性条件**，
+// 实测 viewer 账号能拿到 owner 的媒体（2025-07-教会山-010.jpg）。
+//
+// ⚠️ 调用约定（正确性的一部分，不是风格问题）：作用域 args **必须最先追加**，
+// 因为 scopeConds 的占位符从 $1 起编号；tag/cursor 条件一律按 len(args) 续编。
+// 编号错了只会在**运行期**报 `expected N arguments`，编译期与静态阅读都看不出来。
+func buildTagMediaWhere(scope MediaScope, tagID, cursor string) (string, []any, error) {
+	conds := []string{"m.deleted_at IS NULL"}
+	args := []any{}
+	scopeWhere, scopeArgs := scopeConds(scope)
+	args = append(args, scopeArgs...)
+	conds = append(conds, scopeWhere...)
+
+	args = append(args, tagID)
+	conds = append(conds, fmt.Sprintf("mt.tag_id = $%d", len(args)))
+	conds = append(conds, "mt.confirmed = true")
+
 	if cursor != "" {
 		t, id, err := decodeCursor(cursor)
 		if err != nil {
-			return nil, errors.New("无效游标")
+			return "", nil, errors.New("无效游标")
 		}
 		args = append(args, t, id)
-		where += fmt.Sprintf(" AND (m.taken_at, m.id) < ($%d, $%d)", len(args)-1, len(args))
+		conds = append(conds, fmt.Sprintf("(m.taken_at, m.id) < ($%d, $%d)", len(args)-1, len(args)))
+	}
+	return strings.Join(conds, " AND "), args, nil
+}
+
+// ListMediaByTag 按标签分页浏览媒体（仅已确认关联）；复合游标风格与时间轴一致。
+// 可见性口径见 buildTagMediaWhere：scope 由 handler 解析后传入，零值（未解析）即空结果。
+func (s *Store) ListMediaByTag(ctx context.Context, scope MediaScope, tagID, cursor string, limit int) (*ListResult, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	where, args, err := buildTagMediaWhere(scope, tagID, cursor)
+	if err != nil {
+		return nil, err
 	}
 	var total int
 	if err := s.Pool.QueryRow(ctx,

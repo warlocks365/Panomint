@@ -241,6 +241,17 @@ func (s *Store) Purge(ctx context.Context, id string) (string, error) {
 // **没有 folder_path**，于是回收站的 folder_path 恒为 ""（与列表页不一致，属历史漂移）。
 // 收拢后回收站也带上真实 folder_path —— 这是"同一份清单"的必然结果，
 // 若保留旧的 13 列，就又是一份私有副本。
+//
+// ⚠️ WHERE 口径说明（**有意保持现状，勿为「与 scopeConds 一致」而改**）：
+// 本查询是 `deleted_at IS NOT NULL AND owner_id = $1`，**已绑定调用者**（$1 = 当前 user_id），
+// 不返回任何他人媒体，不存在越权泄漏。它与 scopeConds（/media 系列）相比确实少了
+// `space = 'personal'` 一臂，但那不是遗漏：
+//   - 回收站的语义是「**我的**已删媒体」，不是「某个空间的已删媒体」；
+//   - 若补上 space = 'personal'，我在共享空间里删掉的照片会从回收站里**消失**，
+//     而恢复接口按 id 走、用户已看不到它，于是**再也无法恢复** —— 这是实打实的功能回退；
+//   - 该改动换不来任何安全收益（查询本就 owner-bound），纯负收益。
+//
+// 因此这里保留现状。将来若要改，必须先有「共享空间回收站」的产品语义，而不是"一致性"。
 func (s *Store) ListTrash(ctx context.Context, ownerID string) (*ListResult, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT `+MediaRefColumns+`

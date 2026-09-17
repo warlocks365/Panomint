@@ -339,9 +339,18 @@ func (h *Handler) ConfirmMediaTags(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"media_id": mediaID, "confirmed": n})
 }
 
-// ListTagMedia GET /tags/:id/media?cursor=&limit=：按标签浏览（仅已确认关联）。
+// ListTagMedia GET /tags/:id/media?cursor=&limit=&space=：按标签浏览（仅已确认关联）。
 // 标签不存在时 404，避免与「标签存在但无已确认媒体」返回的空列表混淆。
+//
+// 可见性：与 GET /media 同口径（ResolveMediaScope + scopeConds）：space 缺省 = 本人个人空间
+// （**不是「全部」**），枚举外取值 400 INVALID_PARAMS。tags 表全局无 owner，故按
+// **media 的可见性**收窄，而不是按标签归属（见 tags.go 的 buildTagMediaWhere）。
 func (h *Handler) ListTagMedia(c *gin.Context) {
+	scope, err := ResolveMediaScope(c.Query("space"), c.GetString("user_id"))
+	if err != nil {
+		rejectScope(c, err)
+		return
+	}
 	tagID := c.Param("id")
 	exists, err := h.Store.tagExists(c.Request.Context(), tagID)
 	if err != nil {
@@ -356,7 +365,7 @@ func (h *Handler) ListTagMedia(c *gin.Context) {
 	if v := c.Query("limit"); v != "" {
 		limit, _ = strconv.Atoi(v)
 	}
-	res, err := h.Store.ListMediaByTag(c.Request.Context(), tagID, c.Query("cursor"), limit)
+	res, err := h.Store.ListMediaByTag(c.Request.Context(), scope, tagID, c.Query("cursor"), limit)
 	if err != nil {
 		errResp(c, http.StatusBadRequest, "QUERY_FAILED", err.Error())
 		return
