@@ -118,7 +118,8 @@ OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`
 ### GET /media
 
 时间轴分页（年/月/日/全部 + 筛选）。
-- 查询：`space=personal|shared`、`view=year|month|day|all`、`date=2026-08`、`type=photo|video|360`、`favorites=true`、`tag=`、`person=`、`cursor=`、`limit=`- **作用域（安全不变量，2026-09-16 修复跨用户越权后确立）**：`space` **缺省 = `personal` = 仅本人**，绝不等于「全部」；`space=shared` 限「该共享空间的成员或属主」（失败关闭：两者都不是则返回**空结果**，而不是所有 shared 媒体）；`space` 取枚举外值 → **400 `INVALID_PARAMS`**（且不回显 PostgreSQL 枚举原文）；无 `user_id` 身份 → **401 `UNAUTHENTICATED`**。谓词本体见 `internal/media/scope.go` 的 `scopeConds`；`GET /media`、`GET /media/date-histogram`、`GET /media/duplicates` 三处**共用同一函数**，不接受各写一份而漂移。
+- 查询：`space=personal|shared`、`view=year|month|day|all`、`date=2026-08`、`type=photo|video|360`、`favorites=true`、`tag=`、`person=`、`cursor=`、`limit=`
+- **作用域（安全不变量，2026-09-16 修复跨用户越权后确立）**：`space` **缺省 = `personal` = 仅本人**，绝不等于「全部」；`space=shared` 限「该共享空间的成员或属主」（失败关闭：两者都不是则返回**空结果**，而不是所有 shared 媒体）；`space` 取枚举外值 → **400 `INVALID_PARAMS`**（且不回显 PostgreSQL 枚举原文）；无 `user_id` 身份 → **401 `UNAUTHENTICATED`**。谓词本体见 `internal/media/scope.go` 的 `scopeConds`；`GET /media`、`GET /media/date-histogram`、`GET /media/duplicates` 三处**共用同一函数**，不接受各写一份而漂移。
 
 - 响应：`{ "items": [MediaRef...], "next_cursor", "total", "buckets": [{"key":"2026-08","count":N}] }`
 
