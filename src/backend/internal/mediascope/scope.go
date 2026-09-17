@@ -108,7 +108,26 @@ func sharedVerdict(n int) string {
 		"\t\t\t\tOR EXISTS(SELECT 1 FROM shared_space ss WHERE ss.owner_id = $%[1]d))", n)
 }
 
+// qual 给 media 表的列名加上表别名前缀；alias 为空表示该查询未给 media 起别名。
+//
+// 为什么需要这一层：本包原先把 `m.` **硬编码**进谓词文本，于是只有"恰好把 media
+// 起名为 m"的查询能用它。实测 internal/geo 的四个地图查询用的是**不带别名的裸列名**
+// （`FROM media` + `gps` / `deleted_at`），因此无法复用本包，只能继续手写、继续漂移；
+// 而"只能被两个包用"的所谓唯一真源，在共享语义上是名不副实的。
+//
+// 现在谓词与别名解耦：
+//   - alias = "m"（既有调用点）→ 输出与收敛前**逐字节相同**，零影响；
+//   - alias = ""（裸列名）→ 任何未加别名的单表查询都能直接接入。
+func qual(alias, col string) string {
+	if alias == "" {
+		return col
+	}
+	return alias + "." + col
+}
+
 // Conds 组装作用域谓词（/media 系列三个端点共用，防止各写各的而漂移）。
+//
+// 等价于 CondsFor(s, "m")：保留原签名，使既有调用点与既有测试**一处都不用改**。
 //
 // ⚠️ 调用约定：调用方必须把返回的 args **最先**追加进自己的 args 切片，
 // 因为内部占位符从 $1 开始编号（其余条件一律按 len(args) 续编）。
@@ -122,18 +141,24 @@ func sharedVerdict(n int) string {
 // search 侧从此也认空间属主，与时间轴口径一致。收敛只会让 search 的可见集合
 // **变宽到与时间轴相等**，不会变宽到泄漏：谓词仍绑定调用者本人（$start），
 // 且 userID 为空时 VisibleCond 恒假。
-func Conds(s Scope) ([]string, []any) {
+func Conds(s Scope) ([]string, []any) { return CondsFor(s, "m") }
+
+// CondsFor 与 Conds 同义，但允许指定 media 表的别名（alias 为空 = 不加前缀）。
+//
+// 需要**区分空间档位**的调用方（space=personal|shared 白名单）用这个；
+// 需要"调用者本人可见集合的并集"的调用方用 VisibleCondFor。
+func CondsFor(s Scope, alias string) ([]string, []any) {
 	switch s.Space {
 	case "personal":
 		if s.OwnerID == "" {
 			return []string{FailClosed}, nil
 		}
-		return []string{"m.space = 'personal'", "m.owner_id = $1"}, []any{s.OwnerID}
+		return []string{qual(alias, "space") + " = 'personal'", qual(alias, "owner_id") + " = $1"}, []any{s.OwnerID}
 	case "shared":
 		if s.MemberID == "" {
 			return []string{FailClosed}, nil
 		}
-		return []string{"m.space = 'shared'", sharedVerdict(1)}, []any{s.MemberID}
+		return []string{qual(alias, "space") + " = 'shared'", sharedVerdict(1)}, []any{s.MemberID}
 	default:
 		// space 为空（未解析）或枚举外取值：不放行任何行。
 		return []string{FailClosed}, nil
@@ -156,10 +181,20 @@ func Conds(s Scope) ([]string, []any) {
 // 绝不能返回一段"不绑定主体"的谓词 —— 那正是历史越权事故的同形
 // （调用方拿不到主体时，唯一安全的输出是"谁也看不见"）。
 func VisibleCond(start int, userID string) (string, []any) {
+	return VisibleCondFor(start, userID, "m")
+}
+
+// VisibleCondFor 与 VisibleCond 同义，但允许指定 media 表的别名（alias 为空 = 不加前缀）。
+//
+// ⚠️ 这是"新增任何返回 media 行的查询"的**默认入口**：凡是要把 media 行返回给终端用户的
+// 查询，都应调用本函数或 CondsFor，而不是自己拼谓词。理由见包文档：
+// 本包之外的每一份手写副本都迟早会漂移，而漂移方向往往是**放宽**（漏掉某一臂 = 多返回数据，
+// SQL 不报错）。alias 参数的存在就是为了让"表别名不同"不再成为不复用的借口。
+func VisibleCondFor(start int, userID, alias string) (string, []any) {
 	if userID == "" {
 		return FailClosed, nil
 	}
-	return fmt.Sprintf("((m.space = 'personal' AND m.owner_id = $%[1]d)\n"+
-		"\t\tOR (m.space = 'shared' AND %[2]s))",
-		start, sharedVerdict(start)), []any{userID}
+	return fmt.Sprintf("((%[3]s = 'personal' AND %[4]s = $%[1]d)\n"+
+		"\t\tOR (%[3]s = 'shared' AND %[2]s))",
+		start, sharedVerdict(start), qual(alias, "space"), qual(alias, "owner_id")), []any{userID}
 }
