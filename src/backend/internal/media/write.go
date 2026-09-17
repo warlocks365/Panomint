@@ -206,17 +206,22 @@ func (s *Store) SoftDelete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Restore 从回收站恢复。
-func (s *Store) Restore(ctx context.Context, id string) error {
-	ct, err := s.Pool.Exec(ctx,
-		`UPDATE media SET deleted_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NOT NULL`, id)
-	if err != nil {
-		return err
+// Restore 从回收站恢复；返回该媒体的 path，供调用方在审计 detail 里留可解析线索。
+//
+// 与 Purge 同形（都用 RETURNING path），理由见 §二十四.7：恢复**本身**不销毁任何东西，
+// 但恢复之后这行**仍可能被 purge** —— 那一刻 `target_id` 就再也查不回内容了
+// （GetDetail 只会说「不存在或已删除」）。path 是这条媒体在库里最后的可解析线索，
+// 而**只有在恢复的当口顺手取出来才拿得到**：删掉的行读不回来，事后无法补记。
+// 键名 path 不含任何敏感子串，不会被 RedactDetail 剔除。
+func (s *Store) Restore(ctx context.Context, id string) (string, error) {
+	var path string
+	err := s.Pool.QueryRow(ctx,
+		`UPDATE media SET deleted_at = NULL, updated_at = now() WHERE id = $1 AND deleted_at IS NOT NULL RETURNING path`,
+		id).Scan(&path)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
 	}
-	if ct.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return path, err
 }
 
 // Purge 永久删除（回收站中）；返回媒体 path 供调用方清理文件。

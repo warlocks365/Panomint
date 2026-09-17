@@ -92,6 +92,14 @@ const (
 	ActionMediaDelete = "media.delete"
 	// ActionMediaPurge 从回收站彻底清除，不可恢复。
 	ActionMediaPurge = "media.purge"
+	// ActionMediaRestore 从回收站恢复。
+	//
+	// 与 delete / purge 并列，但语义相反：它**撤销**「在回收站里」这个状态。
+	// 之所以必须记：没有它，`media.delete` 就是一笔**无法闭合**的账 —— 库里只有
+	// 「谁在什么时候把 X 删了」，而没有任何地方记录「后来又拿回来了」，于是
+	// **「已删除」与「删了又恢复」在审计上不可区分**，「当前还在回收站」这件事只能靠
+	// 现有数据反推。用户侧的直接后果是工具箱页的「已恢复」标签没有数据来源。
+	ActionMediaRestore = "media.restore"
 
 	// ActionSettingsPatch 系统配置变更。
 	ActionSettingsPatch = "admin.settings.patch"

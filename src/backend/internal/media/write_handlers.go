@@ -301,16 +301,27 @@ func (h *Handler) Trash(c *gin.Context) {
 // Restore POST /media/trash/:id/restore
 func (h *Handler) Restore(c *gin.Context) {
 	id := c.Param("id")
-	if _, ok := h.checkAccess(c, id); !ok {
+	ownerID, ok := h.checkAccess(c, id)
+	if !ok {
 		return
 	}
-	if err := h.Store.Restore(c.Request.Context(), id); errors.Is(err, ErrNotFound) {
+	path, err := h.Store.Restore(c.Request.Context(), id)
+	if errors.Is(err, ErrNotFound) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或不在回收站")
 		return
 	} else if err != nil {
 		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
 		return
 	}
+	// 审计在**成功落库之后**：对**不在回收站**的 id（未软删或不存在）返回 404 且**不写**
+	// —— 记一条「已恢复」而它其实从未被删，与记一条假的「已删除」同样危险（§二十四.1）。
+	// 这条负对照必须在真库上跑：只验成功路径时，"进了 handler 就写"与"成功后写"表现完全相同。
+	//
+	// detail 记 path 的理由与 Purge 相同（§二十四.7）：恢复之后这行仍可能被 purge，
+	// 届时 target_id 查不回任何东西；path 是这条媒体在库里最后的可解析线索，
+	// 而只有在恢复的当口才取得到。键名 owner_id / path 均不含敏感子串，不会被 RedactDetail 剔除。
+	h.record(c, audit.ActionMediaRestore, audit.TargetMedia, id,
+		map[string]any{"owner_id": ownerID, "path": path})
 	c.JSON(http.StatusOK, gin.H{"id": id, "restored": true})
 }
 

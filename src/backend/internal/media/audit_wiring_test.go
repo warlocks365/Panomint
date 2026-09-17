@@ -7,6 +7,10 @@ package media
 // 磁盘文件清理），旧实现在 handler 里 `checkAccess` → `Store.Purge` → 清文件 → 返回，
 // **一行审计都不写**。也就是说：「谁把什么东西永久销毁了」在库里没有任何痕迹。
 //
+// 续（§二十五 遗留 1）：`media.delete` / `media.purge` 已审计，但**「从回收站恢复」没有**
+// ⇒ `media.delete` 成了一笔无法闭合的账，库里只留「谁删了 X」，没有任何地方记录
+// 「后来又拿回来了」。本文件同时钉住 `media.restore`。
+//
 // 本文件用三种互补的方式把它钉住：
 //
 //	1. record 的语义（fake store）：actor 取自上下文、action/target 落库正确、
@@ -157,7 +161,7 @@ func TestRecordWithoutRecorderIsNoop(t *testing.T) {
 
 // ---- 2. 失败路径不写审计（真实 handler + 不可达库）----
 
-func TestPurgeAndDeleteAuditNothingWhenStoreFails(t *testing.T) {
+func TestMediaWriteOpsAuditNothingWhenStoreFails(t *testing.T) {
 	pool := unreachablePool(t)
 	defer pool.Close()
 
@@ -169,24 +173,30 @@ func TestPurgeAndDeleteAuditNothingWhenStoreFails(t *testing.T) {
 	reg := func(r *gin.Engine) {
 		r.DELETE("/media/:id", h.Delete)
 		r.DELETE("/media/trash/:id", h.Purge)
+		r.POST("/media/trash/:id/restore", h.Restore)
 	}
 	const uuid = "3f3d7bad-6795-4e48-a039-79c44b206c67"
 
-	for _, tc := range []struct{ name, path string }{
-		{"Delete", "/media/" + uuid},
-		{"Purge", "/media/trash/" + uuid},
+	for _, tc := range []struct{ name, method, path string }{
+		{"Delete", http.MethodDelete, "/media/" + uuid},
+		{"Purge", http.MethodDelete, "/media/trash/" + uuid},
+		{"Restore", http.MethodPost, "/media/trash/" + uuid + "/restore"},
 	} {
-		rec := auditReq(h, "7c6b1b9c-cba2-4394-b982-67d9038421f3", http.MethodDelete, tc.path, reg)
+		rec := auditReq(h, "7c6b1b9c-cba2-4394-b982-67d9038421f3", tc.method, tc.path, reg)
 		if rec.Code == http.StatusOK {
 			t.Fatalf("%s：库不可达时不该返回 200，实际 %d", tc.name, rec.Code)
 		}
 	}
 	// 关键断言：一次都没成功，就一条审计都不该有。
-	// 若有人把 record 挪到触库**之前**（或挪进 checkAccess），这里会红。
 	if len(fake.entries) != 0 {
 		t.Fatalf("操作全部失败，却写入了 %d 条审计：%v —— "+
-			"那会记下「谁删了 X」而 X 其实还在，比不记录更危险", len(fake.entries), fake.entries)
+			"那会记下「谁删了/恢复了 X」而 X 根本没动，比不记录更危险", len(fake.entries), fake.entries)
 	}
+	// ⚠️ 本用例**能**证明的与**不能**证明的，写清楚免得被当成更强的保证：
+	//   能：触库不可达时完全不写审计；record 若被挪进 checkAccess 会红。
+	//   不能：**证明不了 record 排在 Store 调用之后** —— 库连不上时 handler 在
+	//   checkAccess 就返回了，把 record 放在 checkAccess 之后、Store 调用之前，这里照样绿。
+	// 所以顺序不变量由下面 TestMediaWriteHandlersAreWiredToAudit 按源码位置单独断言。
 }
 
 // ---- 3. 接线本身还在（源码形状）----
@@ -213,34 +223,69 @@ func TestMediaWriteHandlersAreWiredToAudit(t *testing.T) {
 	src := string(b)
 
 	// broken 是「去掉 record 那一行」的坏版本，用于前提自证。
+	// wants 是**全部**必须同时出现的片段：只断言 "调了 record" 挡不住
+	// 「顺手把 detail 里的可解析线索删掉」—— 那正是不报错、只静默降级的坏改动。
 	cases := []struct {
-		fn, want string
-		broken   string
+		fn        string
+		wants     []string
+		storeCall string
+		broken    string
 	}{
-		{"Delete", "h.record(c, audit.ActionMediaDelete, audit.TargetMedia, id",
+		{"Delete",
+			[]string{"h.record(c, audit.ActionMediaDelete, audit.TargetMedia, id",
+				`"owner_id": ownerID`},
+			"h.Store.SoftDelete(",
 			"func (h *Handler) Delete(c *gin.Context) {\n\tc.JSON(http.StatusOK, gin.H{})\n}"},
-		{"Purge", "h.record(c, audit.ActionMediaPurge, audit.TargetMedia, id",
+		{"Purge",
+			[]string{"h.record(c, audit.ActionMediaPurge, audit.TargetMedia, id",
+				`"path": path`},
+			"h.Store.Purge(",
 			"func (h *Handler) Purge(c *gin.Context) {\n\tc.JSON(http.StatusOK, gin.H{})\n}"},
+		{"Restore",
+			[]string{"h.record(c, audit.ActionMediaRestore, audit.TargetMedia, id",
+				`"owner_id": ownerID`,
+				`"path": path`},
+			"h.Store.Restore(",
+			"func (h *Handler) Restore(c *gin.Context) {\n\tc.JSON(http.StatusOK, gin.H{})\n}"},
 	}
 	for _, tc := range cases {
 		body := handlerBody(t, src, tc.fn)
-		if !strings.Contains(body, tc.want) {
-			t.Fatalf("%s 里找不到审计调用 %q。\n"+
-				"这两个动作必须写审计，其中 media.purge 是**唯一不可恢复**的动作：\n"+
-				"它会把 media 行整行删除，此后 target_id 再也查不回任何东西 ——\n"+
-				"审计行是「谁永久销毁了什么」仅存的证据。"+
-				"若是有意改动，请同时更新本测试与 §二十 的接入清单。", tc.fn, tc.want)
+		for _, want := range tc.wants {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s 里找不到 %q。\n"+
+					"这三个动作必须写审计，其中 media.purge 是**唯一不可恢复**的动作："+
+					"它会把 media 行整行删除，此后 target_id 再也查不回任何东西 ——\n"+
+					"审计行是「谁永久销毁了什么」仅存的证据。\n"+
+					"media.restore 记 path 是同一理由（恢复后仍可能被 purge），"+
+					"且该值**只有在恢复的当口才取得到**，事后补不回来。\n"+
+					"若是有意改动，请同时更新本测试与 §二十 的接入清单。", tc.fn, want)
+			}
+		}
+		// §二十四.1 的顺序不变量：record 必须在触库调用**之后**。
+		// 这条只能按源码位置断言 —— 见 TestMediaWriteOpsAuditNothingWhenStoreFails 的说明：
+		// 库不可达时 handler 在 checkAccess 就返回了，那种用例**证实不了**顺序。
+		iStore := strings.Index(body, tc.storeCall)
+		iRecord := strings.Index(body, tc.wants[0])
+		if iStore < 0 {
+			t.Fatalf("%s 里找不到触库调用 %q —— 方法被改名或重构？本守卫无法判定顺序",
+				tc.fn, tc.storeCall)
+		}
+		if iRecord >= 0 && iRecord < iStore {
+			t.Fatalf("%s：审计调用出现在 %q **之前**（下标 %d < %d）—— 违反 §二十四.1。"+
+				"审计记的是**事实**不是**尝试**：失败/404 不该留下记录，"+
+				"否则库里会出现「谁恢复了 X」而 X 根本没在回收站里。",
+				tc.fn, tc.storeCall, iRecord, iStore)
 		}
 		// 前提自证：把 record 去掉后，同一条断言必须失败，否则这个守卫是空转的。
-		if strings.Contains(handlerBody(t, tc.broken, tc.fn), tc.want) {
+		if strings.Contains(handlerBody(t, tc.broken, tc.fn), tc.wants[0]) {
 			t.Fatalf("守卫失效：本断言在去掉 record 的版本上也会通过（%s），拦不住回归", tc.fn)
 		}
 	}
 
 	// 反向守卫：这两个 handler 里不该出现字符串字面量的动作名（必须引用 audit 常量）。
 	// 字面量在改名时不会编译失败，而查询侧按精确匹配已登记的动作名 ⇒ 静默查不到。
-	literal := regexp.MustCompile(`"media\.(delete|purge)"`)
-	for _, fn := range []string{"Delete", "Purge"} {
+	literal := regexp.MustCompile(`"media\.(delete|purge|restore)"`)
+	for _, fn := range []string{"Delete", "Purge", "Restore"} {
 		if m := literal.FindString(handlerBody(t, src, fn)); m != "" {
 			t.Fatalf("%s 里出现了动作名字面量 %s：请改用 audit.ActionMedia* 常量"+
 				"（字面量在改名时不会编译失败，而查询是按精确匹配的）", fn, m)
