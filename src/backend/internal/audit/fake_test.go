@@ -49,6 +49,10 @@ type fakeStore struct {
 	jobsErr    error
 	lastFilter Filter
 	lastJobQ   JobQuery
+	// queryCalls 记录 Query 被调用的次数。
+	// 存在的理由：若干用例要断言的是「handler 在校验失败时**提前返回**、根本没触库」——
+	// 只断言状态码证明不了这一点（提前返回与"查完再报错"在响应上可能长得一样）。
+	queryCalls int
 	// lastJobID 记录 GetJob 收到的 id，供单条端点测试断言参数传递。
 	lastJobID string
 
@@ -98,6 +102,7 @@ func (f *fakeStore) Insert(ctx context.Context, e Entry) (int64, error) {
 func (f *fakeStore) Query(_ context.Context, flt Filter) (*Page, error) {
 	f.mu.Lock()
 	f.lastFilter = flt
+	f.queryCalls++
 	f.mu.Unlock()
 	if f.queryErr != nil {
 		return nil, f.queryErr
@@ -173,6 +178,13 @@ func (f *fakeStore) filter() Filter {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastFilter
+}
+
+// calls 返回 Query 被调用过的次数。
+func (f *fakeStore) calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.queryCalls
 }
 
 var errBoom = errors.New("模拟数据库不可用")

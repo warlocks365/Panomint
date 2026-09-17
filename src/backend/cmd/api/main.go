@@ -369,6 +369,19 @@ func main() {
 	auditStore := &audit.PGStore{Pool: pool}
 	auditH := &audit.Handler{Store: auditStore, Recorder: auditRec}
 	admin.GET("/audit", auditH.ListAudit)
+	// 用户侧：**自己**执行过的「从回收站恢复」历史（工具箱「已恢复」标签的数据来源）。
+	//
+	// 挂在 `authed` 而**不是** `admin` —— 这是本端点存在的全部意义：普通成员必须能看
+	// 自己的恢复历史，而 /admin/audit 在 admin:users 之下，成员够不到。
+	// 权限用 media:read：它属于 /media 命名空间，与其它 /media 读端点一致。
+	//
+	// 注册在同一组 `authed` 上 ⇒ 与 /media/:id 落在**同一棵路由树**，
+	// 静态段 restore-history 优先于参数段 :id（与 /media/trash、/media/duplicates 同型，
+	// 后两者的优先级已被真实请求实测过，不是推断）。
+	// 实现放在 audit 包：数据源是 audit_log，复用的也是该包的 Filter/游标/limit 约定，
+	// 抄一份到 media 包就会漂（§二十一）。先例：/admin/stats、/admin/jobs 同样是
+	// audit 包实现、挂在别人的路径前缀下。理由详见 internal/audit/restore_history.go。
+	authed.GET("/media/restore-history", permRead, auditH.RestoreHistory)
 	authed.GET("/admin/stats", auth.RequirePerm(authStore, "admin:system"), auditH.Stats)
 	authed.GET("/admin/jobs", auth.RequirePerm(authStore, "admin:system"), auditH.Jobs)
 	// 契约 §12 的 `GET /admin/jobs/:id`（此前只是契约里的悬空引用，本轮补上实现）

@@ -207,6 +207,32 @@ OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`
 
 - 错误：参数非整数 → 400 `INVALID_PARAMS`；候选宇宙超限 → 400 `TOO_MANY_MEDIA`；查询失败 → 500 `QUERY_FAILED`。
 
+### GET /media/restore-history
+
+工具箱·「已恢复」标签的数据源（PRD §6.16）。返回**调用者自己执行过**的 `media.restore` 审计行，**倒序**。**本端点只读**。
+
+- 权限：`media:read`（`permRead`）；路由挂在 `authed` 组内、**与 `GET /media/:id` 同一组**（`cmd/api/main.go`），故 gin「静态段优先于参数段」的规则同样保护 `/media/trash`、`/media/date-histogram`、`/media/duplicates` 与本端点。
+  > ⚠️ 实现位于 `internal/audit/restore_history.go` 而非 `internal/media`：它读的是 `audit_log`，直接复用本包既有的 `Filter` / `Page` / 游标编解码 / limit 钳制；若搬到 media 包就得把这套约定**再实现一遍**，而「同一份约定抄两处 + 注释承诺同步」正是 §二十一 收敛掉的漂移模式（`MediaRef` 列清单曾 7 份副本、5 份各漂各的）。**路径命名空间 ≠ 包边界**，既有同型先例是 `GET /admin/stats` 与 `GET /admin/jobs`（同为 audit 包实现、挂在别人的前缀下）。
+
+- 查询：`limit=`（默认 **50**；`<=0` 用默认；`>200` **钳到 200** 而非回落默认）、`cursor=`（上一页返回的 `next_cursor`，原样回传）、`?actor=` **无效**（见限制二）
+
+- 响应：`{ "items": [ { "id": 132, "actor_user_id": "…", "action": "media.restore", "target_type": "media", "target_id": "…", "ip": "…", "detail": { "owner_id": "…", "path": "…" }, "at": "2026-09-17T14:30:30.113662+08:00" } ], "total": 2, "limit": 50, "next_cursor": "…" }`
+  审计行原样透传（`internal/audit.Entry`，`omitempty` 字段缺失即省略；`next_cursor` 为空时字段省略）。`detail` 里的 `path` / `owner_id` 也是原样透传，不做二次加工。`total` 是**调用者自己**的条数，不是全站 `media.restore` 条数。
+
+- 时间列是 **`at`**，**不是 `created_at`**（`audit_log` 的 DDL 里没有 `created_at` 这一列）。排序键 `(at DESC, id DESC)`：`at` 虽精确到微秒仍可能重复，只用 `at` 排序会漏行或重行，故与 `id` 组成复合键。
+
+- 游标与 `GET /admin/audit` **完全同一套** `encodeCursor` / `decodeCursor`：`base64url(RFC3339Nano + "|" + id)`，谓词用复合行比较 `(at, id) < ($n, $m)`。**没有新造风格**。非法游标 → 400 `INVALID_INPUT`（消息「无效游标」）。
+
+- 索引：复用既有 `idx_audit_actor_at ON audit_log(user_id, at DESC)`，**未新增任何索引**。
+
+- 错误：未认证（拿不到非空 actor）→ 401 `UNAUTHORIZED`；游标非法 → 400 `INVALID_INPUT`；查询失败 → 500 `INTERNAL`。
+
+- **本端点不写审计**：刻意**不**记 `ActionAuditRead`。先例（`GET /admin/audit` 记 `admin.audit.read`）的立论前提是「该端点暴露**全站**敏感操作史，读它本身就是一次有后果的敏感访问」；本端点只返回调用者**自己**的行，那些行本就是他自己的动作，**读它不产生任何新的知情面**。另有两条理由：前提不同就不该照搬先例；且每打开一次工具箱就写一行，只会把账本**淹没**（噪音掩盖真线索）。该取舍由 `TestRestoreHistoryDoesNotWriteAuditRead` 钉住，且该测试自带反向自证：同一个 fake 挂到 `/admin/audit` 上确实会写 1 行。
+
+- ⚠️ **已知限制一（按 `path` 展示，不承诺稳定文件名）**：`detail` 里给的是**写入时**的 `media.path`，既不是可点击的下载地址，也**不承诺它现在还指向一个存在的文件**；`detail` 里**没有 filename**。若该媒体此后被 `DELETE /media/trash/:id` **永久删除**，那么 `target_id` 已经**解析不回任何东西**（`audit_log.target_id` 无外键、审计行会活过目标），此时 `path` 是唯一还能说明「当初恢复的是哪一条」的线索 —— 这正是 `media.restore` 必须把 `path` 写进 `detail` 的原因（§二十四 原则二：**先留证据、再销毁物证**）。要提供稳定文件名需另存一张恢复记录表，那是一条升级路径，不在本次范围。
+
+- ⚠️ **已知限制二（只含本人「执行」的恢复，不含他人代办的）**：行按 **actor** 存储。管理员在成员的回收站里**代其恢复**时，那一行的 `user_id` 是**管理员**而不是成员，于是成员在本端点里**看不到**这条记录。这是**可见性缺口，不是越权泄漏**（方向是「该看到的人看不到」，过滤 `user_id = 调用者` 不会多返回任何一行）—— 但不写进契约的话，这个列表会**看起来完整而其实不然**。隔离由单测（`TestRestoreHistoryScopesToContextCaller`、`TestRestoreHistoryRejectsMissingActor`）与真库实测双重保证：actor **只**取自认证上下文，`?actor=` 覆盖在真实 handler 上**不生效**；拿不到非空 actor 时直接 401，而**不是**退化成「返回全站所有人的恢复历史」（`BuildWhere` 对空 `ActorUserID` 会静默**跳过** `user_id` 条件，故这一步是必需的安全检查，不是防御性冗余）。
+
 ---
 
 

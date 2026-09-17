@@ -33,6 +33,8 @@ func newTestRouter(h *Handler) *gin.Engine {
 	g.GET("/admin/stats", h.Stats)
 	g.GET("/admin/jobs", h.Jobs)
 	g.GET("/admin/jobs/:id", h.GetJob)
+	// 用户侧端点：注册在同一组（模拟 main.go 把 /media/restore-history 挂在 authed 上）
+	g.GET("/media/restore-history", h.RestoreHistory)
 	return r
 }
 

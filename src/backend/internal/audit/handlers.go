@@ -36,6 +36,9 @@ import (
 const (
 	CodeInvalidInput = "INVALID_INPUT"
 	CodeInternal     = "INTERNAL"
+	// CodeUnauthorized 未认证（本包唯一的用户侧端点 RestoreHistory 用它：
+	// 拿不到 actor 时绝不能退化成"查全站"，见该文件头注释）。
+	CodeUnauthorized = "UNAUTHORIZED"
 )
 
 // Handler 管理端只读端点。Store 不可为空。
