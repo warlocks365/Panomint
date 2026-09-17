@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"panoalbum/internal/mediascope"
 )
 
 // BBox 地理边界框（WGS-84 经纬度，度）。
@@ -82,14 +84,35 @@ var mediaHistogramTrunc = map[string]struct{ trunc, layout string }{
 	"day":   {"day", "YYYY-MM-DD"},
 }
 
-// baseCond 公共过滤条件：有 GPS、未软删、落在 bbox 内；args 前缀为 bbox 四元组。
-func baseCond(b BBox) ([]string, []any) {
-	return []string{
-			"gps IS NOT NULL",
-			"deleted_at IS NULL",
-			"gps && ST_MakeEnvelope($1,$2,$3,$4,4326)",
-		},
-		[]any{b.MinLng, b.MinLat, b.MaxLng, b.MaxLat}
+// baseCond 公共过滤条件：有 GPS、未软删、落在 bbox 内、**且对调用者可见**；
+// args 前缀为 bbox 四元组，其后是可见性谓词的参数（至多 1 个）。
+//
+// ⚠️ 可见性谓词来自 internal/mediascope（唯一真源），本函数**不手写**属主/共享条件：
+// 原实现只有 gps/deleted_at/bbox 三个条件、没有任何属主或空间条件，而四个地图端点
+// 全部从它派生 —— 于是任何持 media:read 的账号只要把 bbox 放大到全世界，就能拿到
+// 全站他人的 GPS 媒体（含文件名与精确经纬度）。这与 /media 系列的历史事故同形：
+// 作用域默认为"全部"，漏加条件不会报错、只会多返回数据。
+//
+// userID 为空时谓词收敛为恒假（mediascope.FailClosed）且**不占参数位**：
+// 没有主体就没有合法的作用域，此时安全的行为是"什么也看不见"。
+//
+// alias 传 "" 而非某个别名：本文件四处查询都是 `FROM media` 的**裸列名**单表查询
+// （无 JOIN、无表别名），故谓词必须输出裸列名（见 mediascope.qual 的约定）。
+func baseCond(b BBox, userID string) ([]string, []any) {
+	conds := []string{
+		"gps IS NOT NULL",
+		"deleted_at IS NULL",
+		"gps && ST_MakeEnvelope($1,$2,$3,$4,4326)",
+	}
+	args := []any{b.MinLng, b.MinLat, b.MaxLng, b.MaxLat}
+
+	// ⚠️ 占位符编号必须**紧接着 bbox 之后**：同包 appendTimeRange 按 len(args) 续编，
+	// 编号错位不会在编译期暴露，只会在运行期报 "expected N arguments"。
+	visibleCond, visibleArgs := mediascope.VisibleCondFor(len(args)+1, userID, "")
+	conds = append(conds, visibleCond)
+	args = append(args, visibleArgs...)
+
+	return conds, args
 }
 
 // appendTimeRange 追加可选时间范围条件（taken_at 区间，闭区间语义：>= from AND <= to）。
@@ -158,8 +181,9 @@ func convert(lng, lat float64, provider string) (float64, float64) {
 
 // Clusters 按 bbox + zoom 做网格聚合，支持时间范围与分类过滤（时间轴 → 地图 联动）。
 // 返回质心 + 计数，坐标按 provider 转换。
-func (s *MediaStore) Clusters(ctx context.Context, b BBox, zoom int, provider, kind string, from, to *time.Time) ([]Cluster, error) {
-	conds, args := baseCond(b)
+// userID 为调用者身份，用于把聚合范围收敛到"调用者可见的媒体"（空串 = 恒假，返回空集）。
+func (s *MediaStore) Clusters(ctx context.Context, b BBox, userID string, zoom int, provider, kind string, from, to *time.Time) ([]Cluster, error) {
+	conds, args := baseCond(b, userID)
 	conds, args = appendTimeRange(conds, args, from, to)
 	conds, args = appendKind(conds, args, kind)
 	args = append(args, GridSize(zoom))
@@ -192,8 +216,9 @@ func (s *MediaStore) Clusters(ctx context.Context, b BBox, zoom int, provider, k
 
 // Items 列出 bbox 内的媒体条目（点击簇 / 框选后展开用），按拍摄时间倒序。
 // limit 由调用方收敛（handler 层做上下界校验）。
-func (s *MediaStore) Items(ctx context.Context, b BBox, provider, kind string, from, to *time.Time, limit int) ([]MediaPoint, error) {
-	conds, args := baseCond(b)
+// userID 为调用者身份，用于把结果收敛到"调用者可见的媒体"（空串 = 恒假，返回空集）。
+func (s *MediaStore) Items(ctx context.Context, b BBox, userID string, provider, kind string, from, to *time.Time, limit int) ([]MediaPoint, error) {
+	conds, args := baseCond(b, userID)
 	conds, args = appendTimeRange(conds, args, from, to)
 	conds, args = appendKind(conds, args, kind)
 	args = append(args, limit)
@@ -227,12 +252,13 @@ func (s *MediaStore) Items(ctx context.Context, b BBox, provider, kind string, f
 // taken_at 为空的媒体归入 "unknown" 桶（字典序自然落末位）。
 // Job000009：每桶同时返回四类媒体分类计数（照片/视频/全景照片/全景视频），
 // 供时间轴实时统计卡片使用，与直方图一次查询返回、天然随 bbox 与粒度联动。
-func (s *MediaStore) Histogram(ctx context.Context, b BBox, granularity string) ([]Bucket, error) {
+// userID 为调用者身份，用于把统计范围收敛到"调用者可见的媒体"（空串 = 恒假，返回空集）。
+func (s *MediaStore) Histogram(ctx context.Context, b BBox, userID string, granularity string) ([]Bucket, error) {
 	g, ok := mediaHistogramTrunc[granularity]
 	if !ok {
 		return nil, ErrInvalidGranularity
 	}
-	conds, args := baseCond(b)
+	conds, args := baseCond(b, userID)
 	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT COALESCE(to_char(date_trunc('%s', taken_at), '%s'), 'unknown') AS bucket,
 		       count(*)::int,
@@ -269,8 +295,9 @@ type Place struct {
 
 // Places 列出 bbox 内出现的地名（place 非空、去重、按计数降序）。
 // taken_at 时间过滤可选；用于地图底部"地理位置罗列"（横向滑动 + 点击定位）。
-func (s *MediaStore) Places(ctx context.Context, b BBox, provider, kind string, from, to *time.Time, limit int) ([]Place, error) {
-	conds, args := baseCond(b)
+// userID 为调用者身份，用于把地名集合收敛到"调用者可见的媒体"（空串 = 恒假，返回空集）。
+func (s *MediaStore) Places(ctx context.Context, b BBox, userID string, provider, kind string, from, to *time.Time, limit int) ([]Place, error) {
+	conds, args := baseCond(b, userID)
 	conds, args = appendTimeRange(conds, args, from, to)
 	conds, args = appendKind(conds, args, kind)
 	args = append(args, limit)

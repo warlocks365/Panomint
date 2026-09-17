@@ -190,7 +190,9 @@ func (h *Handler) Clusters(c *gin.Context) {
 		return
 	}
 
-	clusters, err := h.Media.Clusters(c.Request.Context(), b, zoom, h.provider(c), kind, from, to)
+	// 身份从会话取（复用 GetMapIconPref 的同一约定）。**无身份不返回 500**：
+	// 可见性谓词会自动收敛为恒假、返回空结果 —— fail-closed 的语义就是"什么也看不见"。
+	clusters, err := h.Media.Clusters(c.Request.Context(), b, c.GetString("user_id"), zoom, h.provider(c), kind, from, to)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
 		return
@@ -227,7 +229,7 @@ func (h *Handler) Items(c *gin.Context) {
 		return
 	}
 
-	items, err := h.Media.Items(c.Request.Context(), b, h.provider(c), kind, from, to, limit)
+	items, err := h.Media.Items(c.Request.Context(), b, c.GetString("user_id"), h.provider(c), kind, from, to, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
 		return
@@ -244,7 +246,7 @@ func (h *Handler) Histogram(c *gin.Context) {
 		return
 	}
 	granularity := c.DefaultQuery("granularity", "month")
-	buckets, err := h.Media.Histogram(c.Request.Context(), b, granularity)
+	buckets, err := h.Media.Histogram(c.Request.Context(), b, c.GetString("user_id"), granularity)
 	if err != nil {
 		code := "QUERY_FAILED"
 		status := http.StatusInternalServerError
@@ -286,7 +288,7 @@ func (h *Handler) Places(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
 		return
 	}
-	places, err := h.Media.Places(c.Request.Context(), b, h.provider(c), kind, from, to, limit)
+	places, err := h.Media.Places(c.Request.Context(), b, c.GetString("user_id"), h.provider(c), kind, from, to, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
 		return
