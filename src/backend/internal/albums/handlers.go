@@ -30,11 +30,11 @@ func canManage(c *gin.Context, ownerID string) bool {
 // Create POST /albums {name, kind?, description?, cover_media_id?, criteria?} → 201 {id}
 func (h *Handler) Create(c *gin.Context) {
 	var req struct {
-		Name        string    `json:"name"`
-		Kind        string    `json:"kind"`
-		Description string    `json:"description"`
-		CoverMediaID *string  `json:"cover_media_id"`
-		Criteria    *Criteria `json:"criteria"`
+		Name         string    `json:"name"`
+		Kind         string    `json:"kind"`
+		Description  string    `json:"description"`
+		CoverMediaID *string   `json:"cover_media_id"`
+		Criteria     *Criteria `json:"criteria"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "请求体格式错误")
@@ -72,8 +72,33 @@ func (h *Handler) List(c *gin.Context) {
 }
 
 // Get GET /albums/:id
+//
+// 归属校验与同文件的 Patch/Delete 同一套 helper（getAlbumMeta + canManage）。
+// 无权时返回 **404 而不是 403**：403 会告诉调用方"这个相册存在但不属于你"，
+// 那就是一个可枚举的探测判据。与"相册不存在"共用同一形状。
+//
+// 校验刻意放在 Store.Get **之前**：smart 相册的 Get 会跑一次 criteria 全表查询，
+// 无权请求不该有机会触发它。
+//
+// ⚠️ 属主校验只能放在这里（HTTP 层），**不能**下沉进 Store.Get ——
+// internal/shares 的公开分享链路（shares.Store.ListItems → Store.Get）是匿名可达的，
+// 把鉴权塞进 Store.Get 会把分享功能整条打死。
 func (h *Handler) Get(c *gin.Context) {
-	d, err := h.Store.Get(c.Request.Context(), c.Param("id"))
+	id := c.Param("id")
+	ownerID, _, err := h.Store.getAlbumMeta(c.Request.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "相册不存在")
+		return
+	}
+	if err != nil {
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		return
+	}
+	if !canManage(c, ownerID) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "相册不存在")
+		return
+	}
+	d, err := h.Store.Get(c.Request.Context(), id)
 	if errors.Is(err, ErrNotFound) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "相册不存在")
 		return

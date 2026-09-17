@@ -110,13 +110,21 @@ func (s *Store) getAlbumMeta(ctx context.Context, id string) (ownerID, typ strin
 	return
 }
 
-// List 相册列表：本人相册 + favorites 相册（如存在）；含首图回填与媒体计数。
+// listAlbumsSQL 相册列表：**仅本人**的相册。
+//
+// favorites 是**每人**的系统相册（media.write 按 owner_id 建/取，见 media/write.go:29），
+// **不是**全站共享相册。旧写法 `WHERE a.owner_id = $1 OR a.type = 'favorites'` 的后半段
+// 会命中全站所有人的收藏相册，把他人相册的名称/描述/封面/计数一起列出来 —— 等于全站台账。
+// 这里收窄为仅本人；ORDER BY 仍把 favorites 置顶（列表内排序，与可见性无关）。
+const listAlbumsSQL = `
+	SELECT a.id, a.name, a.type, COALESCE(a.description,''), a.cover_media_id, a.updated_at, a.owner_id
+	FROM albums a
+	WHERE a.owner_id = $1
+	ORDER BY a.type = 'favorites' DESC, a.updated_at DESC`
+
+// List 相册列表：本人相册；含首图回填与媒体计数。
 func (s *Store) List(ctx context.Context, userID string) ([]Summary, error) {
-	rows, err := s.Pool.Query(ctx, `
-		SELECT a.id, a.name, a.type, COALESCE(a.description,''), a.cover_media_id, a.updated_at
-		FROM albums a
-		WHERE a.owner_id = $1 OR a.type = 'favorites'
-		ORDER BY a.type = 'favorites' DESC, a.updated_at DESC`, userID)
+	rows, err := s.Pool.Query(ctx, listAlbumsSQL, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -124,12 +132,13 @@ func (s *Store) List(ctx context.Context, userID string) ([]Summary, error) {
 
 	type rawAlbum struct {
 		Summary
-		typ string
+		typ     string
+		ownerID string
 	}
 	var raws []rawAlbum
 	for rows.Next() {
 		var r rawAlbum
-		if err := rows.Scan(&r.ID, &r.Name, &r.typ, &r.Description, &r.CoverMediaID, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.typ, &r.Description, &r.CoverMediaID, &r.UpdatedAt, &r.ownerID); err != nil {
 			return nil, err
 		}
 		r.Kind = typeToKind(r.typ)
@@ -144,12 +153,14 @@ func (s *Store) List(ctx context.Context, userID string) ([]Summary, error) {
 		sum := r.Summary
 		var firstID *string
 		if r.typ == "smart" {
-			// 智能相册：条件实时计数 + 取首项（与详情同序 taken_at DESC）
+			// 智能相册：条件实时计数 + 取首项（与详情同序 taken_at DESC）。
+			// 属主传**相册属主**（r.ownerID），不是调用者 —— 本函数虽然只列本人相册，
+			// 但口径必须与 Get/分享链路一致，不能依赖"调用者==属主"这个巧合。
 			c, err := s.getCriteria(ctx, r.ID)
 			if err != nil {
 				return nil, err
 			}
-			where, args := buildCriteriaWhere(c)
+			where, args := buildCriteriaWhere(c, r.ownerID)
 			if err := s.Pool.QueryRow(ctx, `SELECT count(*)::int FROM media m WHERE `+where, args...).Scan(&sum.MediaCount); err != nil {
 				return nil, err
 			}
@@ -215,7 +226,9 @@ func (s *Store) Get(ctx context.Context, id string) (*Detail, error) {
 	}
 
 	if d.Type == "smart" {
-		where, args := buildCriteriaWhere(d.Criteria)
+		// 属主传相册属主（d.OwnerID）：公开分享链路（shares.ListItems）在这里是**匿名**调用，
+		// 绝不能改用调用者身份，否则匿名分享会被 fail-closed 打死。
+		where, args := buildCriteriaWhere(d.Criteria, d.OwnerID)
 		rows, err := s.Pool.Query(ctx, `SELECT `+media.MediaRefColumns+` FROM media m WHERE `+where+`
 			ORDER BY m.taken_at DESC, m.id DESC`, args...)
 		if err != nil {

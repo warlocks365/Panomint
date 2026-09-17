@@ -88,6 +88,19 @@ func validProfile(p string) bool {
 	return p == "1080p" || p == "2k" || p == "4k"
 }
 
+// canAccessMedia 媒体归属判定：本人或 owner/admin 角色。
+//
+// transcode_jobs 本身没有 owner 列（见 docker/db/init/01-schema.sql:718 的建表语句），
+// 所以任务/产物的归属一律以 **media.owner_id** 为准 —— CreateJob、JobStatus、ServeHLS
+// 三处共用这一个口径，避免"写操作查了、读操作忘了"。
+func canAccessMedia(c *gin.Context, ownerID string) bool {
+	if c.GetString("user_id") == ownerID {
+		return true
+	}
+	role := c.GetString("role")
+	return role == "owner" || role == "admin"
+}
+
 // CreateJob POST /transcode/job {media_id, profile} → {job_id}
 // 写 transcode_jobs 并入队 kind=transcode。
 func (h *Handler) CreateJob(c *gin.Context) {
@@ -121,8 +134,7 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		errJSON(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
 		return
 	}
-	role := c.GetString("role")
-	if c.GetString("user_id") != ownerID && role != "owner" && role != "admin" {
+	if !canAccessMedia(c, ownerID) {
 		errJSON(c, http.StatusForbidden, "FORBIDDEN", "无权操作该媒体")
 		return
 	}
@@ -151,6 +163,9 @@ func (h *Handler) CreateJob(c *gin.Context) {
 }
 
 // JobStatus GET /transcode/job/:id（查任务状态，前端轮询用）
+//
+// 归属校验：transcode_jobs 没有 owner 列，故 JOIN media 取 media.owner_id（与 CreateJob 同口径）。
+// 无权时返回 404 而不是 403 —— 403 会变成"这个 job 存在"的探测判据，与"任务不存在"共用同一形状。
 func (h *Handler) JobStatus(c *gin.Context) {
 	var j struct {
 		ID         string  `json:"id"`
@@ -159,15 +174,22 @@ func (h *Handler) JobStatus(c *gin.Context) {
 		Profile    *string `json:"profile,omitempty"`
 		ResultPath *string `json:"result_path,omitempty"`
 	}
+	var ownerID string
 	err := h.Pool.QueryRow(c.Request.Context(),
-		`SELECT id, media_id, status, profile, result_path FROM transcode_jobs WHERE id = $1`,
-		c.Param("id")).Scan(&j.ID, &j.MediaID, &j.Status, &j.Profile, &j.ResultPath)
+		`SELECT j.id, j.media_id, j.status, j.profile, j.result_path, m.owner_id
+		 FROM transcode_jobs j JOIN media m ON m.id = j.media_id
+		 WHERE j.id = $1`,
+		c.Param("id")).Scan(&j.ID, &j.MediaID, &j.Status, &j.Profile, &j.ResultPath, &ownerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		errJSON(c, http.StatusNotFound, "NOT_FOUND", "任务不存在")
 		return
 	}
 	if err != nil {
 		errJSON(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		return
+	}
+	if !canAccessMedia(c, ownerID) {
+		errJSON(c, http.StatusNotFound, "NOT_FOUND", "任务不存在")
 		return
 	}
 	c.JSON(http.StatusOK, j)
@@ -177,6 +199,14 @@ func (h *Handler) JobStatus(c *gin.Context) {
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F-]{32,36}$`)
 
 // ServeHLS GET /transcode/hls/:id/*file：带鉴权的 HLS 静态服务（master.m3u8 与分片）。
+//
+// id 是**媒体 id**（HLS 产物按媒体 id 分目录存放），所以鉴权以 media.owner_id 为准，
+// 与 CreateJob / JobStatus 同口径；无权时返回 404，与"文件不存在"共用同一形状。
+//
+// 上面的路径穿越防护是**另一条安全边界**（限制可读范围），与鉴权互不替代，不要合并。
+// 校验放在 os.Stat 之后是刻意的：既保证**任何**分支都不会在鉴权前把字节吐出去，
+// 又让 id 非法（uuidRe 白名单允许"全是连字符"这类串，Postgres 会报 uuid 语法错误）
+// 时的行为保持原样 —— 仍旧是 404，而不是新引入一个 500 + SQL 错误文本泄露。
 func (h *Handler) ServeHLS(c *gin.Context) {
 	id := c.Param("id")
 	if !uuidRe.MatchString(id) {
@@ -199,6 +229,21 @@ func (h *Handler) ServeHLS(c *gin.Context) {
 	}
 	st, err := os.Stat(full)
 	if err != nil || st.IsDir() {
+		errJSON(c, http.StatusNotFound, "NOT_FOUND", "HLS 文件不存在")
+		return
+	}
+	// 归属校验：只有该媒体的属主（或 owner/admin）能取产物。
+	var ownerID string
+	if err := h.Pool.QueryRow(c.Request.Context(),
+		`SELECT owner_id FROM media WHERE id = $1`, id).Scan(&ownerID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			errJSON(c, http.StatusNotFound, "NOT_FOUND", "HLS 文件不存在")
+			return
+		}
+		errJSON(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		return
+	}
+	if !canAccessMedia(c, ownerID) {
 		errJSON(c, http.StatusNotFound, "NOT_FOUND", "HLS 文件不存在")
 		return
 	}
