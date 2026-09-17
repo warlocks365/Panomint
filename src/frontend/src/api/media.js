@@ -16,3 +16,12 @@ export function getDuplicates({ threshold = 10, limit = 50 } = {}) {
 export function deleteMedia(id) {
   return http.delete(`/media/${id}`).then((r) => r.data)
 }
+
+// getRestoreHistory 本人执行过的「从回收站恢复」历史（审计行原样透传）。
+// 时间列是 `at`（不是 created_at）；detail 里只有 path / owner_id，没有 filename。
+// 后端只按 actor 过滤 ⇒ 看不到"管理员代我恢复"的记录（可见性缺口，非越权）。
+export function getRestoreHistory({ limit = 50, cursor = '' } = {}) {
+  const params = { limit }
+  if (cursor) params.cursor = cursor
+  return http.get('/media/restore-history', { params }).then((r) => r.data)
+}
