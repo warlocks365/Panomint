@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"panoalbum/internal/mediascope"
 )
 
 // RecallHit 语义召回命中：媒体 ID + 相似度（0~1，越大越相似）。
@@ -176,16 +178,23 @@ func buildWhere(p SearchParams, hits []RecallHit, geo *GeoCenter) (where string,
 		conds = append(conds, fmt.Sprintf(cond, len(args)))
 	}
 
-	// 空间可见性：个人空间仅本人媒体；共享空间限共享空间成员
-	// （media 无 space_id 列，成员身份即可见共享媒体，与 timeline.go 注释的并集模型一致）
+	// 空间可见性：个人空间仅本人媒体；共享空间限该共享空间的成员或属主
+	// （media 无 space_id 列，成员/属主身份即可见共享媒体，与 timeline.go 注释的并集模型一致）
+	//
+	// ⚠️ 谓词来自 internal/mediascope —— 与 /media 系列（timeline.go / histogram.go /
+	// duplicates.go 走的 Conds）共用的**唯一真源**，这里不再手写。
+	// 历史缺陷：手写版本只判共享空间的成员、漏掉共享空间的属主（owner_id）臂，
+	// 与时间轴口径漂移；两侧各自维护时，改了一边另一边无从得知。
+	// 表名不在本文件重复出现（由 internal/search/query_visible_test.go 的源码形状守卫钉住）。
 	//
 	// ⚠️ 具名保存并**在语义并集分支复用**：并集若是裸的 `m.id = ANY(...)`，
 	// 就会绕过授权与软删——实测「按可见性条件可见媒体数为 0 的用户」仍能搜到他人个人空间的照片。
 	// 这里把可见性抽成变量，就是为了让并集分支无法"忘记"带上它。
-	args = append(args, p.UserID)
-	visibleCond := fmt.Sprintf(`((m.space = 'personal' AND m.owner_id = $%[1]d)
-		OR (m.space = 'shared' AND EXISTS(
-			SELECT 1 FROM shared_space_members sm WHERE sm.user_id = $%[1]d)))`, len(args))
+	//
+	// 占位符编号沿用改动前的约定（占 1 个参数位、编号 len(args)+1）；
+	// p.UserID 为空时 VisibleCond 收敛为恒假且**不占参数位**（没有主体就宁可空结果）。
+	visibleCond, visArgs := mediascope.VisibleCond(len(args)+1, p.UserID)
+	args = append(args, visArgs...)
 	conds = append(conds, visibleCond)
 
 	// q 关键词（Job000005）：多 token OR 召回（任一命中即中），单 token 命中条件 =
