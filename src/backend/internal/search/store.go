@@ -171,9 +171,10 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr, tex
 		orderBy = scoredOrderBy(textMatchExpr != "")
 	}
 	args = append(args, p.Limit+1)
+	// 列清单走 internal/media 的唯一真源；score / text_matched 是**本端点额外的两列**，
+	// 必须排在 MediaRefColumns 之后（扫描目标同序，见下方 Dests 追加）。
 	rows, err := s.Pool.Query(ctx, `
-		SELECT m.id, m.type, m.filename, m.folder_path, m.taken_at, m.width, m.height, m.duration,
-		       m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg,
+		SELECT `+media.MediaRefColumns+`,
 		       `+selectScore+` AS score,
 		       `+selectTextMatch+` AS text_matched
 		FROM media m WHERE `+where+cursorWhere+`
@@ -186,13 +187,13 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr, tex
 
 	res := &SearchResult{Items: []media.MediaRef{}, Total: total}
 	for rows.Next() {
-		var it media.MediaRef
 		var textMatched *bool
-		if err := rows.Scan(&it.ID, &it.Type, &it.Filename, &it.FolderPath, &it.TakenAt, &it.Width, &it.Height,
-			&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG, &it.Score, &textMatched); err != nil {
+		sc := media.NewMediaRefScanner()
+		dests := append(sc.Dests(), &sc.Ref.Score, &textMatched)
+		if err := rows.Scan(dests...); err != nil {
 			return nil, err
 		}
+		it := sc.Finish()
 		// text_matched 为 false 且本行确实在结果集中 → 只能是语义召回带进来的
 		it.SemanticOnly = textMatched != nil && !*textMatched
 		res.Items = append(res.Items, it)

@@ -214,9 +214,10 @@ func (s *Store) TargetOwnedBy(ctx context.Context, kind, targetID, userID string
 	return owner == userID, nil
 }
 
-// mediaCols MediaRef 查询列（与 internal/albums/store.go 保持一致）。
-const mediaCols = `m.id, m.type, m.filename, m.folder_path, m.taken_at, m.width, m.height, m.duration,
-	m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg`
+// MediaRef 的列清单与扫描器**不再在本包维护** —— 唯一真源在 internal/media/mediaref.go。
+// 这里原先的 mediaCols 注释写着"与 internal/albums/store.go 保持一致"，而两份都是裸选可空列：
+// 注释互相引用，却没有一处是权威。实测后果是 GET /public/shares/:token（kind=media）
+// 在任意一行 filename/folder_path 为 NULL 时整响应 500。
 
 // ListItems 分享内容：media 单条 / album 全量（smart 由 albums.Store 实时计算）。
 func (s *Store) ListItems(ctx context.Context, sh *Share) ([]media.MediaRef, error) {
@@ -231,12 +232,8 @@ func (s *Store) ListItems(ctx context.Context, sh *Share) ([]media.MediaRef, err
 		return d.Items, nil
 	}
 	// kind = media：单条（已删除则空列表）
-	var it media.MediaRef
-	err := s.Pool.QueryRow(ctx, `SELECT `+mediaCols+`
-		FROM media m WHERE m.id = $1 AND m.deleted_at IS NULL`, sh.TargetID).
-		Scan(&it.ID, &it.Type, &it.Filename, &it.FolderPath, &it.TakenAt, &it.Width, &it.Height,
-			&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG)
+	it, err := media.ScanMediaRef(s.Pool.QueryRow(ctx, `SELECT `+media.MediaRefColumns+`
+		FROM media m WHERE m.id = $1 AND m.deleted_at IS NULL`, sh.TargetID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []media.MediaRef{}, nil
 	}

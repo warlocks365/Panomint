@@ -330,8 +330,7 @@ func (s *Store) ListMediaByTag(ctx context.Context, tagID, cursor string, limit 
 	}
 	args = append(args, limit+1)
 	rows, err := s.Pool.Query(ctx, `
-		SELECT m.id, m.type, m.filename, m.folder_path, m.taken_at, m.width, m.height, m.duration,
-		       m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg
+		SELECT `+MediaRefColumns+`
 		FROM media m JOIN media_tags mt ON mt.media_id = m.id
 		WHERE `+where+`
 		ORDER BY m.taken_at DESC, m.id DESC
@@ -343,10 +342,8 @@ func (s *Store) ListMediaByTag(ctx context.Context, tagID, cursor string, limit 
 
 	res := &ListResult{Items: []MediaRef{}, Buckets: []Bucket{}, Total: total}
 	for rows.Next() {
-		var it MediaRef
-		if err := rows.Scan(&it.ID, &it.Type, &it.Filename, &it.FolderPath, &it.TakenAt, &it.Width, &it.Height,
-			&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG); err != nil {
+		it, err := ScanMediaRef(rows)
+		if err != nil {
 			return nil, err
 		}
 		res.Items = append(res.Items, it)

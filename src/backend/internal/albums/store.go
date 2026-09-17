@@ -63,29 +63,21 @@ type Comment struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// mediaCols MediaRef 查询列（与 internal/media/timeline.go 保持一致）。
-const mediaCols = `m.id, m.type, m.filename, m.folder_path, m.taken_at, m.width, m.height, m.duration,
-	m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg`
+// MediaRef 的列清单与扫描器**不再在本包维护** —— 唯一真源在 internal/media/mediaref.go。
+// 这里原先的 mediaCols 注释写着"与 internal/media/timeline.go 保持一致"，而它其实是裸选
+// 可空列的那一份：注释承诺同步，机制上却没有任何东西保证它。实测后果是 GET /albums/:id
+// 在任意一行 filename/folder_path 为 NULL 时整响应 500。
 
-// scanMediaRef 扫描一行媒体为 MediaRef。
-func scanMediaRef(row pgx.Row) (*media.MediaRef, error) {
-	var it media.MediaRef
-	err := row.Scan(&it.ID, &it.Type, &it.Filename, &it.FolderPath, &it.TakenAt, &it.Width, &it.Height,
-		&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-		&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG)
-	return &it, err
-}
-
-// scanMediaRows 扫描多行媒体。
+// scanMediaRows 扫描多行媒体为 MediaRef（扫描器见 media.ScanMediaRef）。
 func scanMediaRows(rows pgx.Rows) ([]media.MediaRef, error) {
 	defer rows.Close()
 	out := []media.MediaRef{}
 	for rows.Next() {
-		it, err := scanMediaRef(rows)
+		it, err := media.ScanMediaRef(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *it)
+		out = append(out, it)
 	}
 	return out, rows.Err()
 }
@@ -224,7 +216,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Detail, error) {
 
 	if d.Type == "smart" {
 		where, args := buildCriteriaWhere(d.Criteria)
-		rows, err := s.Pool.Query(ctx, `SELECT `+mediaCols+` FROM media m WHERE `+where+`
+		rows, err := s.Pool.Query(ctx, `SELECT `+media.MediaRefColumns+` FROM media m WHERE `+where+`
 			ORDER BY m.taken_at DESC, m.id DESC`, args...)
 		if err != nil {
 			return nil, err
@@ -235,7 +227,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Detail, error) {
 		}
 	} else {
 		rows, err := s.Pool.Query(ctx, `
-			SELECT `+mediaCols+`
+			SELECT `+media.MediaRefColumns+`
 			FROM album_items ai JOIN media m ON m.id = ai.media_id
 			WHERE ai.album_id = $1 AND m.deleted_at IS NULL
 			ORDER BY ai.sort_key ASC, m.taken_at DESC`, id)

@@ -69,21 +69,8 @@ type ListResult struct {
 	Buckets    []Bucket   `json:"buckets"`
 }
 
-// listMediaCols 时间轴一行的查询列（顺序必须与 List 里的 Scan 目标一一对应）。
-//
-// filename / folder_path 在 DDL 中可空，而 MediaRef 的同名字段是非指针 string：
-// 必须 COALESCE，否则全库只要有一行 NULL，整个 GET /media 就返回 400
-// （实测：can't scan into dest[3] (col: folder_path): cannot scan NULL into *string）。
-//
-// taken_at 同样是可空列，但这里**故意不 COALESCE**：MediaRef.TakenAt 是被 /media、/search、
-// /albums、/shares 等 7 个扫描器与 JSON 契约共用的非指针 time.Time，改成指针会让 taken_at
-// 变 null（契约破坏）。改为在 List 的扫描边界用 *time.Time 承接、NULL 时保持零值——
-// 与同包 duplicates.go 的取法一致，保留"确实没有拍摄时间"这一事实。
-//
-// 回归保护见 timeline_null_test.go：裸选可空列会被测试直接拒绝。
-const listMediaCols = `m.id, m.type, COALESCE(m.filename,''), COALESCE(m.folder_path,''), m.taken_at,
-	m.width, m.height, m.duration, m.codec, m.is_360, m.place, m.rating,
-	m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg`
+// MediaRef 的查询列与扫描器见 mediaref.go（唯一真源，7 处调用共用）。
+// 曾经这里的 listMediaCols 只是"其中一份"，其余 6 份各自裸选可空列而漂移。
 
 // timelineBucketSQL 时间桶聚合。%[1]s=date_trunc 粒度，%[2]s=桶键 to_char 格式，%[3]s=WHERE。
 //
@@ -220,10 +207,10 @@ func (s *Store) List(ctx context.Context, p ListParams) (*ListResult, error) {
 	}
 
 	args = append(args, p.Limit+1)
-	// 列的 NULL 保护与取舍见 listMediaCols 的说明。
+	// 列与扫描器见 mediaref.go（唯一真源）。
 	// NULLS LAST：Postgres 的 DESC 默认 NULLS FIRST，会把无拍摄时间的媒体顶到时间轴最前，
 	// 而其桶又落在 "unknown"（末位）——显式 NULLS LAST 让两者一致；现有数据无 NULL，故零影响。
-	rows, err := s.Pool.Query(ctx, `SELECT `+listMediaCols+`
+	rows, err := s.Pool.Query(ctx, `SELECT `+MediaRefColumns+`
 		FROM media m WHERE `+where+`
 		ORDER BY m.taken_at DESC NULLS LAST, m.id DESC
 		LIMIT $`+fmt.Sprint(len(args)), args...)
@@ -234,19 +221,10 @@ func (s *Store) List(ctx context.Context, p ListParams) (*ListResult, error) {
 
 	res := &ListResult{Items: []MediaRef{}, Buckets: []Bucket{}, Total: total}
 	for rows.Next() {
-		var it MediaRef
-		// taken_at 同样可空，但 MediaRef.TakenAt 是非指针 time.Time——它是 /media、/search、
-		// /albums、/shares 等 7 个扫描器与 JSON 契约共用的形状，改成 *time.Time 会让 taken_at
-		// 变成 null（契约破坏）。故只在扫描边界用 *time.Time 承接、NULL 时保持零值，
-		// 与同包 duplicates.go 的取法严格一致（同包不得有两种"缺失时间"语义）。
-		var taken *time.Time
-		if err := rows.Scan(&it.ID, &it.Type, &it.Filename, &it.FolderPath, &taken, &it.Width, &it.Height,
-			&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG); err != nil {
+		// taken_at 可空由扫描器在边界承接（NULL → 零值），见 mediaref.go 的取舍说明。
+		it, err := ScanMediaRef(rows)
+		if err != nil {
 			return nil, err
-		}
-		if taken != nil {
-			it.TakenAt = *taken
 		}
 		res.Items = append(res.Items, it)
 	}

@@ -231,10 +231,14 @@ func (s *Store) Purge(ctx context.Context, id string) (string, error) {
 }
 
 // ListTrash 回收站列表（按删除时间倒序，上限 500 条）。
+//
+// 列与扫描器走 mediaref.go 的唯一真源。**行为变化（有意）**：本函数原先只选 13 列、
+// **没有 folder_path**，于是回收站的 folder_path 恒为 ""（与列表页不一致，属历史漂移）。
+// 收拢后回收站也带上真实 folder_path —— 这是"同一份清单"的必然结果，
+// 若保留旧的 13 列，就又是一份私有副本。
 func (s *Store) ListTrash(ctx context.Context, ownerID string) (*ListResult, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT m.id, m.type::text, m.filename, m.taken_at, m.width, m.height, m.duration,
-		       m.codec, m.is_360, m.place, m.rating, m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg
+		SELECT `+MediaRefColumns+`
 		FROM media m
 		WHERE m.deleted_at IS NOT NULL AND m.owner_id = $1
 		ORDER BY m.deleted_at DESC LIMIT 500`, ownerID)
@@ -244,10 +248,8 @@ func (s *Store) ListTrash(ctx context.Context, ownerID string) (*ListResult, err
 	defer rows.Close()
 	res := &ListResult{Items: []MediaRef{}, Buckets: []Bucket{}}
 	for rows.Next() {
-		var it MediaRef
-		if err := rows.Scan(&it.ID, &it.Type, &it.Filename, &it.TakenAt, &it.Width, &it.Height,
-			&it.Duration, &it.Codec, &it.Is360, &it.Place, &it.Rating,
-			&it.ThumbnailSM, &it.ThumbnailMD, &it.ThumbnailLG); err != nil {
+		it, err := ScanMediaRef(rows)
+		if err != nil {
 			return nil, err
 		}
 		res.Items = append(res.Items, it)

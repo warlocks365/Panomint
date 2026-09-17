@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"panoalbum/internal/phash"
 )
@@ -271,10 +270,10 @@ func (s *Store) FindDuplicates(ctx context.Context, p DuplicateParams) (*Duplica
 	}
 
 	// ORDER BY id 只为让底层行序稳定（分组的输出顺序不依赖它，见 groupDuplicates）
+	// 列清单走 mediaref.go 的唯一真源；phash / filesize 是**本端点额外的两列**，
+	// 必须排在 MediaRefColumns 之后（扫描目标同序，见下方 Dests 追加）。
 	rows, err := s.Pool.Query(ctx, `
-		SELECT m.id, m.type::text, COALESCE(m.filename,''), COALESCE(m.folder_path,''), m.taken_at,
-		       m.width, m.height, m.duration, m.codec, m.is_360, m.place, m.rating,
-		       m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg, m.phash, COALESCE(m.filesize, 0)
+		SELECT `+MediaRefColumns+`, m.phash, COALESCE(m.filesize, 0)
 		FROM media m WHERE `+where+`
 		ORDER BY m.id`, args...)
 	if err != nil {
@@ -285,21 +284,16 @@ func (s *Store) FindDuplicates(ctx context.Context, p DuplicateParams) (*Duplica
 	cands := make([]dupCandidate, 0, total)
 	for rows.Next() {
 		var (
-			c     dupCandidate
-			taken *time.Time
-			ph    int64
+			c  dupCandidate
+			ph int64
 		)
-		if err := rows.Scan(&c.Ref.ID, &c.Ref.Type, &c.Ref.Filename, &c.Ref.FolderPath, &taken,
-			&c.Ref.Width, &c.Ref.Height, &c.Ref.Duration, &c.Ref.Codec, &c.Ref.Is360,
-			&c.Ref.Place, &c.Ref.Rating, &c.Ref.ThumbnailSM, &c.Ref.ThumbnailMD, &c.Ref.ThumbnailLG,
-			&ph, &c.Filesize); err != nil {
+		sc := NewMediaRefScanner()
+		dests := append(sc.Dests(), &ph, &c.Filesize)
+		if err := rows.Scan(dests...); err != nil {
 			return nil, err
 		}
-		// taken_at 列可空，而 MediaRef.TakenAt 是非指针（与 /media 同一形状，不能改）。
-		// 用 *time.Time 承接再回填，NULL 时保持零值——比让整个请求 500 合理。
-		if taken != nil {
-			c.Ref.TakenAt = *taken
-		}
+		// taken_at 的 NULL 语义由扫描器在边界承接（NULL → 零值），与其余读路径严格一致。
+		c.Ref = sc.Finish()
 		// BIGINT 装的是无符号 64 位指纹的位模式，原样转回即可（见 internal/phash/store.go 的说明）
 		c.PHash = uint64(ph)
 		cands = append(cands, c)

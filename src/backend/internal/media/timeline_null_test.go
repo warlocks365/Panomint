@@ -7,19 +7,21 @@ import (
 	"testing"
 )
 
-// ---- 时间轴的 NULL 保护（T-019）----
+// ---- 列清单的 NULL 保护（T-019；§二十一 收拢为单一真源后改名）----
 //
 // 背景：media.filename / folder_path / taken_at 在 DDL 中都可空，而 MediaRef 的
 // Filename / FolderPath / TakenAt 是非指针字段。裸选可空列时，全库只要有一行 NULL，
-// 整个 GET /media 就 400（实测 can't scan into dest[3] (col: folder_path):
-// cannot scan NULL into *string；taken_at 则是 dest[4] into *time.Time）。
+// 整个端点就崩（实测 can't scan into dest[2] (col: filename): cannot scan NULL into *string）。
 //
-// 这三个测试是**离线**的 SQL 形状回归：真正的端到端证明用"folder_path=NULL 的夹具"
-// 对真实库跑过（改前 400 / 改后出页），见交付报告。
+// 这里的断言对象从"时间轴那一份"变成了**唯一真源** MediaRefColumns（7 处调用共用）。
+// "再出现第 N 份副本"这道防线由 mediaref_single_source_test.go 单独负责。
+//
+// 这三个测试是**离线**的 SQL 形状回归：真正的端到端证明用"三列全 NULL 的夹具"
+// 对真实库跑过（改前 5 个端点崩 / 改后全部 200），见交付报告。
 
-// TestListNullableColumnsGuarded 时间轴不得裸选可空列 filename / folder_path。
+// TestListNullableColumnsGuarded 唯一真源的列清单不得裸选可空列 filename / folder_path。
 func TestListNullableColumnsGuarded(t *testing.T) {
-	norm := strings.Join(strings.Fields(listMediaCols), " ")
+	norm := strings.Join(strings.Fields(MediaRefColumns), " ")
 
 	// 命中"列表项位置上的裸可空列"：前面是开头或逗号，后面是逗号或结尾。
 	// COALESCE(m.filename,'') 不会被命中——它前面是左括号，不是逗号。
