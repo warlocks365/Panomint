@@ -45,6 +45,6 @@
 
 ## 五、运行入口
 
-- 前端 dev：`src/frontend` → `npm run dev` → http://localhost:5173（admin@pano.local / pano-admin-dev-only）
+- 前端 dev：`src/frontend` → `npm run dev` → http://localhost:<password>@pano.local / pano-admin-dev-only）
 - 后端 API：http://localhost:8080（健康检查 /health /ready /metrics）
 - 转码 worker：`cd src/backend && FFMPEG_PATH=C:/Users/warlocks/Tools/ffmpeg/bin go run ./cmd/transcodectl worker`
