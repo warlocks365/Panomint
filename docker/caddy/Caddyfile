@@ -1,14 +1,21 @@
-# 内网 HTTPS 入口（Job000008）：泛域名证书静态挂载，反代到 pano-web
-# 证书：Let's Encrypt *.warlocks.cn（来此加密渠道签发，2026-10-13 到期，需手动续期后重启本容器）
+# 通用入口（**默认形态**）：不依赖任何证书文件即可启动。
+#
+# 站点地址由环境变量注入，缺省 http://localhost（只有本机能访问）：
+#   SITE_ADDRESS=album.example.com     # 公网域名 → Caddy 自动 ACME 签发（需 80/443 公网可达）
+#   SITE_ADDRESS=http://192.168.1.10   # 内网明文 HTTP（需把容器 80 端口映射到宿主机）
+# ⚠️ 不要把它设成空值：Caddy 用 os.LookupEnv 判定，**空串 = 已设置**，空地址会丢掉这里的安全默认值。
+#
+# 需要"自有证书 + 显式 HTTPS"时改用 docker/caddy/Caddyfile.tls（见 docker/caddy/README.md）。
 {
 	auto_https disable_redirects
 }
 
-panomint.warlocks.cn, photo.warlocks.cn {
-	tls /etc/caddy/certs/fullchain.crt /etc/caddy/certs/private.pem
+{$SITE_ADDRESS:http://localhost} {
 	reverse_proxy web:80 {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
+		# 透传给后端的协议：后端据此拼分享链接 / OG 图片的绝对 URL（src/backend/internal/shares/og.go）。
+		# 本形态若以明文 http:// 对外，请把这行改成 http。
 		header_up X-Forwarded-Proto https
 	}
 	# 与 web 容器一致的上传体上限（100m）

@@ -1,0 +1,32 @@
+# 自有证书 + 显式 HTTPS 形态（**当前部署使用**）。
+# 选用方式：在 .env 里加一行 CADDY_CONFIG=Caddyfile.tls（见 docker-compose.yml 的 caddy 服务）。
+#
+# 内网 HTTPS 入口（Job000008）：泛域名证书静态挂载，反代到 pano-web
+# 证书：Let's Encrypt *.warlocks.cn（来此加密渠道签发，2026-10-13 到期，需手动续期后重启本容器）
+#
+# 站点地址与证书路径均为变量，**默认值与改造前的字面量逐字一致** —— 不设这些变量时行为不变：
+#   SITE_ADDRESS        站点地址（多个域名用逗号分隔）
+#   TLS_CERT / TLS_KEY  容器内证书/私钥路径（宿主机 ./docker/caddy/certs 只读挂到 /etc/caddy/certs）
+# ⚠️ 不要把它们设成空值：Caddy 用 os.LookupEnv 判定，**空串 = 已设置**，会覆盖这里的默认值。
+{
+	auto_https disable_redirects
+}
+
+{$SITE_ADDRESS:panomint.warlocks.cn, photo.warlocks.cn} {
+	tls {$TLS_CERT:/etc/caddy/certs/fullchain.crt} {$TLS_KEY:/etc/caddy/certs/private.pem}
+	reverse_proxy web:80 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		# 本形态由 Caddy 终止 HTTPS，故固定透传 https。
+		header_up X-Forwarded-Proto https
+	}
+	# 与 web 容器一致的上传体上限（100m）
+	request_body {
+		max_size 100MB
+	}
+	encode zstd gzip
+	log {
+		output stdout
+		format console
+	}
+}

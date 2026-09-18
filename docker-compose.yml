@@ -245,19 +245,32 @@ services:
     depends_on:
       - api
 
-  # ---- 内网 HTTPS 入口（Job000008）：泛域名证书静态挂载，443 反代 web:80 ----
-  # 证书文件部署在宿主机 ./docker/caddy/certs/（fullchain.crt + private.pem，权限 600，不入库）
-  # 续期：证书 2026-10-13 到期（来此加密手动签发），换新后 docker compose restart caddy
+  # ---- 入口反代（Job000008）----
+  # ⚠️ 这是**环境相关**配置，不是产品默认值：
+  #   · 通用部署走默认形态 docker/caddy/Caddyfile —— HTTP（或公网域名自动 ACME），**不需要任何证书文件**；
+  #   · 当前部署显式选用 HTTPS 变体：在 .env 里加一行 CADDY_CONFIG=Caddyfile.tls，
+  #     证书由部署者放到宿主机 ./docker/caddy/certs/（fullchain.crt + private.pem，权限 600，不入库）。
+  # 证书 2026-10-13 到期（来此加密手动签发），换新后 docker compose restart caddy
+  # 需要覆盖站点地址/证书路径时，给本服务加 environment（⚠️ 不要传空值：Caddy 用 os.LookupEnv，
+  # 空串算"已设置"，会覆盖 Caddyfile 里的安全默认值）：
+  #   environment:
+  #     SITE_ADDRESS: album.example.com
   caddy:
     image: caddy:2-alpine
     container_name: pano-caddy
     restart: unless-stopped
+    # 配置文件由 CADDY_CONFIG 选择（compose 在解析期替换 ${}；未设置或空值都回落到 Caddyfile）。
+    # 显式写出完整 argv：官方 caddy:2-alpine 镜像**不带** ENTRYPOINT，其自带 CMD 正是
+    # ["caddy","run","--config","/etc/caddy/Caddyfile","--adapter","caddyfile"]，
+    # 故这里只是把 config 路径变量化（`docker image inspect caddy:2-alpine` 可复核）。
+    command: ["caddy", "run", "--config", "/etc/caddy/${CADDY_CONFIG:-Caddyfile}", "--adapter", "caddyfile"]
     ports:
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./docker/caddy/certs:/etc/caddy/certs:ro
+      # 整个目录只读挂入（而非单文件）：两个变体都在容器内可见，CADDY_CONFIG 写错时
+      # Caddy 会明确报"文件不存在"，不会像单文件挂载那样被 Docker 静默建成空目录。
+      - ./docker/caddy:/etc/caddy:ro
       - caddydata:/data
     depends_on:
       - web

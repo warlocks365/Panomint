@@ -12,7 +12,8 @@
 # 可覆盖的环境变量（均有默认值）：
 #   COMPOSE_DIR            compose 项目目录        默认 /home/warlocks/pano-album
 #   BACKUP_DIR             备份根目录              默认 /home/backups/pano
-#                          ⚠️ 必须落在 /home（根分区 / 仅剩 2.2G，脚本会主动拒绝落 /）
+#                          ⚠️ 只要目标分区可用空间 ≥ MIN_FREE_GB 即可（示例环境把它放在 /home）；
+#                             落在根分区（单分区/数据即根分区的机器）只告警，不阻塞。
 #   KEEP_DAILY/WEEKLY/MONTHLY  保留份数            默认 14 / 8 / 6
 #   MIN_FREE_GB            执行前最小可用空间(GB)  默认 10
 #   BACKUP_GPG_RECIPIENT   gpg 收件人；设置后整体加密为 <stamp>.tar.gz.gpg
@@ -51,7 +52,11 @@ if ! flock -n 9; then
 fi
 
 DEST_FS="$(df -P "$BACKUP_DIR" | tail -n1 | awk '{print $6}')"
-[ "$DEST_FS" = "/" ] && die "备份目录落在根分区 /（余量极小），请改用 /home 下的目录：BACKUP_DIR=$BACKUP_DIR"
+# 备份目录"与数据同盘"不算错误：单分区机器（数据即根分区）只有 / 可用，禁用备份反而更糟。
+# 故这里只告警，**不阻塞**；真正的门禁是下面的可用空间检查。
+if [ "$DEST_FS" = "/" ]; then
+  log "警告：备份目录落在根分区 $BACKUP_DIR —— 备份与业务数据同盘，磁盘/机器故障时两者会一起丢；建议放到独立磁盘或 NAS（BACKUP_DIR=<独立盘路径>）"
+fi
 
 AVAIL_GB="$(df -BG --output=avail "$BACKUP_DIR" | tail -n1 | tr -dc '0-9')"
 [ -n "$AVAIL_GB" ] || die "无法读取 $BACKUP_DIR 可用空间"
