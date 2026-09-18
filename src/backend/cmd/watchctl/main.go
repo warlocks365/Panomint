@@ -46,7 +46,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg := config.Load()
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Fatalf("配置错误: %v", cfgErr)
+	}
 	db, err := pgxpool.New(ctx, cfg.PGDSN)
 	if err != nil {
 		log.Fatalf("连接 PG 失败: %v", err)

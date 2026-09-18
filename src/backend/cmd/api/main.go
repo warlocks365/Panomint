@@ -38,7 +38,13 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		// 生产环境仍在使用"仅适用于本机开发"的默认配置时直接拒绝启动，
+		// 而不是静默连到 127.0.0.1 上的陌生库。此处只用 os，避免新引入 import。
+		_, _ = os.Stderr.WriteString("配置错误: " + cfgErr.Error() + "\n")
+		os.Exit(1)
+	}
 
 	var log *zap.Logger
 	if cfg.Env == "prod" {

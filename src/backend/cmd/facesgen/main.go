@@ -102,7 +102,10 @@ func main() {
 		return
 	}
 
-	appCfg := config.Load()
+	appCfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Fatalf("配置错误: %v", cfgErr)
+	}
 	// watch 为常驻服务：用信号驱动退出；其余模式限时
 	var ctx context.Context
 	var cancel context.CancelFunc

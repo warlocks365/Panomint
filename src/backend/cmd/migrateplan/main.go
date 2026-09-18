@@ -97,7 +97,10 @@ func main() {
 	}
 	fmt.Printf("发现媒体文件 %d 个，用时 %s\n", len(entries), time.Since(start).Round(time.Millisecond))
 
-	cfg := config.Load()
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Fatalf("配置错误: %v", cfgErr)
+	}
 	pool, err := pgxpool.New(ctx, cfg.PGDSN)
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)

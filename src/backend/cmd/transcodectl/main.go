@@ -30,7 +30,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	cfg := config.Load()
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Fatalf("配置错误: %v", cfgErr)
+	}
 
 	// ffprobe 与 ffmpeg 通常同目录：FFPROBE_PATH 未设时回退用 FFMPEG_PATH
 	if os.Getenv("FFPROBE_PATH") == "" {

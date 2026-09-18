@@ -82,6 +82,12 @@ services:
       MEDIA_ROOT: /data/media
       THUMB_DIR: /data/thumbnails
       TILE_CACHE_DIR: /tile-cache # Job000009 瓦片缓存（高德 429 限流对策）
+      # 允许的跨域源。⚠️ 这是**环境相关**配置，不是产品默认值：
+      # 通用部署其实不需要任何跨域源 —— 前端由 nginx 同源托管并反向代理 API，同源请求不触发 CORS。
+      # 这里显式写出，是为了让"代码默认值去耦"（PG_DSN/VALKEY_ADDR/CORS_ORIGINS 的默认值
+      # 改为仅本机开发可用）**不改变现有部署的行为**；新环境请按需覆盖，
+      # 或显式设为空（= 不放行任何跨域源）。
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8765,https://192.168.1.117:8443}
       # Job000010 语义搜索的设备选择：cpu|cuda|auto（auto=优先 CUDA，不可用回落 CPU）
       # GPU 部署时把 EMBED_DEVICE 设为 cuda，并把 EMBED_LIB 指向 CUDA 版 onnxruntime 库
       EMBED_DEVICE: ${EMBED_DEVICE:-auto}

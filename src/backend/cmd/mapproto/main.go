@@ -11,28 +11,27 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"panoalbum/internal/config"
 	"panoalbum/internal/geo"
 )
-
-func pgDSN() string {
-	if v := os.Getenv("PG_DSN"); v != "" {
-		return v
-	}
-	return "postgres://pano:PanoDev2026!@192.168.1.115:5432/pano_album"
-}
 
 func main() {
 	seed := flag.Bool("seed", false, "写入合成测试数据后退出")
 	flag.Parse()
 
+	// 统一走 internal/config：避免在此重复一份带明文凭据的连接串默认值。
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("配置错误: %v", err)
+	}
+
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, pgDSN())
+	pool, err := pgxpool.New(ctx, cfg.PGDSN)
 	if err != nil {
 		log.Fatalf("连接 PG 失败: %v", err)
 	}

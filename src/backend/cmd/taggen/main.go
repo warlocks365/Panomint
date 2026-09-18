@@ -91,7 +91,10 @@ func main() {
 	ctx, cancel := newContext(o.mode)
 	defer cancel()
 
-	appCfg := config.Load()
+	appCfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Fatalf("配置错误: %v", cfgErr)
+	}
 	pool, err := pgxpool.New(ctx, appCfg.PGDSN)
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)

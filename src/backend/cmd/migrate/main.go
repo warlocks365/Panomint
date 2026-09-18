@@ -22,7 +22,10 @@ func main() {
 		cmd = "up"
 	}
 
-	cfg := config.Load()
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		log.Fatalf("配置错误: %v", cfgErr)
+	}
 	db, err := sql.Open("pgx", cfg.PGDSN)
 	if err != nil {
 		log.Fatalf("连接失败: %v", err)
