@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"panoalbum/internal/audit"
+	"panoalbum/internal/pgxutil"
 	"panoalbum/internal/queue"
 )
 
@@ -19,15 +21,34 @@ func errResp(c *gin.Context, status int, code, msg string) {
 	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
 }
 
+// writeLookupError 把「取媒体元信息/归属」失败的 DB 错误映射为响应。
+//
+// ★ 安全不变量：**畸形 id 与「记录不存在」必须逐字节同形**（同一个 404 NOT_FOUND /
+// 同一个 message）。media.id 是 UUID 列，`GET /media/not-a-uuid` 会让 PG 抛 22P02；
+// 若把它当 500，既伪造了"服务故障"，又会把 PG 原文（invalid input syntax for type uuid、
+// SQLSTATE、列类型）回给客户端。把两条分支收敛到同一个响应，是因为对调用方而言
+// "id 语法非法"与"这条不存在"是同一件事；任何可区分的响应都会变成探测判据。
+//
+// 其余 DB 错误（连不上库、超时、语法正确的 UUID 查询失败）仍是 500，但 message 固定：
+// 服务端 log 保留完整错误供排障，客户端不该看到内部实现细节。
+func writeLookupError(c *gin.Context, err error) {
+	if errors.Is(err, ErrNotFound) || pgxutil.IsMalformedID(err) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在")
+		return
+	}
+	log.Printf("[media] 媒体归属/存在性查询失败: %v", err)
+	errResp(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
+}
+
 // checkAccess 校验媒体归属；resp 为 false 时已写出错误响应。
+//
+// 错误映射统一走 writeLookupError —— 本函数的调用方遍布 /media/** 的读写端点
+// （Detail/Favorite/Rating/Delete/Restore/Purge/…），故畸形 id 的 404 口径与
+// 「不回显 PG 原文」在这里一次性生效，不需要每个端点各判一遍（单一真源）。
 func (h *Handler) checkAccess(c *gin.Context, id string) (ownerID string, ok bool) {
 	ownerID, _, err := h.Store.ownerOf(c.Request.Context(), id)
-	if errors.Is(err, ErrNotFound) {
-		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在")
-		return "", false
-	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		writeLookupError(c, err)
 		return "", false
 	}
 	if !canAccess(c.GetString("user_id"), c.GetString("role"), ownerID) {
@@ -49,7 +70,8 @@ func (h *Handler) Detail(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		log.Printf("[media] 媒体详情查询失败 id=%s: %v", id, err)
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
 		return
 	}
 	c.JSON(http.StatusOK, d)

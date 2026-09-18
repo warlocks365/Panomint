@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/pgxutil"
 	"panoalbum/internal/tags"
 )
 
@@ -339,6 +341,23 @@ func (h *Handler) ConfirmMediaTags(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"media_id": mediaID, "confirmed": n})
 }
 
+// tagNotFound 标签「不存在」的统一响应。
+// 「标签真的不存在」与「:id 语法非法（PG 22P02）」必须共用本函数、逐字节同形：
+// 两条分支对调用方是同一件事（拿不到这个标签），分开写就会变成一个探测判据。
+func tagNotFound(c *gin.Context) { errResp(c, http.StatusNotFound, "NOT_FOUND", "标签不存在") }
+
+// writeTagLookupError 把标签存在性查询的失败映射为响应。
+// 畸形 id → 与「标签不存在」同形 404；其余 DB 故障 → 500，但只把完整错误写进服务端日志，
+// 客户端拿固定文案（绝不回显 PG 原文：invalid input syntax for type uuid / SQLSTATE / 类型名）。
+func writeTagLookupError(c *gin.Context, err error) {
+	if pgxutil.IsMalformedID(err) {
+		tagNotFound(c)
+		return
+	}
+	log.Printf("[media] 标签存在性查询失败: %v", err)
+	errResp(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
+}
+
 // ListTagMedia GET /tags/:id/media?cursor=&limit=&space=：按标签浏览（仅已确认关联）。
 // 标签不存在时 404，避免与「标签存在但无已确认媒体」返回的空列表混淆。
 //
@@ -352,13 +371,15 @@ func (h *Handler) ListTagMedia(c *gin.Context) {
 		return
 	}
 	tagID := c.Param("id")
+	// tags.id 是 UUID 列：畸形 id 会让 PG 抛 22P02。与 !exists 共用 tagNotFound，
+	// 既保证 404 而非 500，也保证响应与「标签不存在」逐字节同形。
 	exists, err := h.Store.tagExists(c.Request.Context(), tagID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		writeTagLookupError(c, err)
 		return
 	}
 	if !exists {
-		errResp(c, http.StatusNotFound, "NOT_FOUND", "标签不存在")
+		tagNotFound(c)
 		return
 	}
 	limit := 0
@@ -367,7 +388,10 @@ func (h *Handler) ListTagMedia(c *gin.Context) {
 	}
 	res, err := h.Store.ListMediaByTag(c.Request.Context(), scope, tagID, c.Query("cursor"), limit)
 	if err != nil {
-		errResp(c, http.StatusBadRequest, "QUERY_FAILED", err.Error())
+		// 状态码与 code 保持既有形状（400/QUERY_FAILED），只把 message 从 err.Error()
+		// 换成固定文案：游标解析失败等本地错误与 DB 故障的来源不同，但都不该回显内部原文。
+		log.Printf("[media] 标签媒体列表查询失败 tag=%s: %v", tagID, err)
+		errResp(c, http.StatusBadRequest, "QUERY_FAILED", "查询失败")
 		return
 	}
 	c.JSON(http.StatusOK, res)

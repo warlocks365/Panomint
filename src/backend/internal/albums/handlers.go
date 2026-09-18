@@ -2,10 +2,13 @@ package albums
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/pgxutil"
 )
 
 // Handler 相册端点。
@@ -71,6 +74,23 @@ func (h *Handler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"albums": albums})
 }
 
+// writeAlbumLookupError 把 getAlbumMeta 的失败映射为响应。
+//
+// 畸形 id（albums.id 是 UUID 列 → PG 22P02）与「相册不存在」共用同一 404（同状态码、
+// 同 code、同 message）。这与 0ec9a78 把「无权」也收敛成 404 是同一个口径：任何可与
+// 「不存在」区分的响应都是探测判据，而 500 还会顺带把 PG 原文（invalid input syntax
+// for type uuid / SQLSTATE）回给客户端，属信息泄漏。
+//
+// 其余 DB 故障仍 500，但 message 固定：排障看服务端日志，客户端不见内部细节。
+func writeAlbumLookupError(c *gin.Context, err error) {
+	if errors.Is(err, ErrNotFound) || pgxutil.IsMalformedID(err) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "相册不存在")
+		return
+	}
+	log.Printf("[albums] 相册元信息查询失败: %v", err)
+	errResp(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
+}
+
 // Get GET /albums/:id
 //
 // 归属校验与同文件的 Patch/Delete 同一套 helper（getAlbumMeta + canManage）。
@@ -86,12 +106,8 @@ func (h *Handler) List(c *gin.Context) {
 func (h *Handler) Get(c *gin.Context) {
 	id := c.Param("id")
 	ownerID, _, err := h.Store.getAlbumMeta(c.Request.Context(), id)
-	if errors.Is(err, ErrNotFound) {
-		errResp(c, http.StatusNotFound, "NOT_FOUND", "相册不存在")
-		return
-	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		writeAlbumLookupError(c, err)
 		return
 	}
 	if !canManage(c, ownerID) {
@@ -104,7 +120,8 @@ func (h *Handler) Get(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		log.Printf("[albums] 相册详情查询失败 id=%s: %v", id, err)
+		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
 		return
 	}
 	c.JSON(http.StatusOK, d)

@@ -108,13 +108,24 @@ func TestThumbDenyIsByteIdenticalToMissingThumb(t *testing.T) {
 }
 
 func TestThumbAccessDBErrorIs500(t *testing.T) {
+	// 真故障必须与「不存在」分开：500，而不是被折叠成 404。
+	// 同时钉住 (b) 类缺陷：500 的 message 绝不能是 err.Error() 原文。
+	dbErr := errors.New(`ERROR: column "thumbnail_sm" does not exist (SQLSTATE 42703)`)
 	c, rec := thumbCtx()
-	writeThumbAccessError(c, errors.New("db down"))
+	writeThumbAccessError(c, dbErr)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("DB 错误应 500，实际 %d: %s", rec.Code, rec.Body.String())
 	}
 	if code, _ := errEnvelope(t, rec); code != "QUERY_FAILED" {
 		t.Fatalf("错误码应为 QUERY_FAILED，实际 %q", code)
+	}
+	if strings.Contains(rec.Body.String(), dbErr.Error()) {
+		t.Fatalf("500 响应回显了数据库原文（信息泄漏）: %s", rec.Body.String())
+	}
+	for _, leak := range []string{"thumbnail_sm", "42703", "SQLSTATE", "column"} {
+		if strings.Contains(strings.ToLower(rec.Body.String()), strings.ToLower(leak)) {
+			t.Fatalf("500 响应泄露内部实现细节（%q）: %s", leak, rec.Body.String())
+		}
 	}
 }
 
@@ -143,16 +154,8 @@ func TestThumbMalformedIDIs404Not500(t *testing.T) {
 	}
 }
 
-func TestIsMalformedID(t *testing.T) {
-	if !isMalformedID(&pgconn.PgError{Code: "22P02"}) {
-		t.Fatal("22P02 应判为畸形 id")
-	}
-	for _, err := range []error{nil, errors.New("db down"), &pgconn.PgError{Code: "23505"}} {
-		if isMalformedID(err) {
-			t.Fatalf("%v 不该判为畸形 id（否则真实故障会被伪装成 404）", err)
-		}
-	}
-}
+// IsMalformedID 的单元测试已随实现迁至 internal/pgxutil/pgerr_test.go（单一真源所在处）。
+// 本包只保留「判定 → 响应」的集成口径：TestThumbMalformedIDIs404Not500 在上面。
 
 // size 白名单必须在触库前生效（Handler.Store 为 nil：走到 DB 会 panic，故 400 即证明未触库）。
 func TestThumbBadSizeRejectedBeforeDB(t *testing.T) {

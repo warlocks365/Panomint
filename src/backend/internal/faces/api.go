@@ -16,10 +16,13 @@ package faces
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/pgxutil"
 )
 
 // Handler 人物 / 人脸相关端点。Store 不可为空。
@@ -94,6 +97,23 @@ func (h *Handler) PatchPerson(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
+// writePersonMediaError 把 GET /people/:id/media 的查询失败映射为响应。
+//
+// 人物 id 是 UUID 列（faces.person_id → people.id），畸形 id 会让 PG 抛 22P02。
+// 与「人物不存在」同形 404（同一 code 与 message，文案取自 ErrPersonNotFound）：
+// 对调用方而言"id 语法非法"与"没有这个人物"是同一件事；若回 500，既伪造服务故障，
+// 又会把 `invalid input syntax for type uuid` / SQLSTATE 这类内部细节吐出去。
+//
+// 其余 DB 故障仍 500，但 message 固定为「查询失败」——完整错误只进服务端日志。
+func writePersonMediaError(c *gin.Context, err error) {
+	if pgxutil.IsMalformedID(err) {
+		fail(c, http.StatusNotFound, "NOT_FOUND", ErrPersonNotFound.Error())
+		return
+	}
+	log.Printf("[faces] 人物媒体查询失败: %v", err)
+	fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
+}
+
 // PersonMedia GET /people/:id/media?limit= → { person_id, total, items:[...] }
 //
 // 调用者身份取自上下文 user_id：只返回该调用者可见的媒体（谓词来自
@@ -103,7 +123,7 @@ func (h *Handler) PersonMedia(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
 	items, err := h.Store.PersonMedia(c.Request.Context(), c.Param("id"), c.GetString("user_id"), limit)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		writePersonMediaError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"person_id": c.Param("id"), "total": len(items), "items": items})

@@ -3,13 +3,15 @@ package media
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgconn"
+
+	"panoalbum/internal/pgxutil"
 )
 
 // Thumb GET /media/:id/thumb?size=sm|md|lg —— 缩略图服务（G2 缺口补齐）。
@@ -98,27 +100,21 @@ func (h *Handler) thumbAccess(c *gin.Context, id string) bool {
 	return false
 }
 
-// isMalformedID 判定「:id 不是合法 UUID」这类 Postgres 输入错误（SQLSTATE 22P02）。
-//
-// media.id 是 UUID 列（migrations/00004_ddl_part.sql:12），非法 id 会让 Postgres 直接报
-// `invalid input syntax for type uuid`。这类错误必须与「不存在」同归 404：
-//   - 改造前 Thumb 对它走的是原有的 `err != nil → 404`，若改成 500 就是行为回退；
-//   - 500 分支会把 Postgres 原文（含类型/列名线索）写进 message，属信息泄漏；
-//     internal/transcode 已踩过同一坑并明确规避（见 transcode.go 的 ServeHLS 注释）。
-//
-// 真正的 DB 故障（连接失败、超时等）不在此列，仍旧 500，不会被伪装成「不存在」。
-func isMalformedID(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "22P02"
-}
-
 // writeThumbAccessError 把归属判定的失败映射为响应：
 // ErrNotFound（无权/不存在）与「id 非法」→ 404（与「不存在」同形）；其余 DB 错误 → 500。
 // **绝不产出 403。**
+//
+// 畸形 id 的判定复用 internal/pgxutil.IsMalformedID（**单一真源**：media/albums/faces/
+// transcode 四个包共用同一份实现，避免各自复制后漂移 —— 本项目已因“同一逻辑复制多份”
+// 出过两次严重事故）。
+//
+// 500 分支只把完整错误写进服务端日志：客户端拿固定文案即可，绝不回显 err.Error()
+// —— PG 原文（SQLSTATE / 类型名 / 列线索）属内部实现细节，任何外部输入都不该让它漏出去。
 func writeThumbAccessError(c *gin.Context, err error) {
-	if errors.Is(err, ErrNotFound) || isMalformedID(err) {
+	if pgxutil.IsMalformedID(err) || errors.Is(err, ErrNotFound) {
 		thumbNotFound(c)
 		return
 	}
-	errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+	log.Printf("[media] 缩略图归属查询失败: %v", err)
+	errResp(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
 }

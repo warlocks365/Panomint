@@ -3,6 +3,7 @@ package transcode
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"panoalbum/internal/ffmpeg"
+	"panoalbum/internal/pgxutil"
 	"panoalbum/internal/queue"
 )
 
@@ -162,6 +164,23 @@ func (h *Handler) CreateJob(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
 }
 
+// writeJobLookupError 把 JobStatus 的查询失败映射为响应。
+//
+// transcode_jobs.id 是 UUID 列 → 畸形 id 会让 PG 抛 22P02。这类错误与「任务不存在」
+// （pgx.ErrNoRows）必须共用同一 404 形状：对调用方而言"id 语法非法"与"没有这个任务"
+// 是同一件事；回 500 会伪造服务故障，并把 PG 原文（invalid input syntax for type uuid、
+// SQLSTATE、类型/列线索）吐给客户端。
+//
+// 其余 DB 故障仍 500，但 message 固定：完整错误只进服务端日志。
+func writeJobLookupError(c *gin.Context, err error) {
+	if errors.Is(err, pgx.ErrNoRows) || pgxutil.IsMalformedID(err) {
+		errJSON(c, http.StatusNotFound, "NOT_FOUND", "任务不存在")
+		return
+	}
+	log.Printf("[transcode] 任务查询失败: %v", err)
+	errJSON(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败")
+}
+
 // JobStatus GET /transcode/job/:id（查任务状态，前端轮询用）
 //
 // 归属校验：transcode_jobs 没有 owner 列，故 JOIN media 取 media.owner_id（与 CreateJob 同口径）。
@@ -180,12 +199,8 @@ func (h *Handler) JobStatus(c *gin.Context) {
 		 FROM transcode_jobs j JOIN media m ON m.id = j.media_id
 		 WHERE j.id = $1`,
 		c.Param("id")).Scan(&j.ID, &j.MediaID, &j.Status, &j.Profile, &j.ResultPath, &ownerID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		errJSON(c, http.StatusNotFound, "NOT_FOUND", "任务不存在")
-		return
-	}
 	if err != nil {
-		errJSON(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		writeJobLookupError(c, err)
 		return
 	}
 	if !canAccessMedia(c, ownerID) {
