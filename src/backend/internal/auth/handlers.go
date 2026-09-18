@@ -609,9 +609,16 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 // DeleteUser DELETE /admin/users/:id（需 admin:users 权限）。
 //
 // 契约 §2 写的是「禁用/删除」——正好对应现实约束：
-//   - 默认（不带参数）→ **硬删除**，但只要该用户还有归属数据就会被外键拒绝（返回 409
-//     USER_HAS_ASSETS，并提示改用禁用）。media/albums/audit_log 等 7 处以 NO ACTION 引用
-//     users(id)，这是刻意的：数据必须继续可归属，审计尤其不能因删用户而失去主体。
+//   - 默认（不带参数）→ **硬删除**，但只要该用户还有「资产」就会被外键拒绝（返回 409
+//     USER_HAS_ASSETS，并提示改用禁用）。仍以 NO ACTION 引用 users(id) 的是
+//     albums / media / memories / share_links / shared_space / index_jobs 六张表
+//     （2026-09-18 用 information_schema.referential_constraints 实测的清单），
+//     意思是"这些数据必须继续可归属到某个人"。
+//   - **审计不再构成阻断**：audit_log.user_id 已由迁移 00025 从 NO ACTION 放宽为
+//     ON DELETE SET NULL（删账号只把该账号审计行的 actor 引用置 NULL，审计行原样保留），
+//     且迁移 00026 给 audit_log 加了 actor_email（**写入时**快照的操作者邮箱）。
+//     归因不再依赖 users 行是否还在 ⇒ 原设计「审计尤其不能因删用户而失去主体」的意图
+//     已由 actor_email 快照满足，不必再靠"拒绝删除"来满足。
 //   - `?disable=1` → **禁用**（status=disabled + 吊销会话），适用于绝大多数真实场景。
 //
 // 两种路径都受"自锁 / 最后 owner"守卫约束（禁用等价于 status=disabled）。

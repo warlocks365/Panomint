@@ -490,13 +490,19 @@ func (s *Store) RevokeAllSessions(ctx context.Context, userID string) error {
 
 // DeleteUser 硬删除用户。
 //
-// ⚠️ **多数情况下会被外键拒绝，这是刻意的**：media / albums / audit_log / index_jobs /
-// memories / share_links / shared_space 七处都以 NO ACTION 引用 users(id)，
-// 意思是"这些数据必须继续可归属到某个人"（审计尤其不能因为删掉用户就失去主体）。
-// 因此真正可行的"删除"是**禁用**（status=disabled）；本方法只在用户确实没有任何归属数据时
-// （例如建错的账号）才会成功，否则返回 ErrUserHasAssets 让调用方改用禁用。
+// ⚠️ **仍有「资产」时会被外键拒绝，这是刻意的**：albums / media / memories / share_links /
+// shared_space / index_jobs 六张表都以 NO ACTION 引用 users(id)
+// （2026-09-18 用 information_schema.referential_constraints 实测的清单），
+// 意思是"这些数据必须继续可归属到某个人"。因此真正可行的"删除"是**禁用**
+// （status=disabled）；本方法只在用户确实没有任何此类归属数据时（例如建错的账号）
+// 才会成功，否则返回 ErrUserHasAssets 让调用方改用禁用。
 //
-// sessions / user_preferences / user_ui_prefs / shared_space_members 是 CASCADE，会随删。
+// **审计不再阻止删账号**：audit_log.user_id 已由迁移 00025 改为 ON DELETE SET NULL，
+// 且迁移 00026 给它加了 actor_email（**写入时**快照的操作者邮箱）。删账号只把该账号审计行的
+// actor 引用置 NULL、审计行原样保留，归因仍在 —— 原设计"审计尤其不能因为删掉用户就失去主体"
+// 的意图，已由 actor_email 快照满足，不再靠"拒绝删除"来满足。
+//
+// sessions / user_preferences / user_ui_prefs / shared_space_members / album_comments 是 CASCADE，会随删。
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	tag, err := s.Pool.Exec(ctx, `DELETE FROM users WHERE id = $1::uuid`, id)
 	var pgErr *pgconn.PgError

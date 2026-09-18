@@ -6,9 +6,14 @@ package audit
 //
 //	audit_log(id, user_id, action, detail jsonb, ip, at)          -- 00002 建表
 //	+ target_type, target_id, user_agent, 三条查询索引            -- 00020 补列
+//	audit_log.user_id 外键 → ON DELETE SET NULL                   -- 00025 放宽
+//	+ actor_email（写入时快照的操作者邮箱）                        -- 00026 补列
 //
 // ⚠️ Entry.ActorUserID 写入 user_id 列：列名是历史遗留（DDL 与文档都叫 user_id），
 // 但语义是「触发者」，故 Go 侧与对外 JSON 一律叫 actor_user_id。00020 刻意不改列名。
+//
+// ⚠️ actor_email 是 00025 的另一半：00025 让账号可删（user_id 置 NULL），
+// 00026 的 actor_email 快照保证删账号后归因仍在（详见该迁移的文件头注释）。
 
 import (
 	"context"
@@ -119,6 +124,11 @@ type PGStore struct {
 
 // Insert 写入一条审计记录并返回自增 id。
 //
+// actor_email 快照（00026）：在同一条 INSERT 里用子查询 `(SELECT email FROM users WHERE id = $1)`
+// 顺带把操作者邮箱写进去。这里**刻意用子查询而非第二次查询**：审计是高频低延迟路径
+// （每个登录/写操作一条），多一次往返不划算；且子查询让「actor 不存在时快照为 NULL」
+// 与「user_id 为 NULL」天然一致。子查询复用 $1，不新增参数位。
+//
 // 调用方通常**不应**直接调用它：请用 Recorder.Record（尽力而为，吞掉错误）。
 // 直接调用会把审计故障升级成业务故障，正是本模块要避免的。
 // 入参假定已经过 Entry.Normalize；未归一化的输入仍能写入，但可能落脏数据。
@@ -139,13 +149,35 @@ func (s *PGStore) Insert(ctx context.Context, e Entry) (int64, error) {
 	}
 
 	var id int64
-	err := s.Pool.QueryRow(ctx, `
-		INSERT INTO audit_log (user_id, action, target_type, target_id, detail, ip, user_agent, at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
-		RETURNING id`,
-		nullIfEmpty(e.ActorUserID), e.Action, nullIfEmpty(e.TargetType), nullIfEmpty(e.TargetID),
-		detail, nullIfEmpty(e.IP), nullIfEmpty(e.UserAgent), at).Scan(&id)
+	err := s.Pool.QueryRow(ctx, insertAuditSQL, insertAuditArgs(e, detail, at)...).Scan(&id)
 	return id, err
+}
+
+// insertAuditSQL 审计写入语句。抽成包级常量，好让 actor_email_test.go 直接钉死
+// 「占位符个数 = 实参个数」—— 两者不一致只在运行期报 `expected N arguments`，
+// 编译期完全看不见（本项目吃过这个亏）。
+//
+// actor_email 用**子查询**在同一条语句里取操作者邮箱做快照，而不是「先查 users 再插入」：
+//
+//	· 审计是高频低延迟路径（每个登录/写操作一条），多一次往返不划算；
+//	· 子查询让「actor 不存在时快照为 NULL」与「user_id 为 NULL」天然一致 ——
+//	  $1 为 NULL / 查不到时 `WHERE id = $1` 匹配不到行，子查询直接返回 NULL，
+//	  不需要在 Go 侧再写一遍「空则跳过」的分支，也就不会出现两条路径口径不一致。
+//
+// 子查询**复用 $1**，不新增参数位：占位符仍是 $1..$8，个数与语义和引入 actor_email 之前一致
+// （$1=user_id/actor，$2=action，$3=target_type，$4=target_id，$5=detail，$6=ip，$7=user_agent，$8=at）。
+const insertAuditSQL = `
+	INSERT INTO audit_log (user_id, actor_email, action, target_type, target_id, detail, ip, user_agent, at)
+	VALUES ($1, (SELECT email FROM users WHERE id = $1), $2, $3, $4, $5::jsonb, $6, $7, $8)
+	RETURNING id`
+
+// insertAuditArgs 按 insertAuditSQL 的占位符顺序组装实参。
+// 与 SQL 常量放在一起，是为了让「顺序/个数」两件事在同一个视野里，改一处就能看见另一处。
+func insertAuditArgs(e Entry, detail any, at time.Time) []any {
+	return []any{
+		nullIfEmpty(e.ActorUserID), e.Action, nullIfEmpty(e.TargetType), nullIfEmpty(e.TargetID),
+		detail, nullIfEmpty(e.IP), nullIfEmpty(e.UserAgent), at,
+	}
 }
 
 // nullIfEmpty 把空串转成 SQL NULL。
