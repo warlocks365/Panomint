@@ -33,8 +33,12 @@ func fail(c *gin.Context, status int, code, msg string) {
 }
 
 // ListPeople GET /people → { named:[...], unnamed:[{cluster_id,count,cover}] }
+//
+// 调用者身份取自上下文 user_id（鉴权中间件注入），用于把**暴露 media 内容的字段**
+// （face_count / cover_media_id / count / cover）收窄到调用者可见的媒体集合。
+// 身份缺失时不放宽、而是恒假收窄（见 Store.ListPeople）。
 func (h *Handler) ListPeople(c *gin.Context) {
-	named, unnamed, err := h.Store.ListPeople(c.Request.Context())
+	named, unnamed, err := h.Store.ListPeople(c.Request.Context(), c.GetString("user_id"))
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
 		return
@@ -91,9 +95,13 @@ func (h *Handler) PatchPerson(c *gin.Context) {
 }
 
 // PersonMedia GET /people/:id/media?limit= → { person_id, total, items:[...] }
+//
+// 调用者身份取自上下文 user_id：只返回该调用者可见的媒体（谓词来自
+// internal/mediascope 单一真源）。此前本端点没有任何属主条件，任一带 media:read
+// 的账号都能拿到他人的媒体 ID / 文件名（已实测复现）。
 func (h *Handler) PersonMedia(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	items, err := h.Store.PersonMedia(c.Request.Context(), c.Param("id"), limit)
+	items, err := h.Store.PersonMedia(c.Request.Context(), c.Param("id"), c.GetString("user_id"), limit)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
 		return
