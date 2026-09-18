@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/httperr"
 )
 
 // AmapTileProxy 高德栅格瓦片反代。
@@ -109,7 +111,7 @@ func (p *AmapTileProxy) Serve(c *gin.Context) {
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, u, nil)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "TILE_UPSTREAM", "message": err.Error()}})
+		httperr.Fail(c, http.StatusBadGateway, "TILE_UPSTREAM", "上游地图服务不可用", err)
 		return
 	}
 	// 上游按 Referer 做防盗链判断，透传本站 Host 便于排查，不暴露内网细节
@@ -117,7 +119,7 @@ func (p *AmapTileProxy) Serve(c *gin.Context) {
 
 	resp, err := cl.Do(req)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "TILE_UPSTREAM", "message": err.Error()}})
+		httperr.Fail(c, http.StatusBadGateway, "TILE_UPSTREAM", "上游地图服务不可用", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -130,7 +132,7 @@ func (p *AmapTileProxy) Serve(c *gin.Context) {
 	// 读全量 body（瓦片 ≤ 数百 KB），写缓存后再下发；429/5xx 不缓存
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "TILE_UPSTREAM", "message": err.Error()}})
+		httperr.Fail(c, http.StatusBadGateway, "TILE_UPSTREAM", "上游地图服务不可用", err)
 		return
 	}
 	p.writeCache(style, z, x, y, body)

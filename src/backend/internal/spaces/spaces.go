@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"panoalbum/internal/httperr"
 )
 
 // Handler 空间端点。
@@ -37,7 +39,7 @@ func (h *Handler) Get(c *gin.Context) {
 		SELECT count(*)::int, COALESCE(sum(filesize),0)::bigint
 		FROM media WHERE owner_id = $1 AND space = 'personal' AND deleted_at IS NULL`, userID).
 		Scan(&p.MediaCount, &p.UsedBytes); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 
@@ -47,14 +49,14 @@ func (h *Handler) Get(c *gin.Context) {
 		FROM shared_space s JOIN shared_space_members m ON m.space_id = s.id
 		WHERE m.user_id = $1 ORDER BY s.created_at`, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var r SharedRef
 		if err := rows.Scan(&r.ID, &r.Name, &r.Role); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+			httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 			return
 		}
 		shared = append(shared, r)

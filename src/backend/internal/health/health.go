@@ -3,6 +3,7 @@ package health
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,6 +30,10 @@ func (h *Handler) Live(c *gin.Context) {
 }
 
 // Ready GET /ready：PG + Valkey + 磁盘可写，全部通过才 200（readiness）。
+//
+// ⚠️ 本端点**无鉴权**（与 /health、/metrics 同挂在根路由上），因此失败原因里绝不能带
+// err.Error()：PG/Valkey 的原文会漏出主机、端口、用户名，os 错误会漏出文件系统路径。
+// 客户端只拿 "fail"，完整错误写服务端日志供排障。
 func (h *Handler) Ready(c *gin.Context) {
 	checks := gin.H{}
 	ok := true
@@ -37,21 +42,24 @@ func (h *Handler) Ready(c *gin.Context) {
 	defer cancel()
 
 	if err := h.Pool.Ping(ctx); err != nil {
-		checks["postgres"] = "fail: " + err.Error()
+		log.Printf("health: postgres 探测失败: %v", err)
+		checks["postgres"] = "fail"
 		ok = false
 	} else {
 		checks["postgres"] = "ok"
 	}
 
 	if err := h.Queue.Ping(ctx); err != nil {
-		checks["valkey"] = "fail: " + err.Error()
+		log.Printf("health: valkey 探测失败: %v", err)
+		checks["valkey"] = "fail"
 		ok = false
 	} else {
 		checks["valkey"] = "ok"
 	}
 
 	if err := checkDiskWritable(h.DiskCheckDir); err != nil {
-		checks["disk"] = "fail: " + err.Error()
+		log.Printf("health: 磁盘可写探测失败 dir=%s: %v", h.DiskCheckDir, err)
+		checks["disk"] = "fail"
 		ok = false
 	} else {
 		checks["disk"] = "ok"

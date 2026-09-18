@@ -68,7 +68,9 @@ func main() {
 			f("min_lng", -180), f("min_lat", -85), f("max_lng", 180), f("max_lat", 85),
 			zoom, provider)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			// 与生产 API 同一口径：DB 原文（SQLSTATE/表列线索）只进服务端日志，客户端拿固定文案。
+			log.Printf("mapproto: map items 查询失败: %v", err)
+			http.Error(w, "查询失败", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

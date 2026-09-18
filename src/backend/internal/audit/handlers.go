@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/httperr"
 )
 
 // 错误码（与既有包同风格的大写下划线常量）。
@@ -49,8 +51,9 @@ type Handler struct {
 }
 
 // fail 统一错误响应。
+// 形状委托给 internal/httperr（单一真源）。
 func fail(c *gin.Context, status int, code, msg string) {
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
+	httperr.Envelope(c, status, code, msg)
 }
 
 // ---------------------------------------------------------------------------

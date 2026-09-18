@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"panoalbum/internal/httperr"
 )
 
 // Handler 文件夹端点。
@@ -82,7 +84,7 @@ func (h *Handler) Tree(c *gin.Context) {
 		`SELECT COALESCE(folder_path,''), count(*)::int FROM media WHERE `+where+`
 		 GROUP BY 1`, args...)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	defer rows.Close()
@@ -91,7 +93,7 @@ func (h *Handler) Tree(c *gin.Context) {
 		var p string
 		var n int
 		if err := rows.Scan(&p, &n); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+			httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 			return
 		}
 		counts[p] = n

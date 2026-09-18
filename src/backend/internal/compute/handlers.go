@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/httperr"
 )
 
 // Handler 管理端节点端点。Store 不可为空。
@@ -49,8 +51,9 @@ func (h *Handler) offlineAfter() time.Duration {
 }
 
 // fail 统一错误响应 {"error":{"code","message"}}，与 media / faces 包保持一致。
+// 形状委托给 internal/httperr（单一真源）。
 func fail(c *gin.Context, status int, code, msg string) {
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
+	httperr.Envelope(c, status, code, msg)
 }
 
 // failStore 把 Store 错误映射为 HTTP 状态码，未识别的错误记日志后返回 500。

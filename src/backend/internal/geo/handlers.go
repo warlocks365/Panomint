@@ -10,7 +10,6 @@ package geo
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -19,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"panoalbum/internal/audit"
+	"panoalbum/internal/httperr"
 )
 
 // Handler 地图模式 HTTP 处理器。
@@ -194,7 +194,7 @@ func (h *Handler) Clusters(c *gin.Context) {
 	// 可见性谓词会自动收敛为恒假、返回空结果 —— fail-closed 的语义就是"什么也看不见"。
 	clusters, err := h.Media.Clusters(c.Request.Context(), b, c.GetString("user_id"), zoom, h.provider(c), kind, from, to)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"clusters": clusters})
@@ -231,7 +231,7 @@ func (h *Handler) Items(c *gin.Context) {
 
 	items, err := h.Media.Items(c.Request.Context(), b, c.GetString("user_id"), h.provider(c), kind, from, to, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
@@ -248,13 +248,13 @@ func (h *Handler) Histogram(c *gin.Context) {
 	granularity := c.DefaultQuery("granularity", "month")
 	buckets, err := h.Media.Histogram(c.Request.Context(), b, c.GetString("user_id"), granularity)
 	if err != nil {
-		code := "QUERY_FAILED"
-		status := http.StatusInternalServerError
+		// 可区分的语义必须保留：粒度非法是本端构造、面向用户的文案（400/INVALID_PARAMS），
+		// 原样回；其余是 DB 故障（500/QUERY_FAILED），message 固定、完整错误只进服务端日志。
 		if err == ErrInvalidGranularity {
-			code = "INVALID_PARAMS"
-			status = http.StatusBadRequest
+			httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
+			return
 		}
-		c.JSON(status, gin.H{"error": gin.H{"code": code, "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"buckets": buckets})
@@ -290,7 +290,7 @@ func (h *Handler) Places(c *gin.Context) {
 	}
 	places, err := h.Media.Places(c.Request.Context(), b, c.GetString("user_id"), h.provider(c), kind, from, to, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"places": places})
@@ -306,7 +306,7 @@ func (h *Handler) GetMapIconPref(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"pref": p})
@@ -317,7 +317,7 @@ func (h *Handler) PutMapIconPref(c *gin.Context) {
 	userID := c.GetString("user_id")
 	var p MapIconPref
 	if err := c.ShouldBindJSON(&p); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Fail(c, http.StatusBadRequest, "INVALID_PARAMS", "请求体格式错误", err)
 		return
 	}
 	// 基础校验：shape 必须为已知值，颜色必须为合法十六进制色值
@@ -330,7 +330,7 @@ func (h *Handler) PutMapIconPref(c *gin.Context) {
 		return
 	}
 	if err := h.Media.PutMapIcon(c.Request.Context(), userID, &p); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"pref": &p})
@@ -343,7 +343,7 @@ func (h *Handler) PutMapIconPref(c *gin.Context) {
 func (h *Handler) GetUIPrefs(c *gin.Context) {
 	p, err := h.Media.GetUIPrefs(c.Request.Context(), c.GetString("user_id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, p)
@@ -356,7 +356,7 @@ func (h *Handler) GetUIPrefs(c *gin.Context) {
 func (h *Handler) PutUIPrefs(c *gin.Context) {
 	var in UIPrefs
 	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Fail(c, http.StatusBadRequest, "INVALID_PARAMS", "请求体格式错误", err)
 		return
 	}
 	norm, err := NormalizeUIPrefs(in)
@@ -365,7 +365,7 @@ func (h *Handler) PutUIPrefs(c *gin.Context) {
 		return
 	}
 	if err := h.Media.PutUIPrefs(c.Request.Context(), c.GetString("user_id"), norm); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, norm)
@@ -379,7 +379,7 @@ func (h *Handler) GetMapConfig(c *gin.Context) {
 	state, source := h.keyState(ctx)
 	v, err := h.Media.GetSystemMapConfig(ctx, state, source)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, v)
@@ -398,7 +398,7 @@ func (h *Handler) PutMapConfig(c *gin.Context) {
 		ChinaAPIKey *string `json:"china_api_key"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Fail(c, http.StatusBadRequest, "INVALID_PARAMS", "请求体格式错误", err)
 		return
 	}
 	if body.ChinaAPIKey != nil {
@@ -421,8 +421,7 @@ func (h *Handler) PutMapConfig(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		log.Printf("geo: 更新地图配置失败: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	// 系统配置变更写审计（audit.ActionSettingsPatch 早已登记但一直无人写入，本端点首次真正落库）。
