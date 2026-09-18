@@ -1,0 +1,65 @@
+# Panomint API —— 独立服务器部署（无容器）的 systemd unit 模板
+#
+# ⚠️ 本文件是**模板**，占位符 @INSTALL_DIR@ / @RUN_USER@ / @RUN_GROUP@ / @ENV_FILE@
+#    由 scripts/install-standalone.sh 替换后写入**临时目录**并打印下一步；
+#    它**不会**自动安装到 /etc/systemd/system（那一步需要 root，由你亲自执行）。
+#    也可手动替换占位符后自行安装。
+#
+# 依赖：外部 PostgreSQL（+PostGIS/pgvector）与 Valkey 已就绪；见 文档/独立部署指南_v1.0.md
+
+[Unit]
+Description=Panomint API（通用相册系统 · 自托管独立部署）
+Documentation=file:@INSTALL_DIR@/文档/独立部署指南_v1.0.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# —— 不以 root 运行（部署前先创建该用户：useradd --system --home @INSTALL_DIR@ pano）
+User=@RUN_USER@
+Group=@RUN_GROUP@
+
+# —— 工作目录决定相对路径的落点：config 的 ./data/* 与 .env 都相对它解析
+WorkingDirectory=@INSTALL_DIR@
+
+# —— 密钥与连接串走独立的 .env（APP_ENV=prod 时 PG_DSN / VALKEY_ADDR / MEDIA_ROOT
+#    若仍是本机开发默认值，进程会**启动即失败**，这是刻意的门禁，见 config.go:96-121）
+EnvironmentFile=@ENV_FILE@
+
+# —— AI 运行时路径（非密钥，故直接写在这里；按实际架构/目录调整。
+#    ⚠️ arm64 暂不承诺，见 文档/部署方案与兼容性_v1.0.md §11）
+Environment=EMBED_LIB=@INSTALL_DIR@/assets/lib/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so
+Environment=EMBED_MODEL_DIR=@INSTALL_DIR@/assets/models/chinese-clip
+Environment=EMBED_FAMILY=chinese-clip
+Environment=EMBED_DEVICE=auto
+Environment=FACE_MODEL_DIR=@INSTALL_DIR@/assets/models/faces
+
+ExecStart=@INSTALL_DIR@/bin/pano-api
+
+# —— 崩溃自愈：非 0 退出（含 panic、DB 掉线）按指数间隔重启
+Restart=on-failure
+RestartSec=3
+# 给在途上传/转码请求留出优雅停止窗口
+TimeoutStopSec=40
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pano-api
+LimitNOFILE=65535
+
+# —— 安全加固（最小权限）——
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# ⚠️ 刻意**不设** ProtectHome=true：媒体根（MEDIA_ROOT）常位于 /home 或外挂盘下，
+#    设了会让服务读不到媒体文件（这是本模板最容易踩的坑）。
+
+[Install]
+WantedBy=multi-user.target

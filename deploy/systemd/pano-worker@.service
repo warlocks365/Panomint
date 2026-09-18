@@ -1,0 +1,55 @@
+# Panomint Worker —— 独立服务器部署（无容器）的 systemd **模板 unit**
+#
+# 用法（安装到 /etc/systemd/system 后）：
+#   systemctl enable --now pano-worker@index        # 缩略图 / 索引消费
+#   systemctl enable --now pano-worker@transcode    # HLS 转码消费（需主机已装 ffmpeg）
+#
+# 说明：
+#   · %i 是 systemd 的实例名（index / transcode），会被 pano-worker-dispatch.sh 使用；
+#   · 两个 worker 都是 `CGO_ENABLED=0` 编译的纯 Go 程序，**不需要** ONNX Runtime；
+#   · 占位符替换与安装方式同 pano-api.service（见本目录 README.md）。
+
+[Unit]
+Description=Panomint Worker (%i)（通用相册系统 · 后台消费进程）
+Documentation=file:@INSTALL_DIR@/文档/独立部署指南_v1.0.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=@RUN_USER@
+Group=@RUN_GROUP@
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=@ENV_FILE@
+
+# —— 进程分发（等价于容器镜像内的 worker-entrypoint.sh）——
+Environment=PANO_BIN_DIR=@INSTALL_DIR@/bin
+Environment=WORKER_KIND=%i
+Environment=THUMB_DIR=@INSTALL_DIR@/data/thumbnails
+Environment=HLS_DIR=@INSTALL_DIR@/data/hls
+ExecStart=@INSTALL_DIR@/deploy/systemd/pano-worker-dispatch.sh %i
+
+# worker 是长驻消费进程：掉线即任务停摆，故同样按需重启
+Restart=on-failure
+RestartSec=5
+# 转码中途被 SIGTERM 时给 ffmpeg 收尾时间（任务由队列的可靠队列语义重派）
+TimeoutStopSec=90
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pano-worker-%i
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# ⚠️ 同样不设 ProtectHome=true（媒体文件可能位于 /home 下）
+
+[Install]
+WantedBy=multi-user.target
