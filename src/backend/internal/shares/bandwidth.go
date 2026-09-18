@@ -17,6 +17,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+
+	"panoalbum/internal/httperr"
 )
 
 // Phase 4 P1：分享带宽自测 + ABR 初档（契约 §「分享页带宽自测」/§「带宽自测」）。
@@ -306,7 +308,7 @@ func (h *Handler) PublicBandwidthTest(c *gin.Context) {
 	refID := sh.ID
 	if err := h.Store.SaveSelfTest(c.Request.Context(),
 		bandwidthScope{Scope: "share_token", RefID: &refID}, up, down, lat); err != nil {
-		errResp(c, http.StatusInternalServerError, "SAVE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "SAVE_FAILED", "保存失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"up_kbps": up, "down_kbps": down, "latency_ms": lat})
@@ -322,7 +324,7 @@ func (h *Handler) SelfTest(c *gin.Context) {
 		return
 	}
 	if err := h.Store.SaveSelfTest(c.Request.Context(), bandwidthScope{Scope: "global"}, up, down, lat); err != nil {
-		errResp(c, http.StatusInternalServerError, "SAVE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "SAVE_FAILED", "保存失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"up_kbps": up, "down_kbps": down, "latency_ms": lat})
@@ -333,7 +335,7 @@ func (h *Handler) SelfTest(c *gin.Context) {
 func (h *Handler) GetBandwidth(c *gin.Context) {
 	up, down, source, err := h.Store.EffectiveBandwidth(c.Request.Context(), bandwidthScope{Scope: "global"})
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"up_kbps": up, "down_kbps": down, "source": source})
@@ -385,7 +387,7 @@ func (h *Handler) PatchBandwidth(c *gin.Context) {
 			return
 		}
 		if err != nil {
-			errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 			return
 		}
 		role := c.GetString("role")
@@ -397,12 +399,12 @@ func (h *Handler) PatchBandwidth(c *gin.Context) {
 	}
 
 	if err := h.Store.SaveManual(c.Request.Context(), sc, req.UpKbps, req.DownKbps); err != nil {
-		errResp(c, http.StatusInternalServerError, "SAVE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "SAVE_FAILED", "保存失败", err)
 		return
 	}
 	up, down, source, err := h.Store.EffectiveBandwidth(c.Request.Context(), sc)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

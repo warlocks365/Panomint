@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
 )
 
@@ -31,8 +32,9 @@ type Handler struct {
 }
 
 // fail 统一错误响应 {"error":{"code","message"}}，与 media 包保持一致。
+// 形状委托给 internal/httperr（单一真源）。
 func fail(c *gin.Context, status int, code, msg string) {
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
+	httperr.Envelope(c, status, code, msg)
 }
 
 // ListPeople GET /people → { named:[...], unnamed:[{cluster_id,count,cover}] }
@@ -43,7 +45,7 @@ func fail(c *gin.Context, status int, code, msg string) {
 func (h *Handler) ListPeople(c *gin.Context) {
 	named, unnamed, err := h.Store.ListPeople(c.Request.Context(), c.GetString("user_id"))
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"named": named, "unnamed": unnamed})
@@ -66,7 +68,7 @@ func (h *Handler) CreatePerson(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "CREATE_FAILED", "创建失败", err)
 		return
 	}
 	c.JSON(http.StatusCreated, p)
@@ -91,7 +93,7 @@ func (h *Handler) PatchPerson(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	case err != nil:
-		fail(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, p)
@@ -155,7 +157,7 @@ func (h *Handler) TriggerScan(c *gin.Context) {
 	}
 	n, err := h.Store.ResetScanned(c.Request.Context(), req.Scope)
 	if err != nil {
-		fail(c, http.StatusInternalServerError, "RESET_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "RESET_FAILED", "重置失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job_id": NewClusterID(), "scope": req.Scope, "queued": n})

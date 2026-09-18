@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
 )
 
@@ -17,8 +18,9 @@ type Handler struct {
 }
 
 // errResp 统一错误格式 {"error":{"code","message"}}。
+// 形状委托给 internal/httperr（单一真源）。
 func errResp(c *gin.Context, status int, code, msg string) {
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
+	httperr.Envelope(c, status, code, msg)
 }
 
 // canManage 相册写操作权限：本人或 owner/admin 角色。
@@ -58,7 +60,7 @@ func (h *Handler) Create(c *gin.Context) {
 	id, err := h.Store.Create(c.Request.Context(), c.GetString("user_id"),
 		req.Name, req.Description, req.Kind, req.CoverMediaID, req.Criteria)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "CREATE_FAILED", "创建失败", err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"id": id})
@@ -68,7 +70,7 @@ func (h *Handler) Create(c *gin.Context) {
 func (h *Handler) List(c *gin.Context) {
 	albums, err := h.Store.List(c.Request.Context(), c.GetString("user_id"))
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"albums": albums})
@@ -136,7 +138,7 @@ func (h *Handler) Patch(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !canManage(c, ownerID) {
@@ -158,7 +160,7 @@ func (h *Handler) Patch(c *gin.Context) {
 		return
 	}
 	if err := h.Store.Patch(c.Request.Context(), id, req.Name, req.Description, req.CoverMediaID, req.Criteria); err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -173,7 +175,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if typ == "favorites" {
@@ -185,7 +187,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.Store.Delete(c.Request.Context(), id); err != nil {
-		errResp(c, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "DELETE_FAILED", "删除失败", err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -200,7 +202,7 @@ func (h *Handler) AddItems(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if typ == "smart" {
@@ -229,7 +231,7 @@ func (h *Handler) AddItems(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusBadRequest, "ADD_FAILED", err.Error())
+		httperr.Fail(c, http.StatusBadRequest, "ADD_FAILED", "添加失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"added": added})
@@ -244,7 +246,7 @@ func (h *Handler) RemoveItem(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if typ == "smart" {
@@ -261,7 +263,7 @@ func (h *Handler) RemoveItem(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "DELETE_FAILED", "删除失败", err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -271,7 +273,7 @@ func (h *Handler) RemoveItem(c *gin.Context) {
 func (h *Handler) ListComments(c *gin.Context) {
 	comments, err := h.Store.ListComments(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"comments": comments})
@@ -303,7 +305,7 @@ func (h *Handler) AddComment(c *gin.Context) {
 	case errors.Is(err, ErrThirdLevel):
 		errResp(c, http.StatusBadRequest, "THIRD_LEVEL", "仅支持两级评论，不能回复回复")
 	case err != nil:
-		errResp(c, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "CREATE_FAILED", "创建失败", err)
 	default:
 		c.JSON(http.StatusCreated, gin.H{"id": id})
 	}
@@ -318,7 +320,7 @@ func (h *Handler) DeleteComment(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	role := c.GetString("role")
@@ -327,7 +329,7 @@ func (h *Handler) DeleteComment(c *gin.Context) {
 		return
 	}
 	if err := h.Store.DeleteComment(c.Request.Context(), cid); err != nil {
-		errResp(c, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "DELETE_FAILED", "删除失败", err)
 		return
 	}
 	c.Status(http.StatusNoContent)

@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"panoalbum/internal/audit"
+	"panoalbum/internal/httperr"
 )
 
 // Handler 鉴权端点（API v1.1 §2）。
@@ -330,7 +331,10 @@ func (h *Handler) Refresh(c *gin.Context) {
 	}
 	userID, err := h.Store.RotateSession(ctx, req.RefreshToken, newRefresh, c.ClientIP(), c.GetHeader("User-Agent"))
 	if err != nil {
-		errResp(c, http.StatusUnauthorized, "INVALID_REFRESH", err.Error())
+		// RotateSession 既可能返回本端文案（会话不存在 / 令牌重放），也可能返回 DB 故障原文。
+		// 两类共用同一响应形状，message 一律固定：完整错误只进服务端日志，
+		// 客户端不该看到 PG 的 SQLSTATE / 表列线索。
+		httperr.Fail(c, http.StatusUnauthorized, "INVALID_REFRESH", "刷新令牌无效或已过期", err)
 		return
 	}
 	u, err := h.Store.FindByID(ctx, userID)

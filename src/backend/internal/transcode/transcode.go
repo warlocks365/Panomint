@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"panoalbum/internal/ffmpeg"
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
 	"panoalbum/internal/queue"
 )
@@ -133,7 +134,7 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errJSON(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !canAccessMedia(c, ownerID) {
@@ -149,7 +150,7 @@ func (h *Handler) CreateJob(c *gin.Context) {
 	if err := h.Pool.QueryRow(ctx,
 		`INSERT INTO transcode_jobs (media_id, kind, profile, status)
 		 VALUES ($1, 'hls', $2, 'pending') RETURNING id`, req.MediaID, req.Profile).Scan(&jobID); err != nil {
-		errJSON(c, http.StatusInternalServerError, "INSERT_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "INSERT_FAILED", "创建失败", err)
 		return
 	}
 	_, err = h.Q.Enqueue(ctx, queue.Job{Kind: "transcode", Payload: map[string]string{
@@ -158,7 +159,7 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		"profile":  req.Profile,
 	}})
 	if err != nil {
-		errJSON(c, http.StatusInternalServerError, "ENQUEUE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "ENQUEUE_FAILED", "任务入队失败", err)
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
@@ -255,7 +256,7 @@ func (h *Handler) ServeHLS(c *gin.Context) {
 			errJSON(c, http.StatusNotFound, "NOT_FOUND", "HLS 文件不存在")
 			return
 		}
-		errJSON(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !canAccessMedia(c, ownerID) {
@@ -274,5 +275,5 @@ func (h *Handler) ServeHLS(c *gin.Context) {
 }
 
 func errJSON(c *gin.Context, status int, code, msg string) {
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
+	httperr.Envelope(c, status, code, msg)
 }

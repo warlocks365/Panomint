@@ -13,6 +13,7 @@ import (
 
 	"panoalbum/internal/audit"
 	"panoalbum/internal/auth"
+	"panoalbum/internal/httperr"
 )
 
 // Handler 分享端点（管理端点走 authed + share:create；公开端点 token 即凭证）。
@@ -45,8 +46,9 @@ func (h *Handler) record(c *gin.Context, action, targetType, targetID string, de
 }
 
 // errResp 统一错误格式 {"error":{"code","message"}}。
+// 形状委托给 internal/httperr（单一真源）。
 func errResp(c *gin.Context, status int, code, msg string) {
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
+	httperr.Envelope(c, status, code, msg)
 }
 
 // Create POST /shares {kind, target_id, title?, expire_at?, password?, is_wechat?, max_views?} → 201 {id, token, url}
@@ -92,7 +94,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	role := c.GetString("role")
@@ -106,7 +108,7 @@ func (h *Handler) Create(c *gin.Context) {
 	if req.Password != nil && *req.Password != "" {
 		hash, err := auth.HashPassword(*req.Password)
 		if err != nil {
-			errResp(c, http.StatusInternalServerError, "HASH_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "HASH_FAILED", "密码加密失败", err)
 			return
 		}
 		pwdHash = &hash
@@ -128,7 +130,7 @@ func (h *Handler) Create(c *gin.Context) {
 		MaxViews:      req.MaxViews,
 	})
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "CREATE_FAILED", "创建失败", err)
 		return
 	}
 	// 审计在创建成功之后。target 是**分享本身**（share/<id>）；被分享的相册/媒体 id
@@ -157,7 +159,7 @@ func shareURL(c *gin.Context, token string) string {
 func (h *Handler) List(c *gin.Context) {
 	shares, err := h.Store.ListByOwner(c.Request.Context(), c.GetString("user_id"))
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	now := time.Now()
@@ -182,7 +184,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	role := c.GetString("role")
@@ -191,7 +193,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.Store.Delete(c.Request.Context(), id); err != nil {
-		errResp(c, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "DELETE_FAILED", "删除失败", err)
 		return
 	}
 	// 审计在吊销成功之后（失败不写）。
@@ -214,7 +216,7 @@ func (h *Handler) guardPublic(c *gin.Context) *Share {
 		return nil
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return nil
 	}
 	switch code := checkAccess(sh, c.Query("password"), time.Now()); code {
@@ -241,12 +243,12 @@ func (h *Handler) PublicGet(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 	if err := h.Store.RecordAccess(ctx, sh.ID, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		errResp(c, http.StatusInternalServerError, "LOG_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "LOG_FAILED", "记录访问失败", err)
 		return
 	}
 	items, err := h.Store.ListItems(ctx, sh)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -268,7 +270,7 @@ func (h *Handler) PublicThumb(c *gin.Context) {
 	mediaID := c.Param("id")
 	ok, err := h.Store.MediaInShare(ctx, sh, mediaID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !ok {
@@ -310,7 +312,7 @@ func (h *Handler) PublicHLS(c *gin.Context) {
 	mediaID := c.Param("id")
 	ok, err := h.Store.MediaInShare(ctx, sh, mediaID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !ok {
@@ -319,7 +321,7 @@ func (h *Handler) PublicHLS(c *gin.Context) {
 	}
 	has, err := h.Store.HasHLS(ctx, mediaID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !has {
