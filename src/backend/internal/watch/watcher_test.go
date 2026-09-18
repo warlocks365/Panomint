@@ -30,8 +30,8 @@ func TestEntriesFromPaths(t *testing.T) {
 
 	entries := EntriesFromPaths(root, []string{
 		img, vid, txt,
-		root,                             // 目录跳过
-		filepath.Join(root, "ghost.jpg"), // Rename 旧路径（已不存在）跳过
+		root,                                 // 目录跳过
+		filepath.Join(root, "ghost.jpg"),     // Rename 旧路径（已不存在）跳过
 		filepath.Join(root, "..", "out.jpg"), // 根外路径跳过
 	})
 	if len(entries) != 2 {
@@ -103,11 +103,11 @@ func TestWatcherDetectsNewFile(t *testing.T) {
 // TestScanDirSkipsEaDir 全量扫描跳过群晖 @eaDir sidecar 目录（防缩略图副本入库）。
 func TestScanDirSkipsEaDir(t *testing.T) {
 	root, entries := mkTree(t, map[string]string{
-		"real.jpg":               "real",
-		"@eaDir/thumb.jpg":       "synology-thumb",
-		"@eaDir/sub/SYNOINFO":    "meta",
-		"2024/@eaDir/inner.jpg":  "nested-eadir",
-		"2024/keep.jpg":          "keep",
+		"real.jpg":              "real",
+		"@eaDir/thumb.jpg":      "synology-thumb",
+		"@eaDir/sub/SYNOINFO":   "meta",
+		"2024/@eaDir/inner.jpg": "nested-eadir",
+		"2024/keep.jpg":         "keep",
 	})
 	if len(entries) != 2 {
 		t.Fatalf("应跳过 @eaDir 只留 2 个文件，实际 %d: %+v", len(entries), entries)

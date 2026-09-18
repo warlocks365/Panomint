@@ -199,4 +199,3 @@ func TestDefaultVocabExcludesLowPrecisionTags(t *testing.T) {
 		}
 	}
 }
-

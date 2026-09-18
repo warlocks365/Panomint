@@ -110,11 +110,11 @@ func TestRetryThenDead(t *testing.T) {
 		}
 	}
 
-	consume()                     // 第 1 次：失败 → attempts=1，延迟 50ms
+	consume()                          // 第 1 次：失败 → attempts=1，延迟 50ms
 	time.Sleep(120 * time.Millisecond) // 等延迟到期
-	consume()                     // 第 2 次：失败 → attempts=2，延迟 100ms
+	consume()                          // 第 2 次：失败 → attempts=2，延迟 100ms
 	time.Sleep(200 * time.Millisecond)
-	consume()                     // 第 3 次：attempts=2 >= MaxRetries=2 → 死信
+	consume() // 第 3 次：attempts=2 >= MaxRetries=2 → 死信
 
 	if got := atomic.LoadInt64(&attempts); got != 3 {
 		t.Fatalf("处理次数 = %d，期望 3（首试 + 2 次重试）", got)

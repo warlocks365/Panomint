@@ -32,14 +32,14 @@ func TestParseContentRange(t *testing.T) {
 		t.Fatalf("末尾块应合法: %v", err)
 	}
 	bad := []string{
-		"bytes 100-99/300",  // start > end
-		"bytes 0-300/300",    // end >= total
-		"bytes 0-99/0",       // total 为 0
-		"items 0-99/300",     // 单位错误
-		"bytes 0-99",         // 缺 total
-		"bytes -99/300",      // 缺 end
-		"bytes 0--1/300",     // 负数
-		"bytes a-b/c",        // 非数字
+		"bytes 100-99/300", // start > end
+		"bytes 0-300/300",  // end >= total
+		"bytes 0-99/0",     // total 为 0
+		"items 0-99/300",   // 单位错误
+		"bytes 0-99",       // 缺 total
+		"bytes -99/300",    // 缺 end
+		"bytes 0--1/300",   // 负数
+		"bytes a-b/c",      // 非数字
 	}
 	for _, s := range bad {
 		if _, err := parseContentRange(s); err == nil {

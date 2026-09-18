@@ -142,9 +142,9 @@ func seedData(ctx context.Context, pool *pgxpool.Pool) error {
 
 	rng := rand.New(rand.NewSource(42))
 	type city struct {
-		name string
+		name             string
 		lng, lat, spread float64
-		count int
+		count            int
 	}
 	clusters := []city{
 		{"北京", 116.40, 39.90, 0.35, 800},

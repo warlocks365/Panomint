@@ -53,14 +53,14 @@ func errResp(c *gin.Context, status int, code, msg string) {
 // is_wechat=true 时强制 allow_download=false（微信 H5 不给原文件，PRD 核心约束）。
 func (h *Handler) Create(c *gin.Context) {
 	var req struct {
-		Kind         string     `json:"kind"`
-		TargetID     string     `json:"target_id"`
-		Title        *string    `json:"title"`
-		ExpireAt     *time.Time `json:"expire_at"`
-		Password     *string    `json:"password"`
-		IsWechat     bool       `json:"is_wechat"`
-		AllowDownload bool      `json:"allow_download"`
-		MaxViews     *int       `json:"max_views"`
+		Kind          string     `json:"kind"`
+		TargetID      string     `json:"target_id"`
+		Title         *string    `json:"title"`
+		ExpireAt      *time.Time `json:"expire_at"`
+		Password      *string    `json:"password"`
+		IsWechat      bool       `json:"is_wechat"`
+		AllowDownload bool       `json:"allow_download"`
+		MaxViews      *int       `json:"max_views"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "请求体格式错误")
