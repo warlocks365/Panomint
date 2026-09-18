@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"panoalbum/internal/audit"
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
 	"panoalbum/internal/queue"
 )
@@ -17,8 +18,9 @@ import (
 // 媒体写操作 HTTP 处理器（详情/收藏/评级/软删/回收站）。
 
 // errResp 统一错误响应 {"error":{"code","message"}}。
+// 形状委托给 internal/httperr（单一真源），本包不再各写一份 c.JSON(gin.H{...})。
 func errResp(c *gin.Context, status int, code, msg string) {
-	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
+	httperr.Envelope(c, status, code, msg)
 }
 
 // writeLookupError 把「取媒体元信息/归属」失败的 DB 错误映射为响应。
@@ -91,7 +93,7 @@ func (h *Handler) Favorite(c *gin.Context) {
 		return
 	}
 	if err := h.Store.SetFavorite(c.Request.Context(), id, c.GetString("user_id"), req.Favorite); err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "favorite": req.Favorite})
@@ -114,7 +116,7 @@ func (h *Handler) Rate(c *gin.Context) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
 		return
 	} else if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "rating": req.Rating})
@@ -149,7 +151,7 @@ func (h *Handler) Patch(c *gin.Context) {
 			errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
 			return
 		} else if err != nil {
-			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 			return
 		}
 		resp["notes"] = *req.Notes
@@ -169,7 +171,7 @@ func (h *Handler) Patch(c *gin.Context) {
 			errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
 			return
 		} else if err != nil {
-			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 			return
 		}
 		if edits != nil {
@@ -240,7 +242,7 @@ func (h *Handler) Rotate(c *gin.Context) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
 		return
 	} else if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 
@@ -260,7 +262,7 @@ func (h *Handler) Rotate(c *gin.Context) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
 		return
 	} else if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	h.enqueueThumbRegen(c, id)
@@ -300,7 +302,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已在回收站")
 		return
 	} else if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	// 审计在**成功落库之后**：软删失败（404/500）不写，否则审计里会出现
@@ -314,7 +316,7 @@ func (h *Handler) Delete(c *gin.Context) {
 func (h *Handler) Trash(c *gin.Context) {
 	res, err := h.Store.ListTrash(c.Request.Context(), c.GetString("user_id"))
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -332,7 +334,7 @@ func (h *Handler) Restore(c *gin.Context) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或不在回收站")
 		return
 	} else if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	// 审计在**成功落库之后**：对**不在回收站**的 id（未软删或不存在）返回 404 且**不写**
@@ -359,7 +361,7 @@ func (h *Handler) Purge(c *gin.Context) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或不在回收站")
 		return
 	} else if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	// ⭐ 本动作**不可恢复**，是全部动作里唯一"事后无从补救"的一个，所以审计行必须落在
@@ -391,7 +393,7 @@ func (h *Handler) Pano360(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	resp := gin.H{

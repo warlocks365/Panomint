@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/index"
 	"panoalbum/internal/queue"
 )
@@ -137,7 +138,7 @@ func (h *Handler) Upload(c *gin.Context) {
 
 	src, err := fh.Open()
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "READ_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "READ_FAILED", "读取失败", err)
 		return
 	}
 	defer src.Close()
@@ -180,7 +181,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 	if err := os.MkdirAll(h.UploadTmp, 0o755); err != nil {
-		errResp(c, http.StatusInternalServerError, "WRITE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "WRITE_FAILED", "写入失败", err)
 		return
 	}
 	partPath := filepath.Join(h.UploadTmp, uploadID+".part")
@@ -204,7 +205,7 @@ func (h *Handler) Upload(c *gin.Context) {
 		}
 		data, _ := json.Marshal(meta)
 		if err := os.WriteFile(metaPath, data, 0o600); err != nil {
-			errResp(c, http.StatusInternalServerError, "WRITE_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "WRITE_FAILED", "写入失败", err)
 			return
 		}
 	} else {
@@ -245,12 +246,12 @@ func (h *Handler) Upload(c *gin.Context) {
 
 	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "WRITE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "WRITE_FAILED", "写入失败", err)
 		return
 	}
 	if _, err := io.Copy(f, src); err != nil {
 		f.Close()
-		errResp(c, http.StatusInternalServerError, "WRITE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "WRITE_FAILED", "写入失败", err)
 		return
 	}
 	f.Close()
@@ -264,7 +265,7 @@ func (h *Handler) Upload(c *gin.Context) {
 	// 最后一块：合并入库
 	pf, err := os.Open(partPath)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "READ_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "READ_FAILED", "读取失败", err)
 		return
 	}
 	defer pf.Close()
@@ -284,7 +285,7 @@ func (h *Handler) respondIngest(c *gin.Context, id string, dup bool, err error) 
 			errResp(c, ue.status, ue.code, ue.msg)
 			return
 		}
-		errResp(c, http.StatusInternalServerError, "INGEST_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "INGEST_FAILED", "入库失败", err)
 		return
 	}
 	if dup {

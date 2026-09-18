@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
 	"panoalbum/internal/tags"
 )
@@ -47,7 +48,7 @@ func (h *Handler) ListTags(c *gin.Context) {
 	}
 	tags, err := h.Store.ListTags(c.Request.Context(), q, kind, limit)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"tags": tags})
@@ -73,11 +74,11 @@ func (h *Handler) AddTag(c *gin.Context) {
 	}
 	tag, err := h.Store.FindOrCreateUserTag(c.Request.Context(), name)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "TAG_CREATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "TAG_CREATE_FAILED", "创建标签失败", err)
 		return
 	}
 	if err := h.Store.AttachTag(c.Request.Context(), id, tag.ID); err != nil {
-		errResp(c, http.StatusInternalServerError, "TAG_ATTACH_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "TAG_ATTACH_FAILED", "添加标签失败", err)
 		return
 	}
 	// 回查真实值再返回：FindOrCreateUserTag 只取 id/name/kind/color，
@@ -85,7 +86,7 @@ func (h *Handler) AddTag(c *gin.Context) {
 	// 与刚建立的关联（confirmed=true、origin=user、usage_count>=1）不一致。
 	real, err := h.Store.GetTag(c.Request.Context(), tag.ID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "tag": real})
@@ -100,7 +101,7 @@ func (h *Handler) RemoveTag(c *gin.Context) {
 	}
 	exists, err := h.Store.tagExists(c.Request.Context(), tagID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !exists {
@@ -109,7 +110,7 @@ func (h *Handler) RemoveTag(c *gin.Context) {
 	}
 	removed, err := h.Store.DetachTag(c.Request.Context(), id, tagID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "tag_id": tagID, "removed": removed})
@@ -163,7 +164,7 @@ func (h *Handler) CreateTag(c *gin.Context) {
 	}
 	tag, err := h.Store.CreateTag(c.Request.Context(), name, kind, color)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "TAG_CREATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "TAG_CREATE_FAILED", "创建标签失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"tag": tag})
@@ -207,7 +208,7 @@ func (h *Handler) PatchTag(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"tag": tag})
@@ -228,7 +229,7 @@ func (h *Handler) DeleteTag(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusBadRequest, "DELETE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusBadRequest, "DELETE_FAILED", "删除失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": id, "merged_into": into, "moved": moved})
@@ -251,7 +252,7 @@ func (h *Handler) ConfirmTag(c *gin.Context) {
 	// 标签不存在一律 404（与 DELETE /tags/:id 语义一致），不再静默 200 空更新。
 	exists, err := h.Store.tagExists(c.Request.Context(), id)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !exists {
@@ -265,7 +266,7 @@ func (h *Handler) ConfirmTag(c *gin.Context) {
 		// confirmed 真正落库到 media_tags.confirmed，响应回显即落库值（false 可取消确认）。
 		ok, err := h.Store.ConfirmTagForMedia(c.Request.Context(), req.MediaID, id, confirmed)
 		if err != nil {
-			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"media_id": req.MediaID, "tag_id": id, "confirmed": confirmed, "updated": ok})
@@ -273,7 +274,7 @@ func (h *Handler) ConfirmTag(c *gin.Context) {
 	}
 	ok, err := h.Store.SetTagReviewed(c.Request.Context(), id, confirmed)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"tag_id": id, "confirmed": confirmed, "updated": ok})
@@ -321,7 +322,7 @@ func (h *Handler) ConfirmMediaTags(c *gin.Context) {
 	if ids == nil {
 		n, err := h.Store.ConfirmAllForMedia(ctx, mediaID)
 		if err != nil {
-			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"media_id": mediaID, "confirmed": n})
@@ -331,7 +332,7 @@ func (h *Handler) ConfirmMediaTags(c *gin.Context) {
 	for _, tid := range *ids {
 		ok, err := h.Store.ConfirmTagForMedia(ctx, mediaID, tid, true)
 		if err != nil {
-			errResp(c, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 			return
 		}
 		if ok {
@@ -415,7 +416,7 @@ func (h *Handler) AITagsPreview(c *gin.Context) {
 	if h.Tagger != nil {
 		vec, err := ts.LoadEmbedding(ctx, mediaID)
 		if err != nil {
-			errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 			return
 		}
 		for _, s := range h.Tagger.Suggest(vec) {
@@ -424,7 +425,7 @@ func (h *Handler) AITagsPreview(c *gin.Context) {
 	}
 	pending, err := ts.ListPendingAITags(ctx, mediaID)
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"media_id": mediaID, "live": live, "pending": pending})
@@ -466,7 +467,7 @@ func (h *Handler) AITagsTrigger(c *gin.Context) {
 		}
 		n, err := app.ApplyByID(ctx, req.MediaID)
 		if err != nil {
-			errResp(c, http.StatusInternalServerError, "TAG_FAILED", err.Error())
+			httperr.Fail(c, http.StatusInternalServerError, "TAG_FAILED", "打标失败", err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"processed": 1, "tagged": n})
@@ -474,7 +475,7 @@ func (h *Handler) AITagsTrigger(c *gin.Context) {
 	}
 	list, err := ts.ListPendingAI(ctx, req.Limit, "")
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	processed, tagged, failed := 0, 0, 0

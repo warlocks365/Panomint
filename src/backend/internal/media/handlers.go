@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"panoalbum/internal/audit"
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/queue"
 	"panoalbum/internal/tags"
 )
@@ -78,7 +79,7 @@ func (h *Handler) List(c *gin.Context) {
 	}
 	res, err := h.Store.List(c.Request.Context(), p)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusBadRequest, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -124,7 +125,7 @@ func (h *Handler) Duplicates(c *gin.Context) {
 		return
 	}
 	if err != nil {
-		errResp(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, res)
@@ -145,7 +146,7 @@ func (h *Handler) DateHistogram(c *gin.Context) {
 	}
 	buckets, err := h.Store.DateHistogram(c.Request.Context(), scope, granularity)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "QUERY_FAILED", "message": err.Error()}})
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	c.JSON(http.StatusOK, buckets)
