@@ -38,7 +38,27 @@ QUEUE_MAX_DEPTH="${QUEUE_MAX_DEPTH:-100}"      # 队列积压上限
 QUEUE_MAX_OLD_MIN="${QUEUE_MAX_OLD_MIN:-30}"   # 最老逾期任务上限（分钟）
 READY_FAIL_THRESHOLD="${READY_FAIL_THRESHOLD:-3}"  # /ready 连续失败几次告警
 ALERT_MIN_INTERVAL="${ALERT_MIN_INTERVAL:-1800}"   # 同内容告警最小间隔（秒）
-EXPECTED_SERVICES="${EXPECTED_SERVICES:-db valkey minio api web caddy index-worker transcode-worker embed-worker}"
+# 期望巡检的服务清单。
+#
+# ⚠️ 默认**从 compose 定义动态获取**，不写死名单。原因是一处真实缺陷：
+# 这里原先写死了 9 个服务，而 docker-compose.yml 定义了 12 个 ——
+# 于是 tag-worker / phash-worker / faces-worker **从未被巡检**，且没有任何人会注意到，
+# 因为"少巡检一个服务"不会报任何错，只会让故障晚被发现。
+#
+# ⚠️ 必须用 `docker compose config --services`（**compose 定义**）而不是 `docker compose ps`（**现有容器**）：
+# ps 只列已存在的容器，因此"本该存在但根本不在"的服务会被静默漏掉 —— 而那恰恰是最该告警的情况
+# （实测：phash-worker 在 compose 里有定义，但容器根本不存在）。
+#
+# 如需只巡检子集，用环境变量覆盖：EXPECTED_SERVICES="db api web"
+EXPECTED_SERVICES_OVERRIDE="${EXPECTED_SERVICES:-}"
+
+expected_services() {
+  if [ -n "$EXPECTED_SERVICES_OVERRIDE" ]; then
+    printf '%s\n' "$EXPECTED_SERVICES_OVERRIDE"
+    return 0
+  fi
+  (cd "$COMPOSE_DIR" && docker compose config --services 2>/dev/null) | sort -u
+}
 
 mkdir -p "$STATE_DIR"
 MODE="${1:-check}"
@@ -48,7 +68,14 @@ add_problem() { PROBLEMS+=("$1"); }
 # ------------------------------------------------------------------ 巡检 -----
 check_services() {
   local out; out="$(cd "$COMPOSE_DIR" && docker compose ps --format '{{.Service}}|{{.State}}|{{.Health}}' 2>/dev/null)"
-  for svc in $EXPECTED_SERVICES; do
+  local roster; roster="$(expected_services)"
+  if [ -z "$roster" ]; then
+    # 拿不到清单本身就是异常（compose 文件缺失/语法错/docker 不可用）。
+    # 必须告警而不是静默跳过整段巡检 —— 静默跳过等于"巡检看着全绿、其实什么都没查"。
+    add_problem "[P0] 无法从 compose 获取服务清单（docker compose config --services 无输出）→ 容器状态这一段巡检被跳过"
+    return
+  fi
+  for svc in $roster; do
     local line; line="$(printf '%s\n' "$out" | grep "^$svc|" | head -n1)"
     if [ -z "$line" ]; then
       add_problem "[P0] 容器 $svc 未在运行（compose ps 无记录）"
