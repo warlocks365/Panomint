@@ -15,6 +15,7 @@ import (
 
 	"panoalbum/internal/albums"
 	"panoalbum/internal/media"
+	"panoalbum/internal/mediascope"
 )
 
 // Store 分享数据访问。
@@ -30,19 +31,19 @@ var (
 
 // Share 分享链接记录（对应 share_links 表；吊销 = 删除行）。
 type Share struct {
-	ID           string     `json:"id"`
-	Token        string     `json:"token"`
-	Kind         string     `json:"kind"` // album|media
-	TargetID     string     `json:"target_id"`
-	OwnerID      string     `json:"owner_id"`
-	Title        *string    `json:"title,omitempty"`
-	ExpireAt     *time.Time `json:"expire_at,omitempty"`
-	PasswordHash *string    `json:"-"`
-	AllowDownload bool      `json:"allow_download"`
-	IsWechat     bool       `json:"is_wechat"`
-	MaxViews     *int       `json:"max_views,omitempty"`
-	AccessCount  int        `json:"access_count"`
-	CreatedAt    time.Time  `json:"created_at"`
+	ID            string     `json:"id"`
+	Token         string     `json:"token"`
+	Kind          string     `json:"kind"` // album|media
+	TargetID      string     `json:"target_id"`
+	OwnerID       string     `json:"owner_id"`
+	Title         *string    `json:"title,omitempty"`
+	ExpireAt      *time.Time `json:"expire_at,omitempty"`
+	PasswordHash  *string    `json:"-"`
+	AllowDownload bool       `json:"allow_download"`
+	IsWechat      bool       `json:"is_wechat"`
+	MaxViews      *int       `json:"max_views,omitempty"`
+	AccessCount   int        `json:"access_count"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // genToken crypto/rand 32 字节 hex（64 字符），防枚举。
@@ -98,14 +99,14 @@ func scanShare(row pgx.Row) (*Share, error) {
 
 // CreateInput 创建参数。
 type CreateInput struct {
-	Kind         string
-	TargetID     string
-	Title        *string
-	ExpireAt     *time.Time
-	PasswordHash *string // 已 bcrypt；空密码为 nil
+	Kind          string
+	TargetID      string
+	Title         *string
+	ExpireAt      *time.Time
+	PasswordHash  *string // 已 bcrypt；空密码为 nil
 	AllowDownload bool
-	IsWechat     bool
-	MaxViews     *int
+	IsWechat      bool
+	MaxViews      *int
 }
 
 // Create 新建分享，返回 id 与 token。
@@ -249,8 +250,8 @@ func (s *Store) MediaInShare(ctx context.Context, sh *Share, mediaID string) (bo
 		return sh.TargetID == mediaID, nil
 	}
 	// album：normal 走 album_items；smart 实时计算条目集合
-	var typ string
-	err := s.Pool.QueryRow(ctx, `SELECT type FROM albums WHERE id = $1`, sh.TargetID).Scan(&typ)
+	var typ, albumOwner string
+	err := s.Pool.QueryRow(ctx, `SELECT type, owner_id FROM albums WHERE id = $1`, sh.TargetID).Scan(&typ, &albumOwner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, ErrTargetLost
 	}
@@ -258,11 +259,21 @@ func (s *Store) MediaInShare(ctx context.Context, sh *Share, mediaID string) (bo
 		return false, err
 	}
 	if typ != "smart" {
+		// 与读路径同一口径：EXISTS 里也要按**相册属主**的可见集过滤。
+		//
+		// 否则会出现"列表里看不到、但仍能按 media id 直接取字节"的侧门：某条历史脏行
+		// （AddItems 修复前塞进来的他人 media）虽已被 ListItems/Get 过滤掉，
+		// 却仍然通过本判定 → 匿名访问者可用它换到 PublicThumb 的缩略图字节（实测 200/40KB）。
+		//
+		// 主体用 albumOwner：匿名分享链路没有调用者身份，且分享是**有意**让匿名可见的；
+		// 用相册属主既收紧了历史脏行，又不会把正常分享打死（属主自己的媒体仍在集合内）。
+		vis, visArgs := mediascope.VisibleCondFor(3, albumOwner, "m")
+		args := append([]any{sh.TargetID, mediaID}, visArgs...)
 		var ok bool
 		err := s.Pool.QueryRow(ctx, `
 			SELECT EXISTS(SELECT 1 FROM album_items ai JOIN media m ON m.id = ai.media_id
-				WHERE ai.album_id = $1 AND ai.media_id = $2 AND m.deleted_at IS NULL)`,
-			sh.TargetID, mediaID).Scan(&ok)
+				WHERE ai.album_id = $1 AND ai.media_id = $2 AND m.deleted_at IS NULL AND `+vis+`)`,
+			args...).Scan(&ok)
 		return ok, err
 	}
 	items, err := s.ListItems(ctx, sh)

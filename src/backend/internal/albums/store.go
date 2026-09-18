@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"panoalbum/internal/media"
+	"panoalbum/internal/mediascope"
 )
 
 // Store 相册数据访问。
@@ -26,6 +27,9 @@ var (
 	ErrSmartReadOnly = errors.New("智能相册禁止手动管理条目")
 	ErrThirdLevel    = errors.New("仅支持两级评论")
 	ErrParentMissing = errors.New("父评论不存在")
+	// ErrMediaNotAccessible 请求的 media_ids 里含相册属主不可见的媒体（他人个人空间的媒体、
+	// 或不存在/已删除的 id）。整笔拒绝，绝不部分插入。
+	ErrMediaNotAccessible = errors.New("含不可访问的媒体")
 )
 
 // Summary GET /albums 列表项。
@@ -167,19 +171,30 @@ func (s *Store) List(ctx context.Context, userID string) ([]Summary, error) {
 			_ = s.Pool.QueryRow(ctx, `SELECT m.id FROM media m WHERE `+where+`
 				ORDER BY m.taken_at DESC, m.id DESC LIMIT 1`, args...).Scan(&firstID)
 		} else {
+			// 读路径与写入端同一口径：按**相册属主**的可见集过滤。
+			// AddItems 的修复只保证"以后不会再塞进来"，挡不住库里已存在的历史行
+			// （相册里的他人 media）—— 读路径过滤是兜住历史数据的唯一办法。
+			vis, visArgs := mediascope.VisibleCondFor(2, r.ownerID, "m")
+			args := append([]any{r.ID}, visArgs...)
 			if err := s.Pool.QueryRow(ctx,
-				`SELECT count(*)::int FROM album_items WHERE album_id = $1`, r.ID).Scan(&sum.MediaCount); err != nil {
+				`SELECT count(*)::int FROM album_items ai JOIN media m ON m.id = ai.media_id
+				 WHERE ai.album_id = $1 AND m.deleted_at IS NULL AND `+vis, args...).Scan(&sum.MediaCount); err != nil {
 				return nil, err
 			}
 			_ = s.Pool.QueryRow(ctx, `
 				SELECT ai.media_id FROM album_items ai JOIN media m ON m.id = ai.media_id
-				WHERE ai.album_id = $1 AND m.deleted_at IS NULL
-				ORDER BY ai.sort_key ASC, m.taken_at DESC LIMIT 1`, r.ID).Scan(&firstID)
+				WHERE ai.album_id = $1 AND m.deleted_at IS NULL AND `+vis+`
+				ORDER BY ai.sort_key ASC, m.taken_at DESC LIMIT 1`, args...).Scan(&firstID)
 		}
 		sum.CoverMediaID = effectiveCover(sum.CoverMediaID, firstID)
 		if sum.CoverMediaID != nil {
+			// cover_media_id 可被 PATCH 设成任意 media id：取缩略图前也要过可见集，
+			// 否则 List 会把他人 media 的 thumbnail_sm 直接交给调用者。
+			thumbVis, thumbVisArgs := mediascope.VisibleCondFor(2, r.ownerID, "m")
+			thumbArgs := append([]any{*sum.CoverMediaID}, thumbVisArgs...)
 			_ = s.Pool.QueryRow(ctx,
-				`SELECT thumbnail_sm FROM media WHERE id = $1`, *sum.CoverMediaID).Scan(&sum.CoverMediaThumb)
+				`SELECT thumbnail_sm FROM media m WHERE m.id = $1 AND m.deleted_at IS NULL AND `+thumbVis,
+				thumbArgs...).Scan(&sum.CoverMediaThumb)
 		}
 		out = append(out, sum)
 	}
@@ -239,11 +254,18 @@ func (s *Store) Get(ctx context.Context, id string) (*Detail, error) {
 			return nil, err
 		}
 	} else {
+		// 读路径按**相册属主** d.OwnerID 收窄可见集，兜住历史脏行（AddItems 修复前的越权插入）。
+		//
+		// ⚠️ 主体必须是相册属主而不是调用者：本函数同时服务公开分享链路
+		// （shares.Store.ListItems → 本函数），那条链路是**匿名**的、根本没有调用者身份，
+		// 且分享是**有意**让匿名可见的。用调用者身份会把匿名分享整条 fail-closed 打死。
+		vis, visArgs := mediascope.VisibleCondFor(2, d.OwnerID, "m")
+		args := append([]any{id}, visArgs...)
 		rows, err := s.Pool.Query(ctx, `
 			SELECT `+media.MediaRefColumns+`
 			FROM album_items ai JOIN media m ON m.id = ai.media_id
-			WHERE ai.album_id = $1 AND m.deleted_at IS NULL
-			ORDER BY ai.sort_key ASC, m.taken_at DESC`, id)
+			WHERE ai.album_id = $1 AND m.deleted_at IS NULL AND `+vis+`
+			ORDER BY ai.sort_key ASC, m.taken_at DESC`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -293,8 +315,63 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// addItemsQueries 生成 AddItems 的两条语句（抽成纯函数以便被单测钉住）。
+//
+// 为什么需要"先校验、再插入"两条语句，而不是靠 INSERT 的 RowsAffected：
+//   - `ON CONFLICT DO NOTHING` 会把"这条媒体已经在相册里"也计成 0 行，
+//     与"这条媒体不可访问"无法区分 —— 用行数判断会把正常的重复添加误判成越权；
+//   - 反过来，若能区分却只插入了一部分，调用方收到的 {added:N<请求数} 会被误读为"全成功"。
+//
+// 因此：先用 checkSQL 数出"请求的 id 中落在相册属主可见集内的个数"，与请求数不等就整笔拒绝；
+// 相等才执行 insertSQL。两条语句在**同一个事务**里（见 AddItems）。
+//
+// 占位符约定（与 mediascope 的调用约定一致，argv 个数必须自洽）：
+//   - checkSQL ：$1 = media id 数组；可见性谓词从 $2 起编号；
+//   - insertSQL：$1 = 相册 id，$2 = media id 数组；可见性谓词从 $3 起编号；
+//     insertSQL 里那个 `max(sort_key) WHERE album_id = $1` 的 $1 就是相册 id，不另占位。
+//
+// ⚠️ 谓词主体是**相册属主 albumOwnerID**，不是调用者：
+//   - canManage 允许 owner/admin 管理他人相册，调用者未必是相册属主；
+//   - 读路径（Get/List/匿名分享）就是以相册属主为口径 —— 写入集合必须等于读回集合；
+//   - 匿名分享链路没有调用者身份，若写入端用调用者口径，读回集合会与之不一致。
+//
+// ⚠️ albumOwnerID=="" 时 mediascope 返回恒假且**不占参数位**：此时 checkSQL 恒数出 0，
+// AddItems 必然整笔拒绝（不会写出任何行）。
+func addItemsQueries(albumID, albumOwnerID string, uniq []string) (checkSQL string, checkArgs []any, insertSQL string, insertArgs []any) {
+	visCheck, visCheckArgs := mediascope.VisibleCondFor(2, albumOwnerID, "m")
+	checkSQL = `
+		SELECT count(*)::int
+		FROM unnest($1::uuid[]) AS u(mid)
+		JOIN media m ON m.id = u.mid
+		WHERE m.deleted_at IS NULL AND ` + visCheck
+	checkArgs = append([]any{uniq}, visCheckArgs...)
+
+	visInsert, visInsertArgs := mediascope.VisibleCondFor(3, albumOwnerID, "m")
+	insertSQL = `
+		INSERT INTO album_items (album_id, media_id, sort_key)
+		SELECT $1, m.id,
+		       COALESCE((SELECT max(sort_key) FROM album_items WHERE album_id = $1), 0)
+		       + ROW_NUMBER() OVER (ORDER BY u.ord)::int
+		FROM unnest($2::uuid[]) WITH ORDINALITY AS u(mid, ord)
+		JOIN media m ON m.id = u.mid
+		WHERE m.deleted_at IS NULL AND ` + visInsert + `
+		ON CONFLICT (album_id, media_id) DO NOTHING`
+	insertArgs = append([]any{albumID, uniq}, visInsertArgs...)
+	return checkSQL, checkArgs, insertSQL, insertArgs
+}
+
 // AddItems 批量加入媒体（去重；返回实际新增数）。
-func (s *Store) AddItems(ctx context.Context, albumID string, mediaIDs []string) (int64, error) {
+//
+// albumOwnerID 由调用点（handler 从 getAlbumMeta 拿到的相册属主）显式传入，**不**从请求上下文取：
+// Store 层没有 gin 上下文，而这一层也正因此不可能"偷偷改用调用者身份"
+// （与 internal/albums/criteria.go 的 buildCriteriaWhere 同一风格、同一理由：属主显式入参）。
+// 注：这里刻意不写带括号的 buildCriteriaWhere 调用形态 —— 同包的
+// TestCriteriaCallSitesPassAlbumOwner 用它统计真实调用点，注释里出现该形态会造成假命中。
+//
+// 语义：请求里只要有一个 media id 不在相册属主的可见集内，就**整笔拒绝**（ErrMediaNotAccessible），
+// 不插入任何一行 —— 修复前这里只校验相册归属，随后把任意 media_id 塞进 album_items，
+// 使他人 media 可经 GET /albums/:id 与**匿名公开分享**读回 filename/thumbnail/place/taken_at。
+func (s *Store) AddItems(ctx context.Context, albumID, albumOwnerID string, mediaIDs []string) (int64, error) {
 	// 去重保序
 	seen := make(map[string]struct{}, len(mediaIDs))
 	uniq := make([]string, 0, len(mediaIDs))
@@ -308,17 +385,32 @@ func (s *Store) AddItems(ctx context.Context, albumID string, mediaIDs []string)
 	if len(uniq) == 0 {
 		return 0, nil
 	}
-	// sort_key 续排（按加入顺序）；已存在条目 ON CONFLICT 跳过
-	tag, err := s.Pool.Exec(ctx, `
-		INSERT INTO album_items (album_id, media_id, sort_key)
-		SELECT $1, mid,
-		       COALESCE((SELECT max(sort_key) FROM album_items WHERE album_id = $1), 0)
-		       + ROW_NUMBER() OVER (ORDER BY ord)::int
-		FROM unnest($2::uuid[]) WITH ORDINALITY AS u(mid, ord)
-		ON CONFLICT (album_id, media_id) DO NOTHING`,
-		albumID, uniq)
+
+	checkSQL, checkArgs, insertSQL, insertArgs := addItemsQueries(albumID, albumOwnerID, uniq)
+
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("加入媒体失败（媒体 id 可能不存在）: %w", err)
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// 可见性校验必须在插入**之前**：只要有一项不可访问就整笔不做。
+	var accessible int
+	if err := tx.QueryRow(ctx, checkSQL, checkArgs...).Scan(&accessible); err != nil {
+		return 0, fmt.Errorf("校验媒体可见性失败: %w", err)
+	}
+	if accessible != len(uniq) {
+		return 0, fmt.Errorf("%w：请求 %d 个，其中 %d 个不在该相册属主的可见范围内",
+			ErrMediaNotAccessible, len(uniq), len(uniq)-accessible)
+	}
+
+	// sort_key 续排（按加入顺序）；已存在条目 ON CONFLICT 跳过。
+	tag, err := tx.Exec(ctx, insertSQL, insertArgs...)
+	if err != nil {
+		return 0, fmt.Errorf("加入媒体失败: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
 	}
 	return tag.RowsAffected(), nil
 }

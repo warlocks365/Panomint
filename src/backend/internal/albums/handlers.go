@@ -218,7 +218,16 @@ func (h *Handler) AddItems(c *gin.Context) {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "media_ids 不能为空")
 		return
 	}
-	added, err := h.Store.AddItems(c.Request.Context(), id, req.MediaIDs)
+	// 属主传**相册属主 ownerID**（来自 getAlbumMeta），不是调用者：
+	// 写入端可见集必须与读路径（含匿名分享）同一口径，否则相册里会出现属主读不到/读得到不一致的行。
+	added, err := h.Store.AddItems(c.Request.Context(), id, ownerID, req.MediaIDs)
+	if errors.Is(err, ErrMediaNotAccessible) {
+		// 400 而不是 403：请求体里的 media_ids 对这个相册而言无效（含他人媒体/不存在/已删除）。
+		// 用 403 会变成"该 media 存在但不属于你"的探测判据；400 对"不存在"与"不可见"同形 ——
+		// 两者都只是没通过可见性计数，调用方无法据此枚举他人 media id。
+		errResp(c, http.StatusBadRequest, "INVALID_PARAMS", "media_ids 含不可访问的媒体")
+		return
+	}
 	if err != nil {
 		errResp(c, http.StatusBadRequest, "ADD_FAILED", err.Error())
 		return

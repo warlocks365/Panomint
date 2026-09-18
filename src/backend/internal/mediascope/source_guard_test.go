@@ -352,8 +352,11 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 	},
 	regKey("internal/shares/store.go", "JOIN media"): {
 		UserFacing: false,
-		Reason:     "MediaInShare 的 EXISTS：回答「这条媒体是否属于该分享目标」的布尔判定（缩略图/HLS 越权防护），不返回媒体行。",
-		Evidence:   "shares/store.go:246-278。",
+		Reason: "MediaInShare 的 EXISTS：回答「这条媒体是否属于该分享目标」的布尔判定（缩略图/HLS 越权防护），不返回媒体行。" +
+			"⚠️ 2026-09-18 补：仅判 album_items+deleted_at 会留下「列表已过滤、仍能按 media id 换到匿名缩略图字节」的侧门" +
+			"（真机复现：匿名 GET .../thumb 200 + 40716 字节），故 EXISTS 里也按**相册属主**的可见集过滤" +
+			"（mediascope.VisibleCondFor(3, albumOwner, \"m\")）。",
+		Evidence: "shares/store.go MediaInShare（SELECT type, owner_id FROM albums + VisibleCondFor(3, albumOwner, \"m\")）。",
 	},
 	regKey("internal/transcode/transcode.go", "FROM media"): {
 		UserFacing: false,
@@ -409,17 +412,20 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 	},
 	regKey("internal/albums/store.go", "FROM media"): {
 		UserFacing: true,
-		Reason: "两处都面向终端用户：① :164/:167 smart 相册摘要的计数与首图；② :182 相册封面缩略图。" +
-			"List 只列**本人**相册（listAlbumsSQL `WHERE a.owner_id = $1`），criteria 又按**相册属主**组装，" +
-			"故不跨用户。",
-		Evidence: "albums/store.go:113-127 listAlbumsSQL；:156-168（buildCriteriaWhere(c, r.ownerID)）；:180-183。",
+		Reason: "面向终端用户：① List 的 smart 相册摘要计数与首图（buildCriteriaWhere 按相册属主）；" +
+			"② List 的 normal 计数/首图/封面缩略图 —— 三者均按**相册属主**的可见集过滤" +
+			"（mediascope.VisibleCondFor(2, r.ownerID, \"m\")）；③ addItemsQueries 的可见性校验语句。" +
+			"List 只列**本人**相册（listAlbumsSQL `WHERE a.owner_id = $1`）。",
+		Evidence: "albums/store.go listAlbumsSQL；List 的 normal 分支（VisibleCondFor(2, r.ownerID, \"m\")）；" +
+			"addItemsQueries（VisibleCondFor(2, albumOwnerID, \"m\")）。",
 	},
 	regKey("internal/albums/store.go", "JOIN media"): {
 		UserFacing: true,
-		Reason: "① :175 本人相册的首图；② :244 相册详情条目（Get）。Get 有两个调用方：albums handler（HTTP 层先 canManage）" +
-			"与公开分享链路 shares.Store.ListItems（由分享 token 授权）。归属校验刻意留在 HTTP 层，" +
-			"因为下沉进 Store.Get 会把匿名分享打死。",
-		Evidence: "albums/store.go:174-177、:241-246；albums/handlers.go:106-116（canManage 先于 Store.Get）；shares/store.go:222-233。",
+		Reason: "面向终端用户：① List 的 normal 计数/首图；② Get 的 album_items 条目 —— 两者均按**相册属主**的可见集过滤" +
+			"（List 用 r.ownerID、Get 用 d.OwnerID），兜住 AddItems 越权修复前遗留的历史脏行；③ addItemsQueries 的插入语句。" +
+			"Get 有两个调用方：albums handler（HTTP 层先 canManage）与公开分享链路 shares.Store.ListItems（分享 token 授权）；" +
+			"谓词主体刻意用相册属主而非调用者，因为匿名分享没有主体，改用调用者会把分享整条 fail-closed 打死。",
+		Evidence: "albums/store.go List/Get/addItemsQueries；albums/handlers.go Get（canManage 先于 Store.Get）；shares/store.go ListItems。",
 	},
 	regKey("internal/folders/folders.go", "FROM media"): {
 		UserFacing: true,
@@ -542,6 +548,7 @@ var visibilityWiring = map[string][]wiringRef{
 	},
 	"internal/albums/store.go": {
 		{File: "internal/albums/store.go", Symbol: "a.owner_id = $1"},
+		{File: "internal/albums/store.go", Symbol: "mediascope.VisibleCondFor("},
 		{File: "internal/albums/handlers.go", Func: "Get", Symbol: "canManage("},
 	},
 	"internal/folders/folders.go": {
@@ -554,6 +561,7 @@ var visibilityWiring = map[string][]wiringRef{
 		{File: "internal/search/query.go", Symbol: "mediascope.VisibleCond("},
 	},
 	"internal/shares/store.go": {
+		{File: "internal/shares/store.go", Symbol: "mediascope.VisibleCondFor("},
 		{File: "internal/shares/handlers.go", Symbol: "h.Store.ListItems("},
 		{File: "internal/shares/handlers.go", Symbol: "h.Store.MediaInShare("},
 	},
