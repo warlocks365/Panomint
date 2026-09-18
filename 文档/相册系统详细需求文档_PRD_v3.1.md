@@ -10,7 +10,7 @@ title: 相册系统详细需求文档 (PRD v3.1)
   <Paragraph id="YwZTODWoIAdPrirzfWa1c3">
     版本：v3.1 ｜ 状态：草案 ｜ 日期：2026-08-24\
     模式：<Mark bold>100% 自研</Mark>（自写后端/前端/AI/转码，不 fork 任何产品；底层复用通用开源库）\
-    参考策略：<Mark bold>功能点优先对标群晖 Synology Photos 套件（用户当前在 DS1819+ DSM 7.2.1 上实际使用的相册）；Synology Photos 不具备的能力，参考 PhotoPrism 的做法</Mark>\
+    参考策略：<Mark bold>功能点优先对标群晖 Synology Photos 套件（示例环境：用户当前在 DS1819+ DSM 7.2.1 上实际使用的相册；**仅为对标参照，非部署目标**）；Synology Photos 不具备的能力，参考 PhotoPrism 的做法</Mark>\
     用户刚需（须全部覆盖）：4K+ 360° 全景视频、手机/PAD 陀螺仪、VR/AR 头显头追、自适应码率、微信 H5 链接分享（非整文件）、时间轴、GPS 地点分类
   </Paragraph>
 </BlockQuote>
@@ -101,7 +101,7 @@ title: 相册系统详细需求文档 (PRD v3.1)
 
     <TableCell id="Mt8KQEVE3J3hKVLp3YZTOt">
       <Paragraph id="JjOR8m9Zi0O3SFRaGBZJD2">
-        当前环境：DS1819+ / DSM 7.2.1 / Synology Photos；大量 H.265/H.264 全景视频经 SMB 持续入库；主力使用手机 App + Web 分享
+        当前环境（**示例环境，非目标平台**）：DS1819+ / DSM 7.2.1 / Synology Photos；大量 H.265/H.264 全景视频经 SMB 持续入库；主力使用手机 App + Web 分享。⚠️ 本系统为通用自托管相册系统，可部署任意主流 Linux / Docker 或独立服务器，**不绑定群晖与任何机型**；本行仅记录开发期使用的一台代表设备。
       </Paragraph>
     </TableCell>
   </TableRow>
@@ -118,7 +118,7 @@ title: 相册系统详细需求文档 (PRD v3.1)
 </Heading>
 
 <Paragraph id="AvRIPfklCnxtioAC5uBBIA">
-  一套<Mark bold>自托管、隐私优先</Mark>的相册系统，作为 <Mark bold>Synology Photos 的增强替代品</Mark>：先完整复刻群晖 Photos 的消费者/家庭 NAS 体验（时间轴、个人空间/共享空间、智能/普通/共享相册、人物、地点、标签、文件夹视图、收藏、回收站、移动端自动备份、链接分享），再补齐 <Mark bold>Synology Photos 缺失的 360° 全景视频交互播放、增强 AI 标签、自适应码率、微信 H5 分享</Mark>——这些缺口参考 PhotoPrism 的成熟做法或纯自研。
+  一套<Mark bold>通用、自托管、隐私优先</Mark>的相册系统，<Mark bold>部署不绑定群晖</Mark>（可部署任意主流 Linux / Docker，或独立服务器安装；媒体源位置无关）。功能上以 <Mark bold>Synology Photos 为对标参照</Mark>：先完整复刻群晖 Photos 的消费者/家庭 NAS 体验（时间轴、个人空间/共享空间、智能/普通/共享相册、人物、地点、标签、文件夹视图、收藏、回收站、移动端自动备份、链接分享），再补齐 <Mark bold>其对标之外的 360° 全景视频交互播放、增强 AI 标签、自适应码率、微信 H5 分享</Mark>——这些缺口参考 PhotoPrism 的成熟做法或纯自研。
 </Paragraph>
 
 <Heading id="01GCWPYfbqCTKn7N3IBq2z" level="3">
@@ -1038,12 +1038,12 @@ title: 相册系统详细需求文档 (PRD v3.1)
 </Paragraph>
 
 <Paragraph id="zPSx3udVrSlkpREbK8gAIM">
-  <Mark bold>技术栈</Mark>：后端 Go 1.22+（API/媒体），Python 3.13（FastAPI AI）；PG 16 + PostGIS 3.4 + pgvector 0.7；前端 Vue3 + Vite；MapLibre GL（地图）；A-Frame/Three.js（360/VR）；hls.js（自适应）；ffmpeg 6（subprocess 调用）+ NVENC；BullMQ + Valkey（Redis BSD fork）；Docker Compose → K8s；Caddy 反代（自动 HTTPS）。
+  <Mark bold>技术栈</Mark>：后端 Go（`go.mod` 声明 1.26）；AI 推理 = Go + CGO + ONNX Runtime（Chinese-CLIP / OpenAI CLIP / YuNet + SFace），**无 Python/FastAPI 服务**；PG 16 + PostGIS 3 + pgvector；前端 Vue3 + Vite + Pinia；MapLibre GL（地图）；A-Frame/Three.js（360/VR）；hls.js（自适应）；ffmpeg 6（subprocess 调用）+ NVENC（可选，无卡回退 CPU）；**自研队列**（语义对齐 BullMQ）基于 Valkey；部署 Docker Compose（基线）/ 独立服务器（二进制 + systemd）。
 </Paragraph>
 
 <BlockQuote id="UMq7dVOyPYcGYoeOkHEgUv">
   <Paragraph id="6Y8RYACC3vfz0BO7AWxhjS">
-    算力分离（关键）：DS1819+（Atom C3538 无 GPU）<Mark bold>只做文件系统/对象存储</Mark>；AI 推理与 HLS 转码放到独立 GPU 节点（带 NVENC 的 mini PC / 服务器），否则人脸索引与 4K+ 全景转码会卡死。
+    算力分离（关键，能力模型）：<Mark bold>存储节点</Mark>（任意 NAS / 服务器，只要有磁盘）<Mark bold>只做文件系统/对象存储</Mark>；AI 推理与 HLS 转码放到<Mark bold>独立算力节点</Mark>（带 NVENC 的 mini PC / 服务器 / 云 GPU；CPU 节点亦可）。低算力主机不承担人脸索引与 4K+ 全景转码，否则会卡死。
   </Paragraph>
 </BlockQuote>
 
@@ -3696,7 +3696,7 @@ title: 相册系统详细需求文档 (PRD v3.1)
   <TableRow id="70hrO564u40csQQmHRubVo">
     <TableCell id="Lc8DvArB1sJ6owI4TlEk3C">
       <Paragraph id="r88QHi8FqM1fHzyqgVDvbv">
-        DS1819+ 无 GPU，AI/转码慢
+        无 GPU / 算力不足的主机，AI/转码慢
       </Paragraph>
     </TableCell>
 
@@ -3708,7 +3708,7 @@ title: 相册系统详细需求文档 (PRD v3.1)
 
     <TableCell id="hAxmlffuSOLOSMPCrAEJ33">
       <Paragraph id="VP6XCOTXcG5C5jgTBae8gJ">
-        存储与算力分离：NAS 仅存，GPU 节点跑 AI/转码
+        存储与算力分离：存储节点仅存，算力节点跑 AI/转码；`EMBED_DEVICE=auto` 回落 CPU
       </Paragraph>
     </TableCell>
   </TableRow>
@@ -3815,13 +3815,13 @@ title: 相册系统详细需求文档 (PRD v3.1)
 </Table>
 
 <Heading id="P4VbQNOUb0pI1CNsJzriUP" level="3">
-  11.2 数据迁移路线（从群晖 Photos 迁移）
+  11.2 数据迁移路线（从群晖 Photos 迁移 · 可选模块，非部署前置）
 </Heading>
 
 <Code id="auoVqWDD1GCu7Cnv8zyJZn">
   ```
-  DS1819+ Synology Photos 导出
-    → 扫描 /volume1/photo/ + /volume1/photo/@eaDir/（群晖缩略图/sidecar）
+  群晖 Synology Photos 导出（示例来源；非群晖环境可跳过本模块）
+    → 扫描 <群晖默认媒体根，按实际修改>（如 /volume1/photo/）+ @eaDir/（群晖缩略图/sidecar）
     → 保留 EXIF + 原始目录结构（folder_path 映射）
     → 读取群晖 sidecar（.info, .extoolkit）提取人物/标签/收藏映射
     → 映射到本系统 media/people/tags/albums 表

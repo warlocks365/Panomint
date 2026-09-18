@@ -9,7 +9,8 @@ title: 技术设计文档 (TDD v1.1)
 <BlockQuote id="DWS8aUUZHaJ2SJQbGqxkzk">
   <Paragraph id="jZoPxE3SW0Qn3mr0gcLjiG">
     版本：v1.1 ｜ 状态：草案 ｜ 日期：2026-08-24\
-    配套：PRD v3.1（群晖 Synology Photos 优先 / PhotoPrism 补位 / 360 视频自研）\
+    配套：PRD v3.1（功能对标：群晖 Synology Photos 优先 / PhotoPrism 补位 / 360 视频自研）\
+    **部署口径（2026-09-18 起）**：通用自托管 —— 可部署任意主流 Linux / Docker，或独立服务器安装；**不绑定群晖、DSM 或任何具体机型**。群晖仅作功能参照。\
     范围：系统架构、服务模块、核心流程、360 播放引擎、安全、伸缩、运维可观测性、技术选型\
     关键决策：账户与权限采用<Mark bold>独立后台管理模式</Mark>（不对接 DSM）
   </Paragraph>
@@ -22,7 +23,7 @@ title: 技术设计文档 (TDD v1.1)
 </Heading>
 
 <Paragraph id="cLES3hihMNpmWJYDokkiNy">
-  本系统为 <Mark bold>100% 自研</Mark>的自托管相册系统，目标是作为 <Mark bold>Synology Photos 的增强替代品</Mark>，并补齐群晖缺失的 <Mark bold>360° 全景视频交互播放（陀螺仪/VR 头追/自适应码率/微信 H5 分享）</Mark>。
+  本系统为 <Mark bold>100% 自研</Mark>的<Mark bold>通用自托管相册系统</Mark>，可部署于任意主流 Linux / Docker 环境或独立服务器，**不绑定群晖**。功能上以 <Mark bold>Synology Photos 为对标参照</Mark>（增强替代），并补齐其对标缺失的 <Mark bold>360° 全景视频交互播放（陀螺仪/VR 头追/自适应码率/微信 H5 分享）</Mark>。
 </Paragraph>
 
 <Table id="ddTUz8mowLJVgbhsrArZGx" readonly rowHeader>
@@ -166,7 +167,7 @@ title: 技术设计文档 (TDD v1.1)
                       ▼                    ▼                    ▼
               ┌──────────────┐   ┌──────────────┐    ┌──────────────┐
               │ API 网关/媒体 │   │  AI 推理服务  │    │ 转码管线节点  │
-              │  (Go)        │   │ (FastAPI)    │    │ (ffmpeg+GPU) │
+              │  (Go)        │   │ (Go+CGO+ORT) │    │ (ffmpeg+GPU) │
               │ 鉴权/RBAC     │   │ 人脸/标签/地图│    │ 缩略图/HLS    │
               │ 媒体库/相册    │   └──────┬───────┘    └──────┬───────┘
               │ 360 播放WebXR │          │ pgvector          │
@@ -174,22 +175,22 @@ title: 技术设计文档 (TDD v1.1)
                      │                  ▼                   │
               ┌──────┴───────┐   ┌──────────────┐   ┌──────┴───────┐
               │ PostgreSQL   │   │ 对象存储/NAS  │   │ 消息队列      │
-              │ + pgvector   │   │(MinIO/S3)¹   │   │(BullMQ/Valkey)²│
+              │ + pgvector   │   │（当前未接入）¹ │   │(自研/Valkey)² │
               │ 元数据/向量   │   │ 原文件+缩略图 │   │ 索引/转码任务 │
               └──────────────┘   └──────────────┘   └──────────────┘
                      ▲                                         
                      │                                         
               ┌──────┴───────┐                                 
-              │ DS1819+ NAS   │  仅做文件系统/对象存储（Atom C3538 无 GPU）
-              │ (存储卷)      │  不参与 AI/转码
+              │ 存储节点      │  仅做文件系统/对象存储（可为 NAS / 服务器 / 对象存储卷）
+              │ (示例：NAS)   │  不参与 AI/转码（低算力主机不承担推理与 4K+ 转码）
               └──────────────┘
   ```
 </Code>
 
 <BlockQuote id="gFIh2d7AZ8J2dF8oUWgFlL">
   <Paragraph id="gVavLYsiF0EGZLF9dxtnS6">
-    ¹ <Mark bold>MinIO</Mark>（AGPL v3）作为独立 S3 兼容服务通过 API 调用，不构成对应用代码的 copyleft 传染（不修改/不分发）。若需完全规避 AGPL，可替换为 <Mark bold>SeaweedFS</Mark>（Apache 2.0）。\
-    ² <Mark bold>Valkey</Mark>（BSD-3-Clause）是 Redis 的 Linux 基金会 fork，用于替代 Redis（2024 起改 RSALv2/SSPL，非 OSI 认证开源），BullMQ 完全兼容。
+    ¹ <Mark bold>对象存储</Mark>（MinIO / S3 / SeaweedFS）当前**尚未在后端接入**：`docker-compose.yml` 内有 `minio` 服务，但 `src/backend` 零调用，媒体实际走本地文件系统。接入后可选 MinIO（AGPL v3，作为独立服务经 API 调用，不构成 copyleft 传染）或 SeaweedFS（Apache 2.0）。\
+    ² <Mark bold>Valkey</Mark>（BSD-3-Clause）是 Redis 的 Linux 基金会 fork，用于替代 Redis（2024 起改 RSALv2/SSPL，非 OSI 认证开源）。本系统的队列**为自研实现**（`internal/queue`），经 Valkey 的 Redis 协议存取，语义对齐 BullMQ（waiting/delayed/processing/failed），**未引入 BullMQ 依赖**。
   </Paragraph>
 </BlockQuote>
 
@@ -807,7 +808,7 @@ title: 技术设计文档 (TDD v1.1)
 </Heading>
 
 <BulletedList id="V1IrDrrt8mg2ByvsuemZne">
-  <Mark bold>DS1819+（Atom C3538 无 GPU）</Mark>：仅作存储卷（NAS 文件系统或格式化为对象存储 MinIO 后端），<Mark bold>不参与 AI/转码</Mark>。
+  <Mark bold>存储节点（能力抽象，不绑定机型）</Mark>：任何具备磁盘的 NAS / 服务器 / 对象存储卷，仅作存储（本地文件系统或对象存储后端），<Mark bold>不参与 AI/转码</Mark>。<Mark bold>低算力主机不承担人脸索引与 4K+ 全景转码</Mark>。示例环境之一是群晖 DS1819+（Atom C3538，无 GPU）——**它是"某台机器"的一个实例，不是目标平台**。
 </BulletedList>
 
 <BulletedList id="Qac5ptiT5UDg3xoWzSeysI">
@@ -835,11 +836,11 @@ title: 技术设计文档 (TDD v1.1)
 </BulletedList>
 
 <BulletedList id="YfVC3emQZAy8bxFFw9NTc5">
-  <Mark bold>边界</Mark>：原文件存 NAS；缩略图/HLS 可存对象存储（同机或边缘 CDN）。
+  <Mark bold>边界</Mark>：原文件存<Mark bold>存储节点</Mark>（NAS / 服务器 / 对象存储卷）；缩略图/HLS 可存对象存储（同机或边缘 CDN）。
 </BulletedList>
 
 <BulletedList id="Mam0FPeVwZq0dqJA6U37f9">
-  <Mark bold>理由</Mark>：避免 C3538 纯 CPU 跑人脸索引与 4K+ 全景转码卡死；多形态节点让算力可随预算/网络在本地与云之间弹性调度。
+  <Mark bold>理由</Mark>：避免<Mark bold>低算力主机</Mark>（无 GPU、CPU 规格有限）纯 CPU 跑人脸索引与 4K+ 全景转码时卡死；多形态节点让算力可随预算/网络在本地与云之间弹性调度。
 </BulletedList>
 
 <Heading id="Djs0Sc6GPc7IhWgOa4S8wt" level="3">
@@ -1652,13 +1653,13 @@ title: 技术设计文档 (TDD v1.1)
 </BulletedList>
 
 <Heading id="esvRlbhC3zJrUUcoZXDF8q" level="3">
-  8.8 数据迁移工具（从群晖 Photos 迁移）
+  8.8 数据迁移工具（从群晖 Photos 迁移 · <Mark bold>可选模块</Mark>）
 </Heading>
 
 <Code id="YquAl3vPrktuB9Sms2EWgW">
   ```
-  DS1819+ Synology Photos 导出
-    → 扫描 /volume1/photo/ + /volume1/photo/@eaDir/（缩略图/sidecar）
+  群晖 Synology Photos 导出（示例来源；其它相册/目录导出同理）
+    → 扫描 <群晖默认媒体根，按实际修改>（如 /volume1/photo/）+ @eaDir/ 缩略图/sidecar 目录
     → 保留 EXIF + 原始目录结构（folder_path 映射）
     → 读取 Synology sidecar（.info, .extoolkit）提取人物/标签/收藏
     → 映射到本系统 media/people/tags/albums
@@ -1668,7 +1669,7 @@ title: 技术设计文档 (TDD v1.1)
 </Code>
 
 <BulletedList id="e0r2gVYnSsWtlsK2kqIFWC">
-  迁移期间双系统并行运行（群晖只读，本系统增量写入）。
+  <Mark bold>性质</Mark>：本模块是**可选功能，不是部署前置条件**——非群晖环境可直接跳过；部署本系统不需要先有群晖。迁移期间双系统并行运行（群晖设为只读，本系统增量写入）。
 </BulletedList>
 
 <Divider id="Q2mAQeBp2TGgemcElGYECL" />
@@ -1717,13 +1718,13 @@ title: 技术设计文档 (TDD v1.1)
   <TableRow id="hH2DSttrmYKatqyXCAVnyj">
     <TableCell id="T9jrfNhmChUKsBcxWHVkGO">
       <Paragraph id="5nRhy3avD2LxMTr9WK60Wi">
-        NAS 无 GPU
+        部署主机无 GPU / 算力不足
       </Paragraph>
     </TableCell>
 
     <TableCell id="EGi1Klwg8G06t9Yiq99xhS">
       <Paragraph id="9MyZeR5WV7KbJWM7C3rrgn">
-        算力分离（§6）
+        算力分离（§6）；`EMBED_DEVICE=auto` 自动回落 CPU
       </Paragraph>
     </TableCell>
   </TableRow>

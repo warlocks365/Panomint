@@ -10,7 +10,7 @@
 
 ### 1.1 项目本质
 
-100% 自研、自托管的全景相册系统，定位为**群晖 Synology Photos 增强替代方案**。用户拥有群晖 DS1819+（Intel Atom C3538，无 GPU），存有大量 H.265/H.264 全景视频。
+**通用相册系统**：100% 自研、可自托管。**部署形态不绑定群晖** —— 可部署任意主流 Linux / Docker，或采用独立服务器安装（二进制 + systemd + 外部 PostgreSQL/Valkey）；媒体源位置无关（SMB/NFS/本地/远端）。全景 / 360° 智能视频相册是其内置的核心能力之一，功能上以**群晖 Synology Photos 为对标参照**（示例环境之一为群晖 DS1819+，Intel Atom C3538，无 GPU）。
 
 ### 1.2 核心需求（7 项用户刚需）
 
@@ -26,7 +26,7 @@
 
 ### 1.3 关键约束（贯穿全部设计）
 
-- **存储与算力分离**：DS1819+ 仅做存储，转码/AI 跑在独立 GPU 节点（本地 GPU / 云 GPU / 局域网第三方 GPU 主机，通过 Compute Node agent 接入）
+- **存储与算力分离（能力模型，不绑定型号）**：存储节点（任意 NAS / 服务器 / 对象存储，只要有磁盘）只负责存放原文件；**算力节点**（本机 CPU、本地 GPU、云 GPU、局域网第三方主机，经 Compute Node agent 接入）负责转码/AI。低算力主机不承担人脸索引与 4K+ 全景转码。
 - **独立后台账户体系**：不对接 DSM/目录账户，自建账户 + RBAC
 - **100% 自研** = 自写前后端/AI/转码，不 fork 成品，仅复用通用开源库
 
@@ -34,18 +34,19 @@
 
 | 层 | 技术选型 | 版本 |
 |----|----------|------|
-| 后端 API | Go | 1.22+ |
-| AI 推理 | Python + FastAPI | 3.13 |
-| 数据库 | PostgreSQL + PostGIS + pgvector | PG 16 / PostGIS 3.4 / pgvector 0.7 |
-| 对象存储 | MinIO（或 SeaweedFS） | - |
-| 前端 | Vue3 + Vite | 3.x |
-| 地图 | MapLibre GL JS | - |
+| 后端 API | Go | `go.mod` 声明 1.26.0 |
+| AI 推理 | **Go + CGO + ONNX Runtime**（无 Python 服务） | ORT 1.29.0；`github.com/yalue/onnxruntime_go` |
+| 向量与视觉模型 | Chinese-CLIP（默认）/ OpenAI CLIP；YuNet + SFace（人脸） | 512 维 / 128 维 |
+| 数据库 | PostgreSQL + PostGIS + pgvector | PG 16 / PostGIS 3 / pgvector |
+| 对象存储 | **当前未接入**（compose 有 MinIO 服务，后端零调用；媒体走本地文件系统） | - |
+| 前端 | Vue3 + Vite + Pinia | 3.x |
+| 地图 | MapLibre GL JS | v6 |
 | 360/VR | Three.js / A-Frame | - |
 | 自适应码率 | hls.js | - |
-| 转码 | ffmpeg（subprocess）+ NVENC | 6.x |
-| 消息队列 | BullMQ + **Valkey** | - |
-| 部署 | Docker Compose → K8s | - |
-| 反代 | Caddy（自动 HTTPS） | - |
+| 转码 | ffmpeg（subprocess）+ NVENC（可选，无卡回退 CPU） | 6.x |
+| 消息队列 | **自研队列**（语义对齐 BullMQ），基于 Valkey | - |
+| 部署 | Docker Compose（基线）/ 独立服务器（二进制 + systemd） | - |
+| 反代 | nginx（容器内）/ 自建反代（规则清单见独立部署指南） | - |
 
 ### 1.5 文档体系（当前版本）
 
