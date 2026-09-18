@@ -13,7 +13,7 @@
 #   amd64：docker compose build api                              （默认，行为与改造前一致）
 #   arm64：docker buildx build --platform linux/arm64 -f docker/api/Dockerfile .
 # 资产获取（P0-3）：本 Dockerfile 只消费 `assets/`，不负责下载。全新克隆请先跑
-#   scripts/fetch-all-assets.sh        （细节见 文档/部署方案与兼容性_v1.0.md「资产获取」）
+#   bash scripts/fetch-all-assets.sh   （细节见 文档/部署方案与兼容性_v1.0.md「资产获取」）
 
 # ---- 阶段 1：编译 ----
 FROM golang:1.26-bookworm AS build
@@ -82,7 +82,7 @@ RUN --mount=type=bind,target=/ctx,ro \
       for f in $missing; do echo "    - $f" >&2; done; \
       echo "" >&2; \
       echo "  这些文件被 .gitignore 排除，全新克隆必然没有；镜像缺它们只会在运行期崩溃循环。" >&2; \
-      echo "  请在仓库根执行一键获取：  scripts/fetch-all-assets.sh" >&2; \
+      echo "  请在仓库根执行一键获取：  bash scripts/fetch-all-assets.sh" >&2; \
       echo "  离线环境做法见：文档/部署方案与兼容性_v1.0.md「资产获取（P0-3 已处理）」" >&2; \
       exit 1; \
     fi; \
@@ -90,7 +90,7 @@ RUN --mount=type=bind,target=/ctx,ro \
     if [ "$n" = 0 ]; then \
       echo "" >&2; \
       echo "错误：assets/models/faces 下没有任何 .onnx 人脸模型（YuNet/SFace）。" >&2; \
-      echo "  请在仓库根执行：  scripts/fetch-all-assets.sh" >&2; \
+      echo "  请在仓库根执行：  bash scripts/fetch-all-assets.sh" >&2; \
       exit 1; \
     fi; \
     mkdir -p /ort/lib; \
@@ -109,7 +109,7 @@ RUN --mount=type=bind,target=/ctx,ro \
       echo "      TARGETARCH=${arch}，期望 e_machine=0x${elf_machine}（${elf_name}）" >&2; \
       echo "      实际 $(basename "$real") 的 e_machine=0x${got}" >&2; \
       echo "      多半是 ${ort_dir}/lib/ 里放了别的架构的库。" >&2; \
-      echo "      请重新执行：scripts/fetch-all-assets.sh --platform <linux-x64|linux-arm64>" >&2; \
+      echo "      请重新执行：bash scripts/fetch-all-assets.sh --platform <linux-x64|linux-arm64>" >&2; \
       exit 1; \
     fi; \
     echo "== 架构自检通过：TARGETARCH=${arch} 使用 $(basename "$real")，ELF e_machine=0x${got}（${elf_name}）"; \

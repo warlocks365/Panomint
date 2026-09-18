@@ -2,7 +2,7 @@
 # 获取 Chinese-CLIP（默认模型族）的 ONNX 资产，并切分出单塔模型。
 #
 # 用法：
-#   scripts/fetch-chinese-clip-assets.sh [--dir <仓库根>] [--no-split]
+#   bash scripts/fetch-chinese-clip-assets.sh [--dir <仓库根>] [--no-split]
 #
 # 产物（均被 .gitignore 忽略，不入库）：
 #   assets/models/chinese-clip/            merged 量化 ONNX + tokenizer + config
@@ -89,8 +89,8 @@ if [ "$DO_SPLIT" = "1" ]; then
   fi
   if [ -z "$PY" ]; then
     echo "错误：未找到 Python 解释器，无法切分单塔模型。" >&2
-    echo "      可用环境变量指定：PYTHON=/path/to/python scripts/fetch-chinese-clip-assets.sh" >&2
-    echo "      或只下载不切分：scripts/fetch-chinese-clip-assets.sh --no-split" >&2
+    echo "      可用环境变量指定：PYTHON=/path/to/python bash scripts/fetch-chinese-clip-assets.sh" >&2
+    echo "      或只下载不切分：bash scripts/fetch-chinese-clip-assets.sh --no-split" >&2
     exit 1
   fi
 
@@ -101,11 +101,11 @@ if [ "$DO_SPLIT" = "1" ]; then
       echo "错误：无法自动安装 onnx，切分未执行。" >&2
       echo "      已下载的模型文件**保留**在 $MODEL_DIR（未做任何删除）。" >&2
       echo "      三选一：" >&2
-      echo "        ① 装好 onnx 后重跑：\"$PY\" -m pip install onnx && scripts/fetch-chinese-clip-assets.sh" >&2
+      echo "        ① 装好 onnx 后重跑：\"$PY\" -m pip install onnx && bash scripts/fetch-chinese-clip-assets.sh" >&2
       echo "        ② 在 Linux 容器内切分（本项目既有做法）：" >&2
       echo "           docker run --rm -v \"$MODEL_DIR:/m\" -v \"$ROOT/scripts:/w\" python:3.13-slim \\" >&2
       echo "             bash -lc 'pip install onnx && python /w/split_clip_onnx.py /m'" >&2
-      echo "        ③ 只下载不切分：scripts/fetch-chinese-clip-assets.sh --no-split" >&2
+      echo "        ③ 只下载不切分：bash scripts/fetch-chinese-clip-assets.sh --no-split" >&2
       echo "      注意：缺少 text_only.onnx / vision_only.onnx 时，api 镜像会在构建期直接失败。" >&2
       exit 1
     fi

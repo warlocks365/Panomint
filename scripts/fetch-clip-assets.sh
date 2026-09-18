@@ -19,7 +19,8 @@
 # ⚠️ 目录命名是接口：docker/api/Dockerfile 按 `onnxruntime-linux-<x64|aarch64>-1.29.0`
 #    拼路径（linux-arm64 → onnxruntime-linux-aarch64），不要改动这里的映射。
 # ⚠️ 本脚本只取 OpenAI CLIP 与 ORT。默认模型族 chinese-clip 的资产见
-#    scripts/fetch-chinese-clip-assets.sh；一次取全请用 scripts/fetch-all-assets.sh。
+#    scripts/fetch-chinese-clip-assets.sh；一次取全请用 bash scripts/fetch-all-assets.sh
+#    （脚本在 git 里未记录执行位，故统一用 bash 调用）。
 
 set -euo pipefail
 
@@ -159,5 +160,5 @@ echo
 echo "提示：CPU 与 GPU 版库可并存，运行时用 EMBED_LIB 指向其一；"
 echo "      设 EMBED_DEVICE=cuda 强制走 GPU（装配失败会直接报错），"
 echo "      设 EMBED_DEVICE=auto 则优先 GPU、不可用回落 CPU。"
-echo "      默认模型族 chinese-clip 还需：scripts/fetch-chinese-clip-assets.sh；"
-echo "      一次取全：scripts/fetch-all-assets.sh"
+echo "      默认模型族 chinese-clip 还需：bash scripts/fetch-chinese-clip-assets.sh"
+echo "      一次取全：bash scripts/fetch-all-assets.sh"

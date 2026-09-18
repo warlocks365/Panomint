@@ -2,7 +2,7 @@
 # 一键获取"运行本系统所需的全部模型与原生库"（P0-3 的单一入口）。
 #
 # 用法：
-#   scripts/fetch-all-assets.sh [--platform <p>] [--gpu] [--dir <仓库根>] [--skip-faces]
+#   bash scripts/fetch-all-assets.sh [--platform <p>] [--gpu] [--dir <仓库根>] [--skip-faces]
 #
 #   --platform : linux-x64 | linux-arm64 | win-x64 | darwin-x64（省略则按 uname 自动识别）
 #   --gpu      : 取 CUDA 版 ONNX Runtime（仅 linux-x64 / win-x64 有上游预编译包）
@@ -82,7 +82,7 @@ detect_platform() {
 if [ -z "$PLATFORM" ]; then
   if ! PLATFORM="$(detect_platform)"; then
     echo "无法自动识别当前平台（uname -s=$(uname -s 2>/dev/null) / uname -m=$(uname -m 2>/dev/null)）。" >&2
-    echo "请显式指定：scripts/fetch-all-assets.sh --platform <linux-x64|linux-arm64|win-x64|darwin-x64>" >&2
+    echo "请显式指定：bash scripts/fetch-all-assets.sh --platform <linux-x64|linux-arm64|win-x64|darwin-x64>" >&2
     exit 2
   fi
 fi
@@ -121,7 +121,7 @@ echo
 if [ "$SKIP_FACES" = "1" ]; then
   echo "【3/3】人脸模型：已按要求跳过（--skip-faces）"
   echo "    注意：跳过后面镜像运行 facesgen/faces-worker 会失败；如需补取："
-  echo "      scripts/fetch-face-assets.sh --dir \"$ROOT\""
+  echo "      bash scripts/fetch-face-assets.sh --dir \"$ROOT\""
 else
   echo "【3/3】人脸模型（OpenCV Zoo YuNet + SFace，约 37MB）"
   bash "$ROOT/scripts/fetch-face-assets.sh" --dir "$ROOT"
@@ -165,7 +165,7 @@ fi
 
 echo
 if [ "$bad" != "0" ]; then
-  echo "结果：资产不完整。请按上面的提示补齐（人脸模型：scripts/fetch-face-assets.sh）。" >&2
+  echo "结果：资产不完整。请按上面的提示补齐（人脸模型：bash scripts/fetch-face-assets.sh）。" >&2
   exit 1
 fi
 
