@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getAccessToken } from '../utils/tokenStore'
+import { useAuthStore } from '../stores/auth'
 
 const routes = [
   {
@@ -102,12 +103,24 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (!to.meta.public && !getAccessToken()) {
     return { name: 'login' }
   }
   if (to.name === 'login' && getAccessToken()) {
     return { path: '/' }
+  }
+  // 启动引导：token 仍在（如页面刷新）但用户信息未恢复时补拉一次 /auth/me。
+  // 失败不阻塞导航；401 由 http 拦截器统一走 forceLogout。
+  if (!to.meta.public) {
+    const auth = useAuthStore()
+    if (!auth.user) {
+      try {
+        await auth.fetchMe()
+      } catch {
+        // 忽略：页面照常渲染，顶栏暂时显示兜底值
+      }
+    }
   }
   return true
 })

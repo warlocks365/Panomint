@@ -161,6 +161,8 @@ const drawerOpen = ref(false)
 let pollTimer = 0
 let plainHls = null
 let blobUrls = []
+let loadSeq = 0 // 代次守卫（同 MediaViewer.loadCurrent）：快速切换媒体时旧响应不得落地
+let pollFailCount = 0 // 转码轮询连续失败计数（P2-06：达上限置 failed 停止重试）
 
 const API_BASE = http.defaults.baseURL
 
@@ -177,6 +179,7 @@ async function fetchBlobUrl(path) {
 }
 
 async function load() {
+  const seq = ++loadSeq
   cleanup()
   loading.value = true
   error.value = ''
@@ -186,12 +189,14 @@ async function load() {
   pano.value = null
   drawerOpen.value = false
   transcode.value = { jobId: '', status: '', starting: false, failed: false }
+  pollFailCount = 0
 
   try {
     const [d, p] = await Promise.all([
       http.get(`/media/${mediaId.value}`),
       http.get(`/media/${mediaId.value}/360`)
     ])
+    if (seq !== loadSeq) return // 已切到新媒体：旧响应不得落地（其 blob 可能已被 cleanup revoke）
     detail.value = d.data
     pano.value = p.data
 
@@ -199,27 +204,33 @@ async function load() {
       // 360 媒体：直接全景播放（照片贴球面 / 视频走 HLS），无「普通播放器 → 点按钮」两步
       mode.value = 'pano'
       if (d.data.type === 'photo') {
-        panoPhotoUrl.value = await fetchBlobUrl(`/media/${mediaId.value}/download`)
+        const url = await fetchBlobUrl(`/media/${mediaId.value}/download`)
+        if (seq !== loadSeq) return
+        panoPhotoUrl.value = url
       } else if (p.data.hls_master) {
         hlsUrl.value = API_BASE + p.data.hls_master
       }
     } else if (d.data.type === 'photo') {
       mode.value = 'photo'
-      photoUrl.value = await fetchBlobUrl(`/media/${mediaId.value}/download`)
+      const url = await fetchBlobUrl(`/media/${mediaId.value}/download`)
+      if (seq !== loadSeq) return
+      photoUrl.value = url
     } else {
       mode.value = 'video'
       loading.value = false // 先渲染出 video 元素再挂载 HLS
       await nextTick()
-      setupPlainVideo(p.data.hls_master)
+      if (seq !== loadSeq) return
+      setupPlainVideo(p.data.hls_master, seq)
     }
   } catch (e) {
+    if (seq !== loadSeq) return
     error.value = e.response?.data?.error?.message || '加载失败'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
-function setupPlainVideo(master) {
+function setupPlainVideo(master, seq) {
   const v = plainVideoRef.value
   if (!v) return
   if (master && Hls.isSupported()) {
@@ -233,8 +244,14 @@ function setupPlainVideo(master) {
     plainHls.attachMedia(v)
   } else {
     // 无 HLS 或 Safari 原生：回退下载 blob（Safari 原生 HLS 无法带 Bearer，同样走 blob）
-    fetchBlobUrl(`/media/${mediaId.value}/download`).then((url) => { v.src = url })
-      .catch(() => { error.value = '视频加载失败' })
+    fetchBlobUrl(`/media/${mediaId.value}/download`).then((url) => {
+      if (seq !== loadSeq) return // 过期代次的 blob 不回填（URL 可能已被 revoke）
+      v.src = url
+    })
+      .catch(() => {
+        if (seq !== loadSeq) return
+        error.value = '视频加载失败'
+      })
   }
 }
 
@@ -245,6 +262,7 @@ async function startTranscode() {
     const res = await http.post('/transcode/job', { media_id: mediaId.value, profile: '1080p' })
     transcode.value.jobId = res.data.job_id
     transcode.value.status = 'pending'
+    pollFailCount = 0
     pollJob()
   } catch (e) {
     error.value = e.response?.data?.error?.message || '发起转码失败'
@@ -258,6 +276,7 @@ function pollJob() {
   pollTimer = setTimeout(async () => {
     try {
       const res = await http.get(`/transcode/job/${transcode.value.jobId}`)
+      pollFailCount = 0
       transcode.value.status = res.data.status
       if (res.data.status === 'done') {
         const p = await http.get(`/media/${mediaId.value}/360`)
@@ -271,7 +290,13 @@ function pollJob() {
       }
       pollJob()
     } catch {
-      pollJob() // 轮询出错继续重试
+      // 轮询连续失败达上限则停止（服务下线等场景不再无限重试）
+      pollFailCount++
+      if (pollFailCount >= 5) {
+        transcode.value.failed = true
+        return
+      }
+      pollJob()
     }
   }, 2000)
 }

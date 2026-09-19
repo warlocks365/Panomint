@@ -27,7 +27,8 @@
 
 <script setup>
 import { onBeforeUnmount, reactive, watch } from 'vue'
-import { thumbBlobUrl } from '../../api/map'
+// 复用 mediaLoader：缓存 + pending 去重 + 404 回退（原 thumbBlobUrl 每次挂载重拉）
+import { loadThumbUrl } from '../timeline/mediaLoader'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -35,19 +36,20 @@ const props = defineProps({
 })
 defineEmits(['close', 'open'])
 
-// 缩略图需 Bearer 鉴权 → 逐个取 blob 转本地 URL（img src 无法带 header）
+// 缩略图需 Bearer 鉴权 → 经 mediaLoader 取 blob 转本地 URL（img src 无法带 header）。
+// objectURL 生命周期由 mediaLoader 的 LRU 统一管理，组件不 revoke
 const thumbs = reactive({})
-const objectUrls = []
+let alive = true
 
 watch(
   () => props.items,
   (list) => {
     for (const it of list) {
       if (thumbs[it.id]) continue
-      thumbBlobUrl(it.id)
+      loadThumbUrl({ id: it.id }, 'sm')
         .then((url) => {
-          thumbs[it.id] = url
-          objectUrls.push(url)
+          // 卸载守卫：慢响应到达时组件可能已卸载，不得再写
+          if (alive) thumbs[it.id] = url
         })
         .catch(() => {})
     }
@@ -56,7 +58,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  objectUrls.forEach((u) => URL.revokeObjectURL(u))
+  alive = false
 })
 </script>
 

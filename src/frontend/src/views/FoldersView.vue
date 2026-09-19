@@ -160,7 +160,7 @@ async function fetchAllMedia() {
   for (let i = 0; i < 20; i++) {
     const params = { limit: 200 }
     if (cursor) params.cursor = cursor
-    const res = await http.get('/media', { params })
+    const res = await http.get('/media', { params, timeout: 0 }) // 全量连拉上限 20 页，慢网/大库下 15s 默认超时不够
     items.push(...(res.data.items || []))
     cursor = res.data.next_cursor || ''
     if (!cursor) break

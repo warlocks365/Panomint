@@ -128,7 +128,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useAuthStore, errMessage } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -170,17 +170,6 @@ function fail(e, fallback) {
   msgKind.value = 'error'
   msg.value = errMessage(e, fallback)
 }
-
-onMounted(async () => {
-  // 直接进入本页时用户信息可能尚未加载（例如刷新页面），补一次
-  if (!auth.user) {
-    try {
-      await auth.fetchMe()
-    } catch {
-      // 忽略：401 会由 http 拦截器处理
-    }
-  }
-})
 
 async function onStartSetup() {
   busy.value = true

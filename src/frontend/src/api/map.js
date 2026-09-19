@@ -83,9 +83,3 @@ export function getUiPrefs() {
 export function putUiPrefs(prefs) {
   return http.put('/user/ui-prefs', prefs)
 }
-
-// thumbBlobUrl 缩略图需 Bearer 鉴权，img src 无法带 header → 取 blob 后转本地 URL
-export async function thumbBlobUrl(id) {
-  const r = await http.get(`/media/${id}/thumb?size=sm`, { responseType: 'blob' })
-  return URL.createObjectURL(r.data)
-}

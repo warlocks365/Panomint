@@ -81,6 +81,7 @@ const loading = ref(false)
 const finished = ref(false)
 const error = ref('')
 let nextCursor = null
+let loadSeq = 0 // 代次守卫：reset() 递增，使在途的旧筛选响应落地时直接作废
 
 const wrapRef = ref(null)
 const scrollerRef = ref(null)
@@ -200,6 +201,7 @@ const emptyText = computed(() => {
 /* ---------- 分页加载 ---------- */
 async function loadMore() {
   if (loading.value || finished.value) return
+  const seq = loadSeq
   loading.value = true
   error.value = ''
   try {
@@ -208,6 +210,7 @@ async function loadMore() {
     if (props.favorites) params.favorites = 'true'
     if (nextCursor) params.cursor = nextCursor
     const { data } = await http.get('/media', { params })
+    if (seq !== loadSeq) return // reset() 已递增代次：旧筛选的响应丢弃
     const list = Array.isArray(data.items) ? data.items : []
     for (const m of list) {
       if (!seen.has(m.id)) {
@@ -218,11 +221,12 @@ async function loadMore() {
     nextCursor = data.next_cursor || null
     if (!nextCursor || !list.length) finished.value = true
   } catch (e) {
+    if (seq !== loadSeq) return
     error.value = e.response
       ? `HTTP ${e.response.status} ${e.response.data?.error?.message || ''}`
       : '网络不可达'
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -236,6 +240,8 @@ async function loadHistogram() {
 }
 
 function reset() {
+  loadSeq++ // 作废在途响应；同时放行 loading 守卫，让新筛选的首页请求立刻可发
+  loading.value = false
   items.splice(0, items.length)
   seen.clear()
   nextCursor = null

@@ -141,7 +141,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import Hls from 'hls.js'
-import { fetchPublicShare, loadPublicThumb, measureShareBandwidth, publicHlsUrl, publicThumbUrl } from '../components/shares/publicApi'
+import { fetchPublicShare, loadPublicThumb, loadPublicViewerUrl, measureShareBandwidth, publicHlsUrl, publicThumbUrl } from '../components/shares/publicApi'
 import Player360 from '../components/player/360Player.vue'
 
 const route = useRoute()
@@ -161,6 +161,15 @@ const thumbs = reactive(new Map())
 
 const viewerItem = ref(null)
 const viewerUrl = ref('')
+// 大图 objectURL 由本组件持有（loadPublicViewerUrl 不进共享缓存），关闭/卸载时必须 revoke；
+// 失败回退到的 thumbOf() 是共享缓存里的 URL，不得 revoke
+let viewerOwnedUrl = ''
+
+function setViewerUrl(url, owned) {
+  if (viewerOwnedUrl) URL.revokeObjectURL(viewerOwnedUrl)
+  viewerOwnedUrl = owned ? url : ''
+  viewerUrl.value = url
+}
 
 const playingItem = ref(null)
 const playerError = ref('')
@@ -267,15 +276,23 @@ async function loadShare(pwd) {
 }
 
 async function loadThumbs() {
-  for (const m of share.value.items) {
-    try {
-      const url = await loadPublicThumb(token, m.id, 'md', password.value)
-      if (alive) thumbs.set(m.id, url)
-    } catch (e) {
-      // 单个缩略图失败不阻塞整体，标记为失败态（显示占位图标而非一直转圈）
-      if (alive) thumbs.set(m.id, 'x-failed')
+  // 有限并发（6）：串行 N 张 = N 个 RTT 太慢，全并发又打爆连接/触发限流
+  const CONCURRENCY = 6
+  const items = share.value.items
+  let next = 0
+  async function worker() {
+    while (next < items.length && alive) {
+      const m = items[next++]
+      try {
+        const url = await loadPublicThumb(token, m.id, 'md', password.value)
+        if (alive) thumbs.set(m.id, url)
+      } catch (e) {
+        // 单个缩略图失败不阻塞整体，标记为失败态（显示占位图标而非一直转圈）
+        if (alive) thumbs.set(m.id, 'x-failed')
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, worker))
 }
 
 async function submitPassword() {
@@ -303,19 +320,20 @@ async function openItem(m) {
     openPlayer(m)
   } else {
     viewerItem.value = m
-    viewerUrl.value = ''
+    setViewerUrl('', false)
     try {
-      const url = await loadPublicThumb(token, m.id, 'lg', password.value)
-      if (alive && viewerItem.value === m) viewerUrl.value = url
+      const url = await loadPublicViewerUrl(token, m.id, password.value)
+      if (alive && viewerItem.value === m) setViewerUrl(url, true)
+      else URL.revokeObjectURL(url) // 已切走/已卸载：立即回收，不滞留
     } catch (e) {
-      if (alive && viewerItem.value === m) viewerUrl.value = thumbOf(m.id)
+      if (alive && viewerItem.value === m) setViewerUrl(thumbOf(m.id), false)
     }
   }
 }
 
 function closeViewer() {
   viewerItem.value = null
-  viewerUrl.value = ''
+  setViewerUrl('', false)
 }
 
 async function openPlayer(m) {
@@ -342,7 +360,13 @@ async function openPlayer(m) {
     hls.loadSource(url)
     hls.attachMedia(v)
   } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-    // iOS Safari / 微信内置浏览器原生 HLS
+    // iOS Safari / 微信内置浏览器原生 HLS：无法给 m3u8 相对路径的 ts 切片逐个补挂密码
+    // （hls.js 的 xhrSetup 在原生分支不存在），密码分享必 403 —— 明确提示，不静默失败。
+    // 长期方案：后端为切片签发一次性查询令牌（签名 URL）。
+    if (password.value) {
+      playerError.value = '当前浏览器不支持受保护视频播放，请用桌面或 Android 设备观看'
+      return
+    }
     v.src = url
   } else {
     playerError.value = '当前浏览器不支持视频播放'
@@ -403,6 +427,7 @@ onBeforeUnmount(() => {
   alive = false
   panoSeq++
   destroyPlayer()
+  if (viewerOwnedUrl) URL.revokeObjectURL(viewerOwnedUrl)
   for (const url of thumbs.values()) URL.revokeObjectURL(url)
   thumbs.clear()
 })

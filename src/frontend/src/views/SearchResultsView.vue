@@ -59,8 +59,8 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useSearchStore } from '../stores/search'
 import { useResponsive } from '../composables/useResponsive'
 import FilterBar from '../components/search/FilterBar.vue'
@@ -69,10 +69,29 @@ import ActiveFilterChips from '../components/search/ActiveFilterChips.vue'
 import SearchGrid from '../components/search/SearchGrid.vue'
 
 const router = useRouter()
+const route = useRoute()
 const store = useSearchStore()
 const { isDesktop } = useResponsive()
 
 const drawerOpen = ref(false)
+
+// 从非搜索页跳入（顶栏搜索框回车 / PeopleView 的 ?person=）时首跳即执行搜索
+onMounted(() => {
+  const person = String(route.query.person || '')
+  if (person) store.filters.person = person
+  if (store.query || person || store.activeFilterCount) store.run()
+})
+
+// 已在搜索页时路由筛选参数变化（如再次从人物页跳入）同步进 store 并重跑
+watch(
+  () => route.query.person,
+  (p) => {
+    const person = String(p || '')
+    if (store.filters.person === person) return
+    store.filters.person = person
+    if (person) store.run()
+  }
+)
 
 const fallbackKm = computed(() => {
   const m = store.placeFallback?.radius_m

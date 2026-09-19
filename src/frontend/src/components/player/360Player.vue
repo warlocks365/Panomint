@@ -82,7 +82,6 @@ const overlay = reactive({ show: false, msg: '', sub: '' })
 let renderer, scene, camera, texture, sphereGeo, sphereMat, video, el
 let hls = null
 let maxTex = 0
-let hevcSupported = false
 
 /* 子系统 2：拖拽/捏合 */
 let lon = 0, lat = 0, downX = 0, downY = 0, downLon = 0, downLat = 0
@@ -408,6 +407,15 @@ function attachHls(url) {
       }
     })
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    // 原生 HLS（iOS Safari / 微信 iOS，无 MSE）：无法给 master 请求加 Authorization，
+    // 也无法像 xhrSetup 那样给 m3u8 相对路径的 ts 切片逐个补挂查询串。
+    // 因此受保护内容（主站 Bearer / 密码分享）在该分支必然 401/403 —— 不得静默失败，
+    // 明确提示换设备。长期方案：后端为切片签发一次性查询令牌（签名 URL），
+    // 使切片请求自带鉴权，前端无需注入。
+    if (props.auth === 'bearer' || props.appendQuery) {
+      showOverlay('当前浏览器不支持受保护视频播放', '请用桌面或 Android 设备观看')
+      return
+    }
     video.src = url
     video.play().catch(() => {})
     playing.value = !video.paused
@@ -562,9 +570,6 @@ onMounted(() => {
   scene.add(new THREE.Mesh(sphereGeo, sphereMat))
 
   maxTex = renderer.capabilities.maxTextureSize
-  hevcSupported = typeof MediaSource !== 'undefined' &&
-    (MediaSource.isTypeSupported('video/mp4; codecs="hvc1.1.6.L123.00"') ||
-     MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L123.00"'))
 
   /* 事件绑定 */
   el.addEventListener('pointerdown', onPointerDown)

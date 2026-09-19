@@ -431,8 +431,11 @@ function toGeoJSON(list) {
   }
 }
 
+let reloadSeq = 0 // 主数据通道代次守卫（同 searchReqId/hoverRequestId 范式）：慢响应后到时丢弃
+
 async function reload() {
   if (!map) return
+  const seq = ++reloadSeq
   const bbox = bboxOf()
   const zoom = map.getZoom()
   const from = range.value?.from || ''
@@ -446,15 +449,17 @@ async function reload() {
       fetchHistogram(bbox, granularity.value).catch(() => []),
       fetchPlaces(bbox, from, to, 50, kind.value).catch(() => [])
     ])
+    if (seq !== reloadSeq || !map) return // 已有更新的请求发起（kind 切换/框选/粒度切换等直调入口均经此守卫）
     clusters.value = cs
     buckets.value = hs
     places.value = ps
     map.getSource('clusters')?.setData(toGeoJSON(cs))
     err.value = ''
   } catch (e) {
+    if (seq !== reloadSeq) return
     err.value = e?.response?.data?.error?.message || '地图数据加载失败'
   } finally {
-    timelineLoading.value = false
+    if (seq === reloadSeq) timelineLoading.value = false
   }
 }
 
@@ -648,7 +653,7 @@ onMounted(async () => {
       scheduleHoverClose()
     })
 
-    window.__map = map
+    if (import.meta.env.DEV) window.__map = map
     reload()
   })
 
@@ -698,6 +703,8 @@ onBeforeUnmount(() => {
   if (prefDirty) saveUiPrefs()
   map?.remove()
   map = null
+  reloadSeq++ // 作废卸载后在途的 reload 响应
+  if (import.meta.env.DEV) window.__map = null
 })
 </script>
 

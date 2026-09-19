@@ -45,7 +45,8 @@
 
 <script setup>
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { thumbBlobUrl } from '../../api/map'
+// 复用 mediaLoader：缓存 + pending 去重 + 404 回退（原 thumbBlobUrl 每次悬停重拉一簇）
+import { loadThumbUrl } from '../timeline/mediaLoader'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -57,26 +58,29 @@ const emit = defineEmits(['open', 'enter', 'leave'])
 
 const mainIndex = ref(0)
 
-// 缩略图 blob URL（全部加载，供主显图和缩略图条）
+// 缩略图 blob URL（全部加载，供主显图和缩略图条）。
+// objectURL 生命周期由 mediaLoader 的 LRU 统一管理，组件不 revoke
 const thumbs = reactive({})
-const objectUrls = []
+let alive = true
 watch(
   () => props.items,
   (list) => {
     mainIndex.value = 0
     for (const it of list) {
       if (thumbs[it.id]) continue
-      thumbBlobUrl(it.id)
+      loadThumbUrl({ id: it.id }, 'sm')
         .then((url) => {
-          thumbs[it.id] = url
-          objectUrls.push(url)
+          // 卸载守卫：组件随悬停关闭即销毁，慢响应到达时不得再写
+          if (alive) thumbs[it.id] = url
         })
         .catch(() => {})
     }
   },
   { immediate: true }
 )
-onBeforeUnmount(() => objectUrls.forEach((u) => URL.revokeObjectURL(u)))
+onBeforeUnmount(() => {
+  alive = false
+})
 
 const counts = computed(() =>
   props.items.reduce(

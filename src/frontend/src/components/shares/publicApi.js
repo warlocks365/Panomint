@@ -5,16 +5,25 @@
 // 同源相对路径（生产 nginx 反代 /public/* → api）；本地 dev 由 vite proxy 转发
 const API_BASE = import.meta.env.VITE_API_BASE || ''
 
+// 密码传递约定（与后端「头优先、query 兼容」对应）：
+// - 普通 API 请求（fetch 可自定义头）→ X-Share-Password 请求头，不出现在 URL/日志里
+// - 媒体流 URL（m3u8/ts 切片、TextureLoader 直贴图等无法带自定义头的场景）→ 保留 ?password= query
 function withPassword(url, password) {
   if (!password) return url
   return url + (url.includes('?') ? '&' : '?') + 'password=' + encodeURIComponent(password)
 }
 
-// GET /public/shares/:token?password=
+function passwordHeaders(password) {
+  return password ? { 'X-Share-Password': password } : {}
+}
+
+// GET /public/shares/:token（密码走 X-Share-Password 头）
 // 成功 → {kind, title, items, require_password}
 // 失败 → 抛 {status, code, message}；code ∈ WRONG_PASSWORD / EXPIRED / NOT_FOUND / MAX_VIEWS
 export async function fetchPublicShare(token, password) {
-  const res = await fetch(withPassword(`${API_BASE}/public/shares/${token}`, password))
+  const res = await fetch(`${API_BASE}/public/shares/${token}`, {
+    headers: passwordHeaders(password)
+  })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
     throw {
@@ -26,7 +35,7 @@ export async function fetchPublicShare(token, password) {
   return body
 }
 
-// 公开缩略图 URL（blob 加载用）
+// 公开缩略图 URL（媒体流路径：供 TextureLoader 等无法带自定义头的场景直接用，密码保留 query）
 export function publicThumbUrl(token, id, size = 'md', password = '') {
   return withPassword(`${API_BASE}/public/shares/${token}/media/${id}/thumb?size=${size}`, password)
 }
@@ -55,7 +64,8 @@ export function loadPublicThumb(token, id, size = 'md', password = '') {
   const key = `${token}:${id}:${size}`
   if (cache.has(key)) return Promise.resolve(cache.get(key))
   if (pending.has(key)) return pending.get(key)
-  const p = fetch(publicThumbUrl(token, id, size, password))
+  // fetch 可自定义头 → 密码走 X-Share-Password，URL 不带 query
+  const p = fetch(publicThumbUrl(token, id, size), { headers: passwordHeaders(password) })
     .then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return res.blob()
@@ -64,6 +74,14 @@ export function loadPublicThumb(token, id, size = 'md', password = '') {
     .finally(() => pending.delete(key))
   pending.set(key, p)
   return p
+}
+
+// 查看器大图（lg）：不进共享缓存，objectURL 由调用方持有并负责 revoke
+// （若复用 loadPublicThumb 的缓存 URL，调用方 revoke 会使缓存持有死引用）
+export async function loadPublicViewerUrl(token, id, password = '') {
+  const res = await fetch(publicThumbUrl(token, id, 'lg'), { headers: passwordHeaders(password) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return URL.createObjectURL(await res.blob())
 }
 
 /* ---------------- Phase 4 P1：分享带宽自测（360 播放页 ABR 初档依据） ---------------- */
@@ -101,9 +119,10 @@ export function publicProbeUrl(token, bytes, password = '') {
 // 任何一步失败都抛错，调用方**必须回落 hls.js 默认 ABR**，不得阻塞播放。
 // 上行探针失败不致命（ABR 只依赖下行），但下行探针失败即视为测速失败。
 export async function measureShareBandwidth(token, password = '') {
+  const headers = passwordHeaders(password) // 探针为普通 API 请求：密码走头不走 query
   // 1) 下行：边收边读，TTFB ≈ RTT（后端返回 X-Accel-Buffering: no，故 nginx 不会缓冲掉时间信息）
   const t0 = performance.now()
-  const dl = await fetch(publicProbeUrl(token, BW_DOWN_BYTES, password), { cache: 'no-store' })
+  const dl = await fetch(publicProbeUrl(token, BW_DOWN_BYTES), { cache: 'no-store', headers })
   if (!dl.ok) throw new Error(`bandwidth probe HTTP ${dl.status}`)
 
   let received = 0
@@ -128,10 +147,11 @@ export async function measureShareBandwidth(token, password = '') {
   // 2) 上行：失败只丢上行值，不影响选档
   let upKbps = 0
   try {
-    const up = await fetch(publicProbeUrl(token, BW_UP_BYTES, password), {
+    const up = await fetch(publicProbeUrl(token, BW_UP_BYTES), {
       method: 'POST',
       body: randomBytes(BW_UP_BYTES),
-      cache: 'no-store'
+      cache: 'no-store',
+      headers
     })
     if (up.ok) upKbps = clampKbps(Number((await up.json())?.up_kbps) || 0)
   } catch {
@@ -142,11 +162,8 @@ export async function measureShareBandwidth(token, password = '') {
 
   // 3) 汇总落库。写库失败也要把已测到的带宽交回调用方（否则白白浪费一次测速）
   try {
-    const url = withPassword(
-      `${API_BASE}/public/shares/${token}/bandwidth-test?down_kbps=${downKbps}&latency_ms=${latencyMs}`,
-      password
-    )
-    const res = await fetch(url, { method: 'POST', cache: 'no-store' })
+    const url = `${API_BASE}/public/shares/${token}/bandwidth-test?down_kbps=${downKbps}&latency_ms=${latencyMs}`
+    const res = await fetch(url, { method: 'POST', cache: 'no-store', headers })
     if (res.ok) return await res.json()
   } catch {
     /* 回落本地测量值 */

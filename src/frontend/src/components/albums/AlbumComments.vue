@@ -205,14 +205,7 @@ async function remove(c) {
   }
 }
 
-onMounted(async () => {
-  if (!auth.user) {
-    try {
-      await auth.fetchMe()
-    } catch (e) {
-      // 用户信息获取失败不影响评论浏览，仅隐藏"删除"按钮
-    }
-  }
+onMounted(() => {
   load()
 })
 </script>

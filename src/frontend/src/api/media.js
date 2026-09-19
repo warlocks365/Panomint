@@ -8,7 +8,8 @@ import http from './http'
 // 调用方必须自己处理该分支（不是网络故障，重试无用）。
 export function getDuplicates({ threshold = 10, limit = 50 } = {}) {
   return http
-    .get('/media/duplicates', { params: { threshold, limit } })
+    // 后端 pHash O(N²) 聚类天然慢，显式取消 15s 全局默认超时
+    .get('/media/duplicates', { params: { threshold, limit }, timeout: 0 })
     .then((r) => r.data)
 }
 
