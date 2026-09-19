@@ -75,11 +75,11 @@ func (p *AmapTileProxy) Serve(c *gin.Context) {
 	x, err2 := strconv.Atoi(c.Param("x"))
 	y, err3 := strconv.Atoi(c.Param("y"))
 	if err1 != nil || err2 != nil || err3 != nil || z < 0 || z > 22 || x < 0 || y < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_TILE", "message": "瓦片坐标非法"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_TILE", "瓦片坐标非法")
 		return
 	}
 	if y >= (1<<z) || x >= (1<<z) { // 该 zoom 下的瓦片索引上界
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_TILE", "message": "瓦片坐标越界"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_TILE", "瓦片坐标越界")
 		return
 	}
 
@@ -125,7 +125,7 @@ func (p *AmapTileProxy) Serve(c *gin.Context) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "TILE_UPSTREAM", "message": fmt.Sprintf("上游返回 %d", resp.StatusCode)}})
+		httperr.Envelope(c, http.StatusBadGateway, "TILE_UPSTREAM", fmt.Sprintf("上游返回 %d", resp.StatusCode))
 		return
 	}
 

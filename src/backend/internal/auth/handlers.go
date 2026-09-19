@@ -83,8 +83,9 @@ type tokenPair struct {
 	TokenType    string `json:"token_type"`
 }
 
+// 形状委托给 internal/httperr（单一真源）。
 func errResp(c *gin.Context, code int, errCode, msg string) {
-	c.JSON(code, gin.H{"error": gin.H{"code": errCode, "message": msg}})
+	httperr.Envelope(c, code, errCode, msg)
 }
 
 // Login POST /auth/login。

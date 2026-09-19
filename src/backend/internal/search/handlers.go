@@ -19,7 +19,7 @@ func (h *Handler) Search(c *gin.Context) {
 	p, err := ParseParams(c.Query, c.GetString("user_id"))
 	if err != nil {
 		code := "INVALID_PARAMS"
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": code, "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, code, err.Error())
 		return
 	}
 	res, err := h.Store.Search(c.Request.Context(), p)

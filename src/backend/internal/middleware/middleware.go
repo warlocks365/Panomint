@@ -11,6 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+
+	"panoalbum/internal/httperr"
 )
 
 // RequestID 注入/透传 X-Request-ID（TDD §8.2 链路追踪贯穿 Caddy→API→日志）。
@@ -36,9 +38,7 @@ func Recovery(log *zap.Logger) gin.HandlerFunc {
 			zap.String("request_id", c.GetString("request_id")),
 			zap.String("path", c.Request.URL.Path),
 		)
-		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{"code": "INTERNAL", "message": "服务器内部错误"},
-		})
+		httperr.Abort(c, http.StatusInternalServerError, "INTERNAL", "服务器内部错误")
 	})
 }
 

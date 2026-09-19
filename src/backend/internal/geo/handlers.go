@@ -125,12 +125,12 @@ func parseBBox(c *gin.Context) (BBox, bool) {
 	maxLng, ok3 := f("max_lng")
 	maxLat, ok4 := f("max_lat")
 	if !ok1 || !ok2 || !ok3 || !ok4 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "bbox 参数缺失或非法（min_lng/min_lat/max_lng/max_lat）"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "bbox 参数缺失或非法（min_lng/min_lat/max_lng/max_lat）")
 		return BBox{}, false
 	}
 	b := BBox{MinLng: minLng, MinLat: minLat, MaxLng: maxLng, MaxLat: maxLat}
 	if !b.Valid() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "bbox 越界或顺序非法"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "bbox 越界或顺序非法")
 		return BBox{}, false
 	}
 	return b, true
@@ -157,8 +157,7 @@ func parseKind(c *gin.Context) (string, bool) {
 		return KindAll, true
 	}
 	if !ValidKind(v) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-			"code": "INVALID_PARAMS", "message": "kind 仅支持 all|photo|video|pano"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "kind 仅支持 all|photo|video|pano")
 		return "", false
 	}
 	return v, true
@@ -176,17 +175,17 @@ func (h *Handler) Clusters(c *gin.Context) {
 	}
 	zoom, _ := strconv.Atoi(c.DefaultQuery("zoom", "4"))
 	if zoom < 0 || zoom > 22 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "zoom 需在 0~22"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "zoom 需在 0~22")
 		return
 	}
 	from, err := ParseTime(c.Query("from"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 	to, err := ParseTime(c.Query("to"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 
@@ -220,12 +219,12 @@ func (h *Handler) Items(c *gin.Context) {
 	}
 	from, err := ParseTime(c.Query("from"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 	to, err := ParseTime(c.Query("to"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 
@@ -280,12 +279,12 @@ func (h *Handler) Places(c *gin.Context) {
 	}
 	from, err := ParseTime(c.Query("from"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 	to, err := ParseTime(c.Query("to"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 	places, err := h.Media.Places(c.Request.Context(), b, c.GetString("user_id"), h.provider(c), kind, from, to, limit)
@@ -322,11 +321,11 @@ func (h *Handler) PutMapIconPref(c *gin.Context) {
 	}
 	// 基础校验：shape 必须为已知值，颜色必须为合法十六进制色值
 	if !validShape(p.Shape) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "shape 非法"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "shape 非法")
 		return
 	}
 	if !validColor(p.Color) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "color 非法"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "color 非法")
 		return
 	}
 	if err := h.Media.PutMapIcon(c.Request.Context(), userID, &p); err != nil {
@@ -361,7 +360,7 @@ func (h *Handler) PutUIPrefs(c *gin.Context) {
 	}
 	norm, err := NormalizeUIPrefs(in)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 	if err := h.Media.PutUIPrefs(c.Request.Context(), c.GetString("user_id"), norm); err != nil {
@@ -402,22 +401,19 @@ func (h *Handler) PutMapConfig(c *gin.Context) {
 		return
 	}
 	if body.ChinaAPIKey != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{
-			"code": "API_KEY_NOT_SUPPORTED_HERE",
-			"message": "本端点暂不支持写入高德 Key：数据库该列按 DDL 语义为加密存储，而当前没有密钥管理设施，" +
-				"写入明文会让列名与内容不符。请改用 AMAP_KEY 环境变量配置（管理界面会显示其可用状态）。",
-		}})
+		httperr.Envelope(c, http.StatusBadRequest, "API_KEY_NOT_SUPPORTED_HERE", "本端点暂不支持写入高德 Key：数据库该列按 DDL 语义为加密存储，而当前没有密钥管理设施，"+
+			"写入明文会让列名与内容不符。请改用 AMAP_KEY 环境变量配置（管理界面会显示其可用状态）。")
 		return
 	}
 	if body.SystemMapConfigInput.Empty() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "没有任何待更新字段"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "没有任何待更新字段")
 		return
 	}
 	ctx := c.Request.Context()
 	state, source := h.keyState(ctx)
 	v, err := h.Media.PutSystemMapConfig(ctx, body.SystemMapConfigInput, state, source)
 	if errors.Is(err, ErrInvalidConfig) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/queue"
 )
 
@@ -20,9 +21,7 @@ func RateLimit(rl *queue.RateLimiter, capacity, ratePerSec float64) gin.HandlerF
 			return
 		}
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": gin.H{"code": "RATE_LIMITED", "message": "请求过于频繁，请稍后重试"},
-			})
+			httperr.Abort(c, http.StatusTooManyRequests, "RATE_LIMITED", "请求过于频繁，请稍后重试")
 			return
 		}
 		c.Next()

@@ -42,3 +42,15 @@ func Fail(c *gin.Context, status int, code, msg string, err error) {
 	}
 	Envelope(c, status, code, msg)
 }
+
+// Abort 写统一封套**并中断**后续 handler（等价于 gin 的 AbortWithStatusJSON）。
+//
+// 为什么必须有它：中间件（鉴权 / 限流 / panic 恢复）用的不是 c.JSON 而是
+// `c.AbortWithStatusJSON` —— 后者除了写响应还会 `c.Abort()`，让后续处理器不再执行。
+// 若把这些地方直接换成只写 JSON 的 Envelope，会**静默丢掉中断语义**：
+// 响应看起来正常，但 handler 链会继续往下跑（可能重复写响应或在无身份的情况下继续处理）。
+// 因此 Abort 与 Envelope 是**两个不可互相替代**的入口，共同保证封套形状只有一份实现。
+func Abort(c *gin.Context, status int, code, msg string) {
+	Envelope(c, status, code, msg)
+	c.Abort()
+}

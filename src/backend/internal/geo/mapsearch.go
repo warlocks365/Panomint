@@ -42,6 +42,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/search"
 )
 
@@ -595,11 +596,11 @@ func toDisplayCoord(h ForwardHit, provider string) (float64, float64) {
 func (s *MapSearchService) Search(c *gin.Context) {
 	q := normalizeQuery(c.Query("q"))
 	if q == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": "q 不能为空"}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", "q 不能为空")
 		return
 	}
 	if utf8.RuneCountInString(q) > maxMapSearchQueryRunes {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": fmt.Sprintf("q 过长（最多 %d 字符）", maxMapSearchQueryRunes)}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", fmt.Sprintf("q 过长（最多 %d 字符）", maxMapSearchQueryRunes))
 		return
 	}
 	display := strings.TrimSpace(c.Query("provider"))

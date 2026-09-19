@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
 )
 
@@ -27,7 +28,7 @@ func (h *Handler) Thumb(c *gin.Context) {
 	size := c.DefaultQuery("size", "md")
 	col := map[string]string{"sm": "thumbnail_sm", "md": "thumbnail_md", "lg": "thumbnail_lg"}[size]
 	if col == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "BAD_SIZE", "message": "size 仅支持 sm|md|lg"}})
+		httperr.Envelope(c, http.StatusBadRequest, "BAD_SIZE", "size 仅支持 sm|md|lg")
 		return
 	}
 	// 先判归属：不存在与无权一律落到**同一个** 404（见 thumbAccess / writeThumbAccessError）。
@@ -48,7 +49,7 @@ func (h *Handler) Thumb(c *gin.Context) {
 	}
 	path := filepath.Join(dir, base)
 	if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(dir)) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "BAD_PATH", "message": "非法路径"}})
+		httperr.Envelope(c, http.StatusBadRequest, "BAD_PATH", "非法路径")
 		return
 	}
 	// 文件缺失时 c.File 会回落 net/http 默认纯文本 404；先 Stat 返回统一 JSON（与 download 的 FILE_MISSING 对齐）

@@ -108,7 +108,7 @@ func rejectScope(c *gin.Context, err error) {
 func (h *Handler) Duplicates(c *gin.Context) {
 	threshold, limit, err := ParseDuplicateParams(c.Query("threshold"), c.Query("limit"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": err.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", err.Error())
 		return
 	}
 	scope, err := ResolveMediaScope(c.Query("space"), c.GetString("user_id"))
@@ -121,7 +121,7 @@ func (h *Handler) Duplicates(c *gin.Context) {
 	})
 	var tooMany *TooManyMediaError
 	if errors.As(err, &tooMany) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "TOO_MANY_MEDIA", "message": tooMany.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "TOO_MANY_MEDIA", tooMany.Error())
 		return
 	}
 	if err != nil {
@@ -136,7 +136,7 @@ func (h *Handler) Duplicates(c *gin.Context) {
 func (h *Handler) DateHistogram(c *gin.Context) {
 	granularity := c.DefaultQuery("granularity", "month")
 	if granularity != "year" && granularity != "month" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "INVALID_PARAMS", "message": ErrInvalidGranularity.Error()}})
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", ErrInvalidGranularity.Error())
 		return
 	}
 	scope, err := ResolveMediaScope(c.Query("space"), c.GetString("user_id"))
