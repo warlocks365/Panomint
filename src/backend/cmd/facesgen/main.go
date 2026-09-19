@@ -61,6 +61,7 @@ type options struct {
 	modelDir  string
 	lib       string
 	thumbDir  string
+	mediaRoot string
 	device    string
 	deviceID  int
 	threads   int
@@ -81,6 +82,7 @@ func main() {
 	flag.StringVar(&o.modelDir, "modeldir", "", "人脸模型目录（YuNet + SFace）")
 	flag.StringVar(&o.lib, "lib", "", "onnxruntime 原生库路径")
 	flag.StringVar(&o.thumbDir, "thumbdir", "", "缩略图目录")
+	flag.StringVar(&o.mediaRoot, "mediaroot", "", "原图根目录（media.path 相对它解析）；缺省取 MEDIA_ROOT。为空则只用 LG 缩略图（旧行为）")
 	flag.StringVar(&o.device, "device", "", "推理设备 cpu|cuda|auto")
 	flag.IntVar(&o.deviceID, "deviceID", -1, "CUDA 设备序号")
 	flag.IntVar(&o.threads, "threads", -1, "CPU 线程数")
@@ -149,6 +151,9 @@ func buildOptions(o options) (faces.Options, string) {
 	opts := faces.OptionsFromEnv()
 	if o.modelDir != "" {
 		opts.ModelDir = o.modelDir
+	}
+	if o.mediaRoot != "" {
+		opts.MediaRoot = o.mediaRoot
 	}
 	if o.lib != "" {
 		opts.LibPath = o.lib
@@ -275,10 +280,17 @@ func runScan(ctx context.Context, opts faces.Options, thumbDir string, limit int
 func scanOne(ctx context.Context, opts faces.Options, det *faces.Detector, rec *faces.Recognizer,
 	thumbDir string, m faces.MediaItem) (int, int, error) {
 
-	path := filepath.Join(thumbDir, filepath.Base(m.ThumbLG))
-	img, err := faces.DecodeImage(path)
+	// 检测图源：原图优先、LG 缩略图回退（见 faces.LoadScanImage）。
+	// 为什么不等价于"一直用缩略图"：检测输入边长按源图长边自适应，而 LG 缩略图宽固定 1280 ——
+	// 对 4K 原图来说缩略图等于把输入砍到约 1/3，靠近 MinFacePx 的人脸就检不出来。
+	// 回退是必须的：只导入过缩略图 / NAS 未挂载 / 源文件被移走时都只有缩略图可用。
+	img, src, err := faces.LoadScanImage(m, opts.MediaRoot, thumbDir)
 	if err != nil {
 		return 0, 0, err
+	}
+	if src.FallbackReason != "" {
+		// 只记"原图本应可用却没用上"的情形；原图本就不存在属正常，不刷日志。
+		log.Printf("  %s %s", m.Filename, src.FallbackReason)
 	}
 	dets, err := det.Detect(img)
 	if err != nil {

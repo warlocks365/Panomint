@@ -29,12 +29,20 @@ type MediaItem struct {
 	ID       string
 	Filename string
 	ThumbLG  string
+	// Path 是原图相对路径（相对 mediaRoot 解析）。可能为空或指向不存在的文件
+	// （只导入过缩略图 / NAS 未挂载 / 源文件已被移除），故它只是**首选**而非必需 ——
+	// 见 LoadScanImage 的回退链。
+	Path string
 }
 
 // ListPending 列出待人脸扫描的媒体；force 为真时忽略扫描标记全量重算。
 //
-// 只返回**已有 LG 缩略图**的行：人脸检测需要足够分辨率（LG=宽 1280），
-// 缩略图由 index worker 异步产出，晚到者由下一轮清扫自然补上（见 facesgen -mode watch）。
+// 仍**只返回已有 LG 缩略图**的行：缩略图由 index worker 异步产出，晚到者由下一轮清扫自然补上
+// （见 facesgen -mode watch），且它是原图不可用时的**回退源** —— 保留这个条件等于保证
+// "每一行至少有一个可解码的图"，扫描才不会因为个别行缺原图而整体失败。
+//
+// 为什么还要带上 path（原图）：检测输入边长按源图长边自适应（resolveInputSize，上限 FACE_INPUT_MAX），
+// 而 LG 缩略图宽固定 1280 —— 喂原图才能真正吃到"输入更大 → 更小的人脸也能检出"的收益。
 func (s *Store) ListPending(ctx context.Context, force bool, limit int) ([]MediaItem, error) {
 	if limit <= 0 {
 		limit = 200
@@ -44,7 +52,7 @@ func (s *Store) ListPending(ctx context.Context, force bool, limit int) ([]Media
 		cond = "true"
 	}
 	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
-		SELECT id::text, COALESCE(filename,''), COALESCE(thumbnail_lg,'')
+		SELECT id::text, COALESCE(filename,''), COALESCE(thumbnail_lg,''), COALESCE(path,'')
 		FROM media
 		WHERE deleted_at IS NULL AND COALESCE(thumbnail_lg,'') <> '' AND %s
 		ORDER BY taken_at DESC NULLS LAST, id
@@ -57,7 +65,7 @@ func (s *Store) ListPending(ctx context.Context, force bool, limit int) ([]Media
 	out := []MediaItem{}
 	for rows.Next() {
 		var m MediaItem
-		if err := rows.Scan(&m.ID, &m.Filename, &m.ThumbLG); err != nil {
+		if err := rows.Scan(&m.ID, &m.Filename, &m.ThumbLG, &m.Path); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

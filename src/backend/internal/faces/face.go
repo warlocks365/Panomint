@@ -217,6 +217,13 @@ type Options struct {
 	MinFacePx     int     // 最小人脸边长（0=默认 24）
 	MergeSim      float64 // 聚类合并余弦阈值（0=默认 0.40）
 
+	// MediaRoot 原图根目录：MediaItem.Path 相对它解析。空 = 不使用原图，直接用 LG 缩略图。
+	//
+	// 为什么要有它：检测输入边长按源图长边自适应（resolveInputSize），而 LG 缩略图宽固定 1280 ——
+	// 喂原图才能吃到"输入更大 → 更小的人脸也能检出"的收益。但原图可能不存在
+	// （只导入过缩略图 / NAS 未挂载 / 源文件已移除），故它只是首选，回退链见 LoadScanImage。
+	MediaRoot string
+
 	// Store 聚类所需的 DB 存取（nil=只检测不聚类）。
 	Store *Store
 }
@@ -248,6 +255,9 @@ func OptionsFromEnv() Options {
 	o.NMSThreshold = atof(os.Getenv("FACE_NMS"))
 	o.MinFacePx = atoi(os.Getenv("FACE_MIN_PX"))
 	o.MergeSim = atof(os.Getenv("FACE_MERGE_SIM"))
+	// 原图根目录：与索引/缩略图共用同一个 MEDIA_ROOT（回退链见 LoadScanImage）。
+	// 未设置 = 不使用原图，扫描退化为只用 LG 缩略图（即旧行为）。
+	o.MediaRoot = os.Getenv("MEDIA_ROOT")
 	return o
 }
 
