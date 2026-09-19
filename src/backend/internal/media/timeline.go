@@ -3,13 +3,14 @@ package media
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"panoalbum/internal/cursor"
 )
 
 // Store 媒体查询。
@@ -166,22 +167,7 @@ func parseDateRange(d string) (time.Time, time.Time, bool) {
 	return time.Time{}, time.Time{}, false
 }
 
-func encodeCursor(t time.Time, id string) string {
-	return base64.URLEncoding.EncodeToString([]byte(t.UTC().Format(time.RFC3339Nano) + "|" + id))
-}
-
-func decodeCursor(s string) (time.Time, string, error) {
-	b, err := base64.URLEncoding.DecodeString(s)
-	if err != nil {
-		return time.Time{}, "", err
-	}
-	ts, id, ok := strings.Cut(string(b), "|")
-	if !ok {
-		return time.Time{}, "", errors.New("游标格式错误")
-	}
-	t, err := time.Parse(time.RFC3339Nano, ts)
-	return t, id, err
-}
+// 游标编解码见 internal/cursor（唯一真源）—— 本包曾与 audit/search 各存一份同构实现。
 
 // List 时间轴查询：过滤 + 复合游标分页 + 时间桶聚合。
 func (s *Store) List(ctx context.Context, p ListParams) (*ListResult, error) {
@@ -192,7 +178,7 @@ func (s *Store) List(ctx context.Context, p ListParams) (*ListResult, error) {
 
 	// 复合游标：(taken_at, id) 降序
 	if p.Cursor != "" {
-		t, id, err := decodeCursor(p.Cursor)
+		t, id, err := cursor.Decode(p.Cursor)
 		if err != nil {
 			return nil, errors.New("无效游标")
 		}
@@ -233,7 +219,7 @@ func (s *Store) List(ctx context.Context, p ListParams) (*ListResult, error) {
 	}
 	if len(res.Items) > p.Limit {
 		last := res.Items[p.Limit-1]
-		res.NextCursor = encodeCursor(last.TakenAt, last.ID)
+		res.NextCursor = cursor.Encode(last.TakenAt, last.ID)
 		res.Items = res.Items[:p.Limit]
 	}
 

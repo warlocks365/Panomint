@@ -2,16 +2,14 @@ package search
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"panoalbum/internal/cursor"
 	"panoalbum/internal/media"
 )
 
@@ -135,7 +133,7 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr, tex
 	cursorWhere := ""
 	if p.Cursor != "" {
 		if scored {
-			tm, sc, t, id, err := decodeScoredCursor(p.Cursor)
+			tm, sc, t, id, err := cursor.DecodeScored(p.Cursor)
 			if err != nil {
 				return nil, ErrInvalidCursor
 			}
@@ -143,7 +141,7 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr, tex
 			args = append(args, cparams...)
 			cursorWhere = " AND " + csql
 		} else {
-			t, id, err := decodeCursor(p.Cursor)
+			t, id, err := cursor.Decode(p.Cursor)
 			if err != nil {
 				return nil, ErrInvalidCursor
 			}
@@ -205,79 +203,15 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr, tex
 		last := res.Items[p.Limit-1]
 		if scored && last.Score != nil {
 			// text_matched 与 SemanticOnly 互补（见上方赋值），游标需带上分组键才能续排
-			res.NextCursor = encodeScoredCursor(!last.SemanticOnly, *last.Score, last.TakenAt, last.ID)
+			res.NextCursor = cursor.EncodeScored(!last.SemanticOnly, *last.Score, last.TakenAt, last.ID)
 		} else {
-			res.NextCursor = encodeCursor(last.TakenAt, last.ID)
+			res.NextCursor = cursor.Encode(last.TakenAt, last.ID)
 		}
 		res.Items = res.Items[:p.Limit]
 	}
 	return res, nil
 }
 
-// ---- 复合游标（taken_at, id）降序，与 internal/media/timeline.go 同构 ----
-
-func encodeCursor(t time.Time, id string) string {
-	return base64.URLEncoding.EncodeToString([]byte(t.UTC().Format(time.RFC3339Nano) + "|" + id))
-}
-
-func decodeCursor(s string) (time.Time, string, error) {
-	b, err := base64.URLEncoding.DecodeString(s)
-	if err != nil {
-		return time.Time{}, "", err
-	}
-	ts, id, ok := strings.Cut(string(b), "|")
-	if !ok {
-		return time.Time{}, "", errors.New("游标格式错误")
-	}
-	t, err := time.Parse(time.RFC3339Nano, ts)
-	return t, id, err
-}
-
-// ---- v3 评分游标（text_matched, score, taken_at, id）降序（与 scoredOrderBy 一一对应）----
-//
-// v3 在 v2（score, taken_at, id）之上补了分组键 text_matched：
-// 排序键多了一列后，若游标仍只带三元组，跨页比较会与 ORDER BY 不一致
-// （仅语义行可能被重复返回或漏掉）。前缀 v1/v2/v3 明确版本化隔离。
-
-func encodeScoredCursor(textMatched bool, score float64, t time.Time, id string) string {
-	tm := "0"
-	if textMatched {
-		tm = "1"
-	}
-	return base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("v3|%s|%g|%s|%s",
-		tm, score, t.UTC().Format(time.RFC3339Nano), id)))
-}
-
-// decodeScoredCursor 解析评分游标，返回 (是否文本命中, score, taken_at, id)。
-// 兼容 v2 三元组：旧游标没带分组键，按 text_matched=true 处理（仅在升级瞬间的跨版本续页可见，
-// 最坏情况是重复若干"仅语义"行，不会漏行、不会报错）。
-func decodeScoredCursor(s string) (bool, float64, time.Time, string, error) {
-	b, err := base64.URLEncoding.DecodeString(s)
-	if err != nil {
-		return false, 0, time.Time{}, "", err
-	}
-	parts := strings.SplitN(string(b), "|", 5)
-	switch {
-	case len(parts) == 5 && parts[0] == "v3":
-		sc, err := strconv.ParseFloat(parts[2], 64)
-		if err != nil {
-			return false, 0, time.Time{}, "", errors.New("评分游标 score 非法")
-		}
-		t, err := time.Parse(time.RFC3339Nano, parts[3])
-		if err != nil {
-			return false, 0, time.Time{}, "", errors.New("评分游标时间非法")
-		}
-		return parts[1] == "1", sc, t, parts[4], nil
-	case len(parts) == 4 && parts[0] == "v2":
-		sc, err := strconv.ParseFloat(parts[1], 64)
-		if err != nil {
-			return false, 0, time.Time{}, "", errors.New("评分游标 score 非法")
-		}
-		t, err := time.Parse(time.RFC3339Nano, parts[2])
-		if err != nil {
-			return false, 0, time.Time{}, "", errors.New("评分游标时间非法")
-		}
-		return true, sc, t, parts[3], nil
-	}
-	return false, 0, time.Time{}, "", errors.New("评分游标格式错误（需 v3 前缀四元组）")
-}
+// 游标编解码见 internal/cursor（唯一真源，含 v3 评分游标与 v2 兼容回退）。
+// 本包曾与 audit/query.go、media/timeline.go 各存一份**逐字节相同**的复合游标实现；
+// 游标是对外契约，重复实现会让"改一处忘一处"变成静默的翻页错位（跨页丢行/重复行）。

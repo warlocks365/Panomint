@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/cursor"
 )
 
 // ---- Job000005：q 多 token OR + 相关度评分 ----
@@ -66,28 +68,28 @@ func TestScoredCursorRoundTrip(t *testing.T) {
 	ts := time.Date(2026, 8, 27, 8, 30, 0, 456, time.UTC)
 	// v3：四元组 (text_matched, score, taken_at, id)，分组键必须往返保真
 	for _, tm := range []bool{true, false} {
-		cur := encodeScoredCursor(tm, 12.5, ts, "abc-123")
-		gotTM, sc, gotT, gotID, err := decodeScoredCursor(cur)
+		cur := cursor.EncodeScored(tm, 12.5, ts, "abc-123")
+		gotTM, sc, gotT, gotID, err := cursor.DecodeScored(cur)
 		if err != nil || sc != 12.5 || gotID != "abc-123" || gotTM != tm || gotT.UnixNano() != ts.UnixNano() {
 			t.Fatalf("v3 游标往返失败(tm=%v): tm=%v sc=%v id=%q t=%v err=%v", tm, gotTM, sc, gotID, gotT, err)
 		}
 	}
 	// v2 兼容：旧三元组无分组键，按 text_matched=true 解析（升级瞬间的跨版本续页不报错）
 	legacy2 := base64.URLEncoding.EncodeToString([]byte("v2|7.5|" + ts.UTC().Format(time.RFC3339Nano) + "|abc-123"))
-	if gotTM, sc, _, gotID, err := decodeScoredCursor(legacy2); err != nil || !gotTM || sc != 7.5 || gotID != "abc-123" {
+	if gotTM, sc, _, gotID, err := cursor.DecodeScored(legacy2); err != nil || !gotTM || sc != 7.5 || gotID != "abc-123" {
 		t.Fatalf("v2 游标兼容失败: tm=%v sc=%v id=%q err=%v", gotTM, sc, gotID, err)
 	}
 	// 旧版（无 v2/v3 前缀）游标在评分模式下应拒绝（版本化隔离）
-	legacy := encodeCursor(ts, "abc-123")
-	if _, _, _, _, err := decodeScoredCursor(legacy); err == nil {
+	legacy := cursor.Encode(ts, "abc-123")
+	if _, _, _, _, err := cursor.DecodeScored(legacy); err == nil {
 		t.Fatal("旧版游标在评分模式应报版本错误")
 	}
-	if _, _, _, _, err := decodeScoredCursor("!!!bad!!!"); err == nil {
+	if _, _, _, _, err := cursor.DecodeScored("!!!bad!!!"); err == nil {
 		t.Fatal("非法 base64 应报错")
 	}
 	// v3 字段非法：拒绝
 	bad := base64.URLEncoding.EncodeToString([]byte("v3|1|abc|" + ts.UTC().Format(time.RFC3339Nano) + "|abc"))
-	if _, _, _, _, err := decodeScoredCursor(bad); err == nil {
+	if _, _, _, _, err := cursor.DecodeScored(bad); err == nil {
 		t.Fatal("非法 score 应报错")
 	}
 }
@@ -555,12 +557,12 @@ func TestNominatimGeocoder(t *testing.T) {
 
 func TestCursorRoundTrip(t *testing.T) {
 	ts := time.Date(2026, 8, 26, 10, 20, 30, 123, time.UTC)
-	cur := encodeCursor(ts, "abc-123")
-	gotT, gotID, err := decodeCursor(cur)
+	cur := cursor.Encode(ts, "abc-123")
+	gotT, gotID, err := cursor.Decode(cur)
 	if err != nil || gotID != "abc-123" || gotT.UnixNano() != ts.UnixNano() {
 		t.Fatalf("游标往返失败: %v %q %v", gotT, gotID, err)
 	}
-	if _, _, err := decodeCursor("!!!bad!!!"); err == nil {
+	if _, _, err := cursor.Decode("!!!bad!!!"); err == nil {
 		t.Fatal("非法 base64 应报错")
 	}
 }

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/cursor"
 )
 
 // ---- Content-Range 解析边界 ----
@@ -188,15 +190,15 @@ func mustJSON(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 
 func TestCursorRoundTrip(t *testing.T) {
 	ts := time.Date(2026, 8, 25, 12, 34, 56, 789, time.UTC)
-	cur := encodeCursor(ts, "abc-123")
-	gotT, gotID, err := decodeCursor(cur)
+	cur := cursor.Encode(ts, "abc-123")
+	gotT, gotID, err := cursor.Decode(cur)
 	if err != nil || gotID != "abc-123" || gotT.UnixNano() != ts.UnixNano() {
 		t.Fatalf("游标往返失败: %v %q %v", gotT, gotID, err)
 	}
-	if _, _, err := decodeCursor("!!!not-base64!!!"); err == nil {
+	if _, _, err := cursor.Decode("!!!not-base64!!!"); err == nil {
 		t.Fatal("非法 base64 应报错")
 	}
-	if _, _, err := decodeCursor("aGVsbG8"); err == nil { // "hello"，无分隔符
+	if _, _, err := cursor.Decode("aGVsbG8"); err == nil { // "hello"，无分隔符
 		t.Fatal("无分隔符游标应报错")
 	}
 }

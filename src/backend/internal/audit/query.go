@@ -13,12 +13,12 @@ package audit
 // 编号与下标由同一处产生，不存在两处计算漂移的可能。
 
 import (
-	"encoding/base64"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"panoalbum/internal/cursor"
 )
 
 // Filter 审计查询过滤条件。零值 = 不过滤。
@@ -125,24 +125,19 @@ func clampJobsLimit(n int) int {
 }
 
 // ---------------------------------------------------------------------------
-// 游标（与 internal/media 的时间轴游标同构：base64(RFC3339Nano|id)）
+// 游标：编解码见 internal/cursor（唯一真源，与 media/search 共用同一线格式）。
+//
+// 这里刻意保留 int64 签名做**薄适配**：审计表的 id 是 bigint，而真源用 string id
+// （因为它要与 UUID 型的 media/search 共用）。适配只做十进制转换，不改变任何字节 ——
+// 十进制字符串就是原实现写进游标的形态。
 // ---------------------------------------------------------------------------
 
 func encodeCursor(at time.Time, id int64) string {
-	return base64.URLEncoding.EncodeToString(
-		[]byte(at.UTC().Format(time.RFC3339Nano) + "|" + strconv.FormatInt(id, 10)))
+	return cursor.Encode(at, strconv.FormatInt(id, 10))
 }
 
 func decodeCursor(s string) (time.Time, int64, error) {
-	b, err := base64.URLEncoding.DecodeString(s)
-	if err != nil {
-		return time.Time{}, 0, err
-	}
-	ts, rawID, ok := strings.Cut(string(b), "|")
-	if !ok {
-		return time.Time{}, 0, errors.New("游标格式错误")
-	}
-	t, err := time.Parse(time.RFC3339Nano, ts)
+	t, rawID, err := cursor.Decode(s)
 	if err != nil {
 		return time.Time{}, 0, err
 	}

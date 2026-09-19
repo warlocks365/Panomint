@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"panoalbum/internal/cursor"
 )
 
 // GET /tags/:id/media 可见性的回归网。
@@ -66,7 +68,7 @@ func TestBuildTagMediaWherePersonalBindsOwnerFirst(t *testing.T) {
 }
 
 func TestBuildTagMediaWherePlaceholderNumbering(t *testing.T) {
-	cur := encodeCursor(time.Date(2025, 7, 1, 0, 0, 0, 0, time.UTC), "m9")
+	cur := cursor.Encode(time.Date(2025, 7, 1, 0, 0, 0, 0, time.UTC), "m9")
 	where, args, err := buildTagMediaWhere(MediaScope{Space: "personal", OwnerID: "u1"}, "t1", cur)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +118,7 @@ func TestBuildTagMediaWhereSharedUsesMembership(t *testing.T) {
 
 func TestBuildTagMediaWhereCursorSeparatorIsSargable(t *testing.T) {
 	// 游标条件必须与时间轴同形（(taken_at, id) < (...)，复合游标），否则分页会漏/重
-	cur := encodeCursor(time.Date(2025, 7, 1, 0, 0, 0, 0, time.UTC), "m9")
+	cur := cursor.Encode(time.Date(2025, 7, 1, 0, 0, 0, 0, time.UTC), "m9")
 	where, _, err := buildTagMediaWhere(MediaScope{Space: "personal", OwnerID: "u1"}, "t1", cur)
 	if err != nil {
 		t.Fatal(err)

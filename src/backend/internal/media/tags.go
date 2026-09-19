@@ -8,6 +8,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+
+	// ⚠️ 取别名：本文件里有名为 cursor 的局部变量（分页游标字符串），
+	// 直接 import 同名包会被变量遮蔽，调用点会编译不过。
+	cursorcodec "panoalbum/internal/cursor"
 )
 
 // 手工标签（Job000005）：GET /tags 自动补全 + POST/DELETE /media/:id/tags 关联管理。
@@ -332,7 +336,7 @@ func buildTagMediaWhere(scope MediaScope, tagID, cursor string) (string, []any, 
 	conds = append(conds, "mt.confirmed = true")
 
 	if cursor != "" {
-		t, id, err := decodeCursor(cursor)
+		t, id, err := cursorcodec.Decode(cursor)
 		if err != nil {
 			return "", nil, errors.New("无效游标")
 		}
@@ -383,7 +387,7 @@ func (s *Store) ListMediaByTag(ctx context.Context, scope MediaScope, tagID, cur
 	}
 	if len(res.Items) > limit {
 		last := res.Items[limit-1]
-		res.NextCursor = encodeCursor(last.TakenAt, last.ID)
+		res.NextCursor = cursorcodec.Encode(last.TakenAt, last.ID)
 		res.Items = res.Items[:limit]
 	}
 	return res, nil
