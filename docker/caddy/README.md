@@ -46,3 +46,59 @@ certs/private.pem     # 私钥（放好后 chmod 600）
 
 `docker-compose.yml` 只映射了 `443`（HTTP 变体要用的话，自行补 `- "80:80"`；
 也可只让 443 反代，另经 `web` 服务的 8088 直连）。
+
+---
+
+## 本部署的证书与域名（Job000029，2026-09-19）
+
+**先把域名结构搞清楚（这里最容易搞错）**：
+
+- `warlocks.cn` 是**一级域名（apex）** —— 它是**证书覆盖范围**里的名字，**不是**本站要服务的站点。
+- **`panomint.warlocks.cn` 与 `photo.warlocks.cn` 才是本站实际服务的域名。**
+- 提供的证书是 apex 的**泛域名证书**（SAN = `*.warlocks.cn` + `warlocks.cn`），
+  所以 `panomint.` / `photo.` 这类子域名被它覆盖 —— **这正是这张证书要解决的问题**。
+
+⇒ 因此 `SITE_ADDRESS` **只列实际站点**（`Caddyfile.tls` 的默认值就是这两个）。
+不要因为"证书里有 apex"就顺手把 `warlocks.cn` 也加进站点列表：那会让本站去接管一个
+它本来不负责的名字，既无必要，也会掩盖真正的域名指向关系。
+
+**证书来源**：`D:\ssl`（来此加密 / Let's Encrypt 渠道，随包带 `detail.txt`）。
+
+| 文件 | 用途 | 是否必需 |
+| --- | --- | --- |
+| `fullchain.crt` | 证书 + 证书链 | ✅ **Caddy 读它** |
+| `private.pem` | 私钥（**ECDSA P-256**） | ✅ **Caddy 读它** |
+| `certificate.crt` / `chain.crt` / `public.pem` / `detail.txt` | 续期比对与核对用 | 可选（Caddy 不读） |
+
+- **SAN**：`*.warlocks.cn` + `warlocks.cn` —— **子域名与 apex 都在覆盖范围内**，这正是
+  `panomint.` / `photo.` 这两个站点域名能用它的原因。
+- **到期**：2026-10-13。续期后替换 `fullchain.crt` / `private.pem`，再
+  `docker compose up -d --force-recreate caddy`。
+- 安装位置：`docker/caddy/certs/`（全部 `chmod 600`；该目录被 gitignore，**证书私钥绝不入库**）。
+
+**服务的站点**由 `.env` 的 `SITE_ADDRESS` 给出（逗号分隔多个域名）。`docker-compose.yml` 用
+`${SITE_ADDRESS:-…}` 透传，**空值会回落到默认**，因此不会踩到上面那个 `os.LookupEnv` 空串坑。
+⚠️ 证书必须覆盖 `SITE_ADDRESS` 里的**所有**名字，否则那个域名的握手会失败。
+
+### ⚠️ 验证 HTTPS 必须带 SNI —— 否则会得到**假故障**
+
+`curl https://127.0.0.1/` 的 SNI 是 `127.0.0.1`，与证书不匹配 ⇒ Caddy 选不到证书 ⇒
+握手报 `tlsv1 alert internal error`。**这不是服务坏了，是测法错了**（本项目真实踩过，并一度误判为"证书与私钥不匹配"）。正确做法：
+
+```bash
+curl -ksS --resolve warlocks.cn:443:127.0.0.1 -o /dev/null \
+     -w 'HTTP=%{http_code} bytes=%{size_download}\n' https://warlocks.cn/
+# 期望 200 且 bytes > 0
+openssl s_client -connect 127.0.0.1:443 -servername warlocks.cn </dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -dates -ext subjectAltName
+```
+
+⚠️ **判"是否真的在服务"要看响应体大小**：站点块没接住该域名时，Caddy 走 NOP —— 状态码看着像 200、**`size=0`**。
+只看状态码会把"只握手、不服务"误判为正常。
+
+### 域名解析
+
+- 局域网 DNS 已把 `panomint.` / `photo.` 指向 `192.168.1.115`，**与站点列表一致，无需改动**。
+- apex `warlocks.cn` 在 DNS 里指向别处（`192.168.1.55`）—— **这与本站无关，不需要改**：
+  本站不服务 apex，它只是证书的覆盖条目。
+- 服务器自身 `/etc/hosts` 含这两条站点域名（`panomint.` / `photo.`）。

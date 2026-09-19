@@ -264,6 +264,13 @@ services:
     # ["caddy","run","--config","/etc/caddy/Caddyfile","--adapter","caddyfile"]，
     # 故这里只是把 config 路径变量化（`docker image inspect caddy:2-alpine` 可复核）。
     command: ["caddy", "run", "--config", "/etc/caddy/${CADDY_CONFIG:-Caddyfile}", "--adapter", "caddyfile"]
+    # SITE_ADDRESS：本部署对外服务的域名（逗号分隔）。
+    # ⚠️ 刻意写成 `${VAR:-默认值}` 而不是 `${VAR}`：compose 在**变量为空或未设置**时都会回落到默认值，
+    #    因此绝不会把空串传进容器。这一点很关键 —— Caddy 用 `os.LookupEnv`，**空串算"已设置"**，
+    #    会让站点块失去地址并直接 `server block without any key` 启动失败（已实测）。
+    # ⚠️ 证书必须覆盖这里列出的**所有**名字；当前证书 SAN = `*.warlocks.cn` + `warlocks.cn`。
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-panomint.warlocks.cn, photo.warlocks.cn}
     ports:
       - "443:443"
       - "443:443/udp"
