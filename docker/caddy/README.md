@@ -29,6 +29,42 @@ services:
 ⚠️ **别传空值**：Caddy 用 `os.LookupEnv` 判定，空串算"已设置"，会覆盖配置文件里的默认值
 （例如 `SITE_ADDRESS=` 会让站点地址变成空，Caddy 直接启动失败）。
 
+## 透传给后端的协议（`FORWARDED_PROTO`）
+
+反代会把 `X-Forwarded-Proto` 传给后端，而后端**据此拼分享链接与 OG 图片的绝对 URL**
+（`src/backend/internal/shares/og.go` 的 `originOf`）。这个值必须**与事实相符**，否则
+分享出去的是打不开的链接。
+
+两个形态的默认值是**各自形态的真实情况**：
+
+| 文件 | 默认值 | 为什么 |
+| --- | --- | --- |
+| `Caddyfile`（HTTP 形态） | **`http`** | 该形态只做明文反代，客户端就是走 http 进来的 |
+| `Caddyfile.tls`（HTTPS 形态） | **`https`** | 该形态由 Caddy 终止 TLS |
+
+> 历史坑：`Caddyfile` 里曾**硬编码 `https`**（注释还写着"若以明文对外请手动改成 http"）。
+> 后果是：明文部署下后端会拼出 `https://…` 的分享链接，而站点根本没有 TLS 监听 ——
+> 分享出去点开就是连不上。现已变量化，默认值就是实话，不必再手改文件。
+
+需要覆盖时（例如 Caddy 前面还有一层终止 TLS 的代理、或某个形态要强制生成 https 链接）。
+⚠️ **不要只往 `.env` 里加 `FORWARDED_PROTO`** —— 它不会被传进 caddy 容器
+（`.env` 只自动供 compose 做变量插值，容器里的环境变量必须由 `environment:` 段显式给出，
+这正是本项目踩过的"环境变量传递链"坑）。用 override 文件显式传值：
+
+```yaml
+# docker-compose.override.yml
+services:
+  caddy:
+    environment:
+      FORWARDED_PROTO: https
+```
+
+⚠️ **也别用 `${FORWARDED_PROTO:-}` 这种空默认值透传**：compose 会把**空串**传进容器，
+而 Caddy 的 `os.LookupEnv` 把空串当成"已设置"，于是 Caddyfile 里的 `{$FORWARDED_PROTO:http}`
+默认值**不会**生效 —— 结果是 `header_up X-Forwarded-Proto `（空值），比不传更糟。
+所以本项目**刻意不在** `docker-compose.yml` 的 caddy 服务里透传这个变量：
+不传时容器内根本没这个环境变量，各形态的默认值才按设计生效。
+
 ## certs/ 由部署者放置，不入库
 
 `docker/caddy/certs/` 已在 `.gitignore` 里（`*.pem` 亦被忽略）——**证书与私钥绝不入库**。

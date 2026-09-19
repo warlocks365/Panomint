@@ -17,8 +17,9 @@
 	reverse_proxy web:80 {
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
-		# 本形态由 Caddy 终止 HTTPS，故固定透传 https。
-		header_up X-Forwarded-Proto https
+		# 本形态由 Caddy 终止 HTTPS，故默认透传 https（与改造前的固定值一致 —— 当前部署行为不变）。
+		# 变量化只为让"前面还有一层 TLS 代理/负载均衡"等情形有个出口，不必再手改本文件。
+		header_up X-Forwarded-Proto {$FORWARDED_PROTO:https}
 	}
 	# 与 web 容器一致的上传体上限（100m）
 	request_body {

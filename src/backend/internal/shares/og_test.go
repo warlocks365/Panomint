@@ -37,6 +37,43 @@ func TestOriginOf(t *testing.T) {
 	}
 }
 
+// TestOriginOfRejectsUnknownScheme 钉住一层纵深防御。
+//
+// 为什么需要：api 的 8088 端口可以被**直接**访问（不经 Caddy），那时 X-Forwarded-Proto
+// 完全由调用方自己填，而这个值会被拼进分享链接与 og:image 的绝对 URL。
+// 只接受 http/https；其余一律忽略并回落到"连接本身"的推断（明文 → http）。
+func TestOriginOfRejectsUnknownScheme(t *testing.T) {
+	bad := []string{
+		"javascript", "file", "data",
+		"HTTPS://evil", "https://evil", // 带路径/层级的不算合法 scheme
+		"http\thttps", "null",
+	}
+	for _, v := range bad {
+		c := ogCtx("http://192.168.1.115:8088/public/shares/tok/og")
+		c.Request.Host = "192.168.1.115:8088"
+		c.Request.Header.Set("X-Forwarded-Proto", v)
+		// 该请求是明文（TLS 为 nil），故应落到 http —— 而不是把 v 原样拼进 URL。
+		if got := originOf(c); got != "http://192.168.1.115:8088" {
+			t.Errorf("非法 scheme %q 必须被忽略并回落 http，实际 %s", v, got)
+		}
+	}
+
+	// 反向：大小写与首尾空白不敏感 —— 合法值仍要生效，否则会误伤正常部署。
+	ok := []struct{ in, want string }{
+		{"HTTPS", "https://h"},
+		{" https ", "https://h"},
+		{"HTTP", "http://h"},
+	}
+	for _, c2 := range ok {
+		c := ogCtx("http://h/public/shares/tok/og")
+		c.Request.Host = "h"
+		c.Request.Header.Set("X-Forwarded-Proto", c2.in)
+		if got := originOf(c); got != c2.want {
+			t.Errorf("%q 应被接受为合法 scheme：期望 %s 实际 %s", c2.in, c2.want, got)
+		}
+	}
+}
+
 // TestRenderOG 渲染结果的四项：完整卡片、中性卡片、转义、状态码。
 func TestRenderOG(t *testing.T) {
 	h := &Handler{}

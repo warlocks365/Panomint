@@ -15,8 +15,12 @@
 		header_up Host {host}
 		header_up X-Real-IP {remote_host}
 		# 透传给后端的协议：后端据此拼分享链接 / OG 图片的绝对 URL（src/backend/internal/shares/og.go）。
-		# 本形态若以明文 http:// 对外，请把这行改成 http。
-		header_up X-Forwarded-Proto https
+		#
+		# ⚠️ 默认值是 **http** —— 本形态（Caddyfile）只做明文反代，客户端就是走 http 进来的，
+		# 所以告诉后端 http 才是实话。此前这里写死 https 是**错的**：后端会据此拼出
+		# https://… 的分享链接，而这个站点根本没有 TLS 监听 → 分享出去点开就是连不上。
+		# 若本形态前面还有一层终止 TLS 的代理（或你想强制生成 https 链接），用 FORWARDED_PROTO 覆盖。
+		header_up X-Forwarded-Proto {$FORWARDED_PROTO:http}
 	}
 	# 与 web 容器一致的上传体上限（100m）
 	request_body {

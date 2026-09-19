@@ -86,7 +86,7 @@ var ogTmpl = template.Must(template.New("share-og").Parse(ogHTML))
 // *.trycloudflare.com），**绝不能写死**：host 一律取请求 Host，scheme 优先取反向代理
 // 透传的 X-Forwarded-Proto（Caddy/cloudflared 会置为 https），缺失时才退回连接本身。
 func originOf(c *gin.Context) string {
-	scheme := c.GetHeader("X-Forwarded-Proto")
+	scheme := normalizeProto(c.GetHeader("X-Forwarded-Proto"))
 	if scheme == "" {
 		if c.Request.TLS != nil {
 			scheme = "https"
@@ -95,6 +95,24 @@ func originOf(c *gin.Context) string {
 		}
 	}
 	return scheme + "://" + c.Request.Host
+}
+
+// normalizeProto 只接受 http / https（大小写与首尾空白不敏感），其余一律当作"没有值"。
+//
+// 为什么要校验：api 的 8088 端口可以被**直接**访问（不经 Caddy），那时 X-Forwarded-Proto
+// 完全由调用方自己填；而这个值会被拼进分享链接与 og:image 的绝对 URL
+// （见 shareURL 与本文件的 OG 模板），塞进任意 scheme 会生成畸形链接。
+// 走 Caddy 时该头会被 `header_up` 覆盖，所以这层校验只是纵深防御，
+// **不改变既有正常路径的行为**（值是 http/https 时原样返回）。
+func normalizeProto(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "http":
+		return "http"
+	case "https":
+		return "https"
+	default:
+		return ""
+	}
 }
 
 // renderOG 渲染并写出 OG HTML。
