@@ -283,6 +283,25 @@ func (a *Agent) pollAndRun(ctx context.Context) error {
 				<-a.sem
 				atomic.AddInt64(&a.activeTasks, -1)
 			}()
+			// 执行器 panic 不得打挂进程（P2-13）：节点侧所有在跑任务都在裸 goroutine 里，
+			// 一个 panic 会让**全部** running 任务进入回收等待。recover 后把 panic 转成
+			// failed 结果回传，让任务有一个看得见的终态，而不是等心跳超时回收。
+			defer func() {
+				if r := recover(); r != nil {
+					a.log.Printf("任务 %s 执行器 panic: %v", j.JobID, r)
+					res := ResultRequest{
+						JobID:  j.JobID,
+						Status: JobStatusFailed,
+						Error:  fmt.Sprintf("executor panic: %v", r),
+					}
+					// 与 runOne 同源：回传用与停机信号解耦的上下文 + 短超时兜底。
+					submitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), submitTimeout)
+					defer cancel()
+					if err := a.client.Submit(submitCtx, res); err != nil {
+						a.log.Printf("任务 %s panic 结果回传失败: %v", j.JobID, err)
+					}
+				}
+			}()
 			a.runOne(ctx, j)
 		}(job)
 	}

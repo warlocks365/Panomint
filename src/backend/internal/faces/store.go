@@ -16,12 +16,59 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"panoalbum/internal/vecutil"
 )
+
+// querier 由 *pgxpool.Pool 与 pgx.Tx 共同满足（事务内复用同一套存取方法，见 WithMediaTx）。
+type querier interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
 
 // Store 人脸存取（聚类亦经此访问库）。
 type Store struct {
 	Pool *pgxpool.Pool
+	// tx 非空 = 事务内视图（由 WithMediaTx 构造）：本文件的整体替换方法走该事务，
+	// 保证「删旧 + 逐张插入 + 回填标记」原子生效（P1-04）。
+	tx pgx.Tx
+}
+
+// q 返回当前生效的执行体（事务内视图返回 tx，否则连接池）。
+func (s *Store) q() querier {
+	if s.tx != nil {
+		return s.tx
+	}
+	return s.Pool
+}
+
+// WithMediaTx 在**单事务**内对 mediaID 取 pg_advisory_xact_lock 后执行 fn。
+//
+// 为什么需要它（P1-04）：scanOne 的「DeleteFacesByMedia → 逐张 SaveFace → MarkScanned」
+// 若非原子，两个 facesgen 并发处理同一媒体会交错「A删→B删→A插×n→B插×n」得到 2n 张人脸；
+// advisory 锁（按 media_id 的 uuid 文本 md5 取低 64 位作锁键）把同一媒体的扫描跨实例串行化，
+// 事务则保证中途失败整体回滚（旧数据保留、标记不回填，下轮重试）。
+//
+// fn 收到的是事务内 Store 视图：仅应调用本文件的人脸存取方法
+// （FacesByMedia/DeleteFacesByMedia/SaveFace/MarkScanned/NearestClusters）。
+func (s *Store) WithMediaTx(ctx context.Context, mediaID string, fn func(st *Store) error) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) // 已提交后为 no-op
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(('x' || md5($1))::bit(64)::bigint)`, mediaID); err != nil {
+		return fmt.Errorf("取媒体扫描锁失败: %w", err)
+	}
+	if err := fn(&Store{Pool: s.Pool, tx: tx}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // MediaItem 待扫描媒体。
@@ -51,7 +98,7 @@ func (s *Store) ListPending(ctx context.Context, force bool, limit int) ([]Media
 	if force {
 		cond = "true"
 	}
-	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
+	rows, err := s.q().Query(ctx, fmt.Sprintf(`
 		SELECT id::text, COALESCE(filename,''), COALESCE(thumbnail_lg,''), COALESCE(path,'')
 		FROM media
 		WHERE deleted_at IS NULL AND COALESCE(thumbnail_lg,'') <> '' AND %s
@@ -75,20 +122,20 @@ func (s *Store) ListPending(ctx context.Context, force bool, limit int) ([]Media
 
 // CountStats 统计：(已扫描媒体数, 媒体总数, 人脸总数, 聚类数)。
 func (s *Store) CountStats(ctx context.Context) (scanned, total, faceCount, clusterCount int, err error) {
-	err = s.Pool.QueryRow(ctx, `
+	err = s.q().QueryRow(ctx, `
 		SELECT count(*) FILTER (WHERE faces_scanned_at IS NOT NULL), count(*)
 		FROM media WHERE deleted_at IS NULL`).Scan(&scanned, &total)
 	if err != nil {
 		return
 	}
-	err = s.Pool.QueryRow(ctx, `
+	err = s.q().QueryRow(ctx, `
 		SELECT count(*), count(DISTINCT cluster_id) FROM faces`).Scan(&faceCount, &clusterCount)
 	return
 }
 
 // DeleteFacesByMedia 清除某媒体的旧人脸（重算前调用，避免残留过期框）。
 func (s *Store) DeleteFacesByMedia(ctx context.Context, mediaID string) error {
-	_, err := s.Pool.Exec(ctx, `DELETE FROM faces WHERE media_id = $1`, mediaID)
+	_, err := s.q().Exec(ctx, `DELETE FROM faces WHERE media_id = $1`, mediaID)
 	return err
 }
 
@@ -101,7 +148,7 @@ func (s *Store) DeleteFacesByMedia(ctx context.Context, mediaID string) error {
 // bbox 为 NULL 的行（理论上不该出现）用 COALESCE 退化成全 0 的零面积框，
 // 因而绝不可能与任何新检出匹配上（BoxIoU 返回 0）——即「宁可丢掉命名，也不张冠李戴」。
 func (s *Store) FacesByMedia(ctx context.Context, mediaID string) ([]FaceRef, error) {
-	rows, err := s.Pool.Query(ctx, `
+	rows, err := s.q().Query(ctx, `
 		SELECT COALESCE(person_id::text, ''),
 		       is_pet,
 		       COALESCE(cluster_id, ''),
@@ -147,7 +194,7 @@ func (s *Store) SaveFace(ctx context.Context, mediaID string, d Detection, emb [
 	if personID != "" {
 		person = personID
 	}
-	_, err := s.Pool.Exec(ctx, `
+	_, err := s.q().Exec(ctx, `
 		INSERT INTO faces (media_id, cluster_id, person_id, bbox, confidence, embedding, is_pet)
 		VALUES ($1,
 		        $2,
@@ -158,13 +205,13 @@ func (s *Store) SaveFace(ctx context.Context, mediaID string, d Detection, emb [
 		        $10)`,
 		mediaID, cluster, person,
 		d.X, d.Y, d.X+d.W, d.Y+d.H,
-		d.Score, vectorLiteral(emb), isPet)
+		d.Score, vecutil.Literal(emb, 6), isPet)
 	return err
 }
 
 // MarkScanned 回填扫描标记（**即使该媒体 0 张脸也必须调用**，否则会被每轮重复扫）。
 func (s *Store) MarkScanned(ctx context.Context, mediaID string) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE media SET faces_scanned_at = now() WHERE id = $1`, mediaID)
+	_, err := s.q().Exec(ctx, `UPDATE media SET faces_scanned_at = now() WHERE id = $1`, mediaID)
 	return err
 }
 
@@ -184,7 +231,7 @@ func (s *Store) NearestClusters(ctx context.Context, mediaID string, emb []float
 	if k <= 0 {
 		k = 5
 	}
-	rows, err := s.Pool.Query(ctx, `
+	rows, err := s.q().Query(ctx, `
 		SELECT cluster_id, avg(embedding)::text AS centroid
 		FROM faces
 		WHERE cluster_id IS NOT NULL AND cluster_id <> ''
@@ -195,7 +242,7 @@ func (s *Store) NearestClusters(ctx context.Context, mediaID string, emb []float
 		  )
 		GROUP BY cluster_id
 		ORDER BY avg(embedding) <=> $1::vector
-		LIMIT $2`, vectorLiteral(emb), k, mediaID)
+		LIMIT $2`, vecutil.Literal(emb, 6), k, mediaID)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +254,7 @@ func (s *Store) NearestClusters(ctx context.Context, mediaID string, emb []float
 		if err := rows.Scan(&id, &centroid); err != nil {
 			return nil, err
 		}
-		out = append(out, ClusterRef{ClusterID: id, Centroid: parseVector(centroid)})
+		out = append(out, ClusterRef{ClusterID: id, Centroid: vecutil.Parse(centroid)})
 	}
 	return out, rows.Err()
 }

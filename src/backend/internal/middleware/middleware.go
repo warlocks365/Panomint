@@ -35,6 +35,7 @@ func Recovery(log *zap.Logger) gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, err any) {
 		log.Error("panic recovered",
 			zap.Any("error", err),
+			zap.Stack("stack"), // panic 现场必须留堆栈，否则线上定位只能靠猜（P2-15）
 			zap.String("request_id", c.GetString("request_id")),
 			zap.String("path", c.Request.URL.Path),
 		)
@@ -70,6 +71,9 @@ func CORS(origins []string) gin.HandlerFunc {
 		origin := c.GetHeader("Origin")
 		if allow[origin] {
 			c.Header("Access-Control-Allow-Origin", origin)
+			// 响应按 Origin 动态变化，必须声明 Vary——否则共享缓存（CDN/反代）
+			// 可能把 A 源的响应回给 B 源请求（P2-16）。
+			c.Header("Vary", "Origin")
 			c.Header("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
 			c.Header("Access-Control-Allow-Headers", "Authorization,Content-Type,X-Request-ID,Content-Range")
 			c.Header("Access-Control-Max-Age", "86400")

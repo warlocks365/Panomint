@@ -12,6 +12,7 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 
 	"panoalbum/internal/ortx"
+	"panoalbum/internal/vecutil"
 )
 
 // Recognizer SFace 识别器（会话非并发安全，内部加锁串行化）。
@@ -99,14 +100,17 @@ func (r *Recognizer) EmbedAligned(px []float32) ([]float32, error) {
 	if len(px) != 3*FaceSize*FaceSize {
 		return nil, fmt.Errorf("对齐像素长度应为 %d，实得 %d", 3*FaceSize*FaceSize, len(px))
 	}
+
+	// 会话与复用张量非并发安全：先加锁，再触碰共享输入/输出张量（写输入→Run→拷输出 全段串行化）。
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	dst := r.in.GetData()
 	if len(dst) != len(px) {
 		return nil, fmt.Errorf("人脸输入张量长度不符: %d != %d", len(dst), len(px))
 	}
 	copy(dst, px)
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if err := r.sess.Run(); err != nil {
 		return nil, fmt.Errorf("人脸特征推理失败: %w", err)
 	}
@@ -116,7 +120,7 @@ func (r *Recognizer) EmbedAligned(px []float32) ([]float32, error) {
 	}
 	res := make([]float32, EmbeddingDim)
 	copy(res, src)
-	return L2Normalize(res), nil
+	return vecutil.L2Normalize(res), nil
 }
 
 // Device 返回实际生效的推理设备。

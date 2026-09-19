@@ -171,17 +171,20 @@ func TestAlbumReadPathsAreScopedToAlbumOwner(t *testing.T) {
 		t.Fatalf("Get 的 items 查询未按相册属主收窄可见集:\n%s", getBody)
 	}
 
-	// List 的 normal 分支：计数与首图**复用同一个 vis**（同 criteria 的 where/args 一样，不重复计算），
-	// 封面缩略图另取一个。故谓词构造出现 2 次，但三条查询都必须真正带上它。
+	// List 的 manual/favorites 分支：计数与首图并入**一条** GROUP BY 聚合查询，
+	// 封面缩略图另一条批量查询，两条都按相册属主的可见集过滤（各持一份 vis）。
+	// 聚合查询的谓词主体写作 userID —— listAlbumsSQL 已收窄为 `WHERE a.owner_id = $1`
+	// （由 TestListAlbumsSQLScopesToOwner 钉住），本批行属主恒等于 userID，二者同一口径。
+	// 若未来 listAlbumsSQL 放宽（共享相册入列表），这里必须改回逐属主谓词。
 	listBody := storeFuncBody(t, src, "List")
-	if n := strings.Count(listBody, `mediascope.VisibleCondFor(2, r.ownerID, "m")`); n != 2 {
-		t.Fatalf("List 里按相册属主收窄的谓词构造应出现 2 次（计数+首图共用 vis、封面缩略图一次），实际 %d 次:\n%s", n, listBody)
+	if n := strings.Count(listBody, `mediascope.VisibleCondFor(2, userID, "m")`); n != 2 {
+		t.Fatalf("List 里按相册属主收窄的谓词构造应出现 2 次（聚合查询一次、封面缩略图批量一次），实际 %d 次:\n%s", n, listBody)
 	}
 	if n := strings.Count(listBody, "+vis"); n != 2 {
-		t.Fatalf("计数与首图两条查询都应拼上 vis 谓词（应出现 2 处 `+vis`），实际 %d 处:\n%s", n, listBody)
+		t.Fatalf("聚合与封面批量两条查询都应拼上 vis 谓词（应出现 2 处 `+vis`），实际 %d 处:\n%s", n, listBody)
 	}
-	if n := strings.Count(listBody, "+thumbVis"); n != 1 {
-		t.Fatalf("封面缩略图查询应拼上 thumbVis 谓词（应出现 1 处 `+thumbVis`），实际 %d 处:\n%s", n, listBody)
+	if !strings.Contains(listBody, "GROUP BY ai.album_id") {
+		t.Fatalf("manual 相册的计数+首图必须并入 GROUP BY 聚合查询（消除 1+3N 往返）:\n%s", listBody)
 	}
 
 	// 结构性：Store 层不得能取到调用者身份。

@@ -40,6 +40,7 @@ import (
 
 	"panoalbum/internal/config"
 	"panoalbum/internal/embed"
+	"panoalbum/internal/sweep"
 )
 
 type options struct {
@@ -268,22 +269,17 @@ func runWatch(ctx context.Context, st *embed.Store, cfg embed.Config, thumbDir s
 	defer enc.Close()
 
 	log.Printf("增量向量化已启动：每 %s 扫描一次（模型族=%s，提供器=%s）", interval, enc.Family(), enc.Provider())
-	sweepOnce(ctx, st, enc, thumbDir)
-
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("收到退出信号，增量向量化停止")
-			return
-		case <-t.C:
-			sweepOnce(ctx, st, enc, thumbDir)
-		}
-	}
+	sweep.Loop(ctx, interval, "增量向量化", func(ctx context.Context) {
+		sweepOnce(ctx, st, enc, thumbDir)
+	})
 }
 
 // sweepOnce 扫描并补算一轮；无待办时静默（避免刷日志）。
+//
+// **确定性失败回填扫描标记**（P1-01，沿用 phashgen 的取舍与理由）：缩略图打不开
+// （截断、格式不支持、磁盘掉了）是确定性失败，重试一万次结果相同，不回填就等于
+// 让这条坏行永久占据清扫队列；而推理/写库失败可能是会话级抖动，不回填、留待下轮。
+// 代价是修好坏缩略图后需 -force 才会重算——这正是 -force 存在的意义。
 func sweepOnce(ctx context.Context, st *embed.Store, enc *embed.Encoder, thumbDir string) {
 	list, err := st.ListPending(ctx, false, 200)
 	if err != nil {
@@ -297,7 +293,17 @@ func sweepOnce(ctx context.Context, st *embed.Store, enc *embed.Encoder, thumbDi
 	ok, fail := 0, 0
 	for i, m := range list {
 		path := filepath.Join(thumbDir, filepath.Base(m.ThumbMD))
-		vec, err := enc.EncodeImage(ctx, path)
+		img, derr := embed.DecodeImageFile(path)
+		if derr != nil {
+			// 回填失败不覆盖原始错误：解码失败才是诊断价值更高的那条。
+			if merr := st.MarkScanned(ctx, m.ID); merr != nil {
+				log.Printf("  回填扫描标记失败 id=%s: %v", m.ID, merr)
+			}
+			fail++
+			log.Printf("[%d/%d] %s 缩略图解码失败（已标记不再重试）: %v", i+1, len(list), m.Filename, derr)
+			continue
+		}
+		vec, err := enc.EncodeImageData(ctx, img)
 		if err == nil {
 			err = st.SaveEmbedding(ctx, m.ID, vec)
 		}

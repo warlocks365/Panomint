@@ -24,9 +24,22 @@ const (
 type ScanSource struct {
 	Kind ScanSourceKind
 	Path string
+	// Scale 「图源像素坐标 → LG/1280 坐标系」的缩放系数（= LGWidth / 图源宽，等比）。
+	// faces.bbox 与命名迁移 IoU 统一判定在 LG 坐标系（P0-02）：scanOne 检出后逐框
+	// Detection.Scaled(src.Scale) 再 SaveFace / BestFaceMatch；SourceThumb 时恒为 1。
+	Scale float64
 	// FallbackReason 非空表示"原图本应可用却没用上"（解码失败等），调用方应记日志：
 	// 静默回退会把"原图坏了/NAS 没挂上"这类系统性问题伪装成正常的缩略图扫描。
 	FallbackReason string
+}
+
+// lgScale 计算图源 → LG/1280 坐标系的缩放系数（LG 宽固定 1280、等比缩放，见 LGWidth）。
+func lgScale(img image.Image) float64 {
+	w := img.Bounds().Dx()
+	if w <= 0 {
+		return 1
+	}
+	return float64(LGWidth) / float64(w)
 }
 
 // LoadScanImage 按「原图优先、LG 缩略图回退」解码一张用于人脸检测的图像。
@@ -58,7 +71,7 @@ func LoadScanImage(m MediaItem, mediaRoot, thumbDir string) (image.Image, ScanSo
 		default:
 			img, err := DecodeImage(p)
 			if err == nil {
-				return img, ScanSource{Kind: SourceOriginal, Path: p}, nil
+				return img, ScanSource{Kind: SourceOriginal, Path: p, Scale: lgScale(img)}, nil
 			}
 			// 文件在但解不开（截断/损坏/格式不支持）：回退，但**必须把原因带出去**。
 			fallbackReason = fmt.Sprintf("原图存在但解码失败，已回退缩略图：%s（%v）", p, err)
@@ -73,7 +86,7 @@ func LoadScanImage(m MediaItem, mediaRoot, thumbDir string) (image.Image, ScanSo
 	if err != nil {
 		return nil, ScanSource{}, fmt.Errorf("LG 缩略图解码失败（%s）: %w", p, err)
 	}
-	return img, ScanSource{Kind: SourceThumb, Path: p, FallbackReason: fallbackReason}, nil
+	return img, ScanSource{Kind: SourceThumb, Path: p, Scale: lgScale(img), FallbackReason: fallbackReason}, nil
 }
 
 // fileExists 只判断"存在且是普通文件"，不做可读性探测（交给 DecodeImage 报真实错误）。

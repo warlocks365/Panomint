@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -68,6 +69,18 @@ func (p *AmapTileProxy) writeCache(style string, z, x, y int, data []byte) {
 
 // amapHosts 高德瓦片 CDN 节点，按瓦片坐标分散负载。
 var amapHosts = [4]string{"webrd01", "webrd02", "webrd03", "webrd04"}
+
+// isImagePayload 校验 200 响应确实是图片（P2-04）：Content-Type 为 image/*
+// **且**内容魔数嗅探也是图片（PNG/JPEG 等）。二者缺一即不可缓存——
+// 上游在 Key 失效/配额异常时可能以 200 返回错误占位图或 XML 错误体，
+// 不加校验会把它们当作瓦片永久缓存（命中后不再回源）。
+func isImagePayload(contentType string, body []byte) bool {
+	ct, _, _ := strings.Cut(contentType, ";")
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(ct)), "image/") {
+		return false
+	}
+	return strings.HasPrefix(http.DetectContentType(body), "image/")
+}
 
 // Serve 处理 GET /tiles/amap/:z/:x/:y。
 func (p *AmapTileProxy) Serve(c *gin.Context) {
@@ -129,13 +142,16 @@ func (p *AmapTileProxy) Serve(c *gin.Context) {
 		return
 	}
 
-	// 读全量 body（瓦片 ≤ 数百 KB），写缓存后再下发；429/5xx 不缓存
+	// 读全量 body（瓦片 ≤ 数百 KB），校验为图片后才写缓存再下发；429/5xx 不缓存，
+	// 「200 但非图片」（Key 失效/配额异常的 XML 错误体或占位图）同样不缓存（P2-04）。
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		httperr.Fail(c, http.StatusBadGateway, "TILE_UPSTREAM", "上游地图服务不可用", err)
 		return
 	}
-	p.writeCache(style, z, x, y, body)
+	if isImagePayload(resp.Header.Get("Content-Type"), body) {
+		p.writeCache(style, z, x, y, body)
+	}
 
 	// 瓦片内容 immutable：允许浏览器/代理长缓存，显著降低重复拖动的上游请求
 	c.Header("Cache-Control", "public, max-age=86400")

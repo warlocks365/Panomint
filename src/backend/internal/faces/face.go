@@ -18,7 +18,6 @@ package faces
 import (
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +31,14 @@ const EmbeddingDim = 128
 
 // FaceSize SFace 输入边长（112×112，ArcFace 标准对齐尺寸）。
 const FaceSize = 112
+
+// LGWidth LG 缩略图宽度（`ffmpeg scale=1280:-2`，宽固定 1280，见 internal/ffmpeg/presets.go）。
+//
+// faces.bbox 与命名迁移 IoU 的**统一坐标系**（P0-02）：无论当次检测喂的是原图还是
+// LG 缩略图，scanOne 入库前一律把 Detection 归一到该坐标系（Detection.Scaled），
+// 否则两次扫描图源分辨率不同时 BestFaceMatch 的 IoU 跨坐标系比较 ≈ 0，用户命名静默丢失。
+// MinFacePx 的判定同样标定在该坐标系（见 detect.go 的换算）。
+const LGWidth = 1280
 
 // 默认参数。阈值需在自有语料上标定（见 Options 注释）。
 const (
@@ -191,12 +198,33 @@ var (
 // ErrCGORequired 表示当前构建未启用 CGO，人脸推理不可用。
 var ErrCGORequired = errors.New("本构建未启用 CGO，人脸识别能力不可用（需 CGO_ENABLED=1 重新构建）")
 
-// Detection 一张人脸（坐标均为**原图**像素坐标）。
+// Detection 一张人脸（坐标均为**当次检测图源**像素坐标）。
+//
+// ⚠️ 图源可能是原图也可能是 LG 缩略图（见 LoadScanImage），两者分辨率不同。
+// 入库（SaveFace）与命名迁移（BestFaceMatch）前必须先用 Scaled 归一到 LG/1280
+// 坐标系（faces.LGWidth），对齐已存量的 bbox 语义；特征对齐（EmbedFace）则用
+// 未归一的图源坐标（与图源本身一致）。
 type Detection struct {
 	X, Y, W, H float64
 	// Landmarks 五点：右眼、左眼、鼻尖、右嘴角、左嘴角（YuNet / OpenCV 约定）。
 	Landmarks [5][2]float64
 	Score     float64
+}
+
+// Scaled 返回按系数 f 等比缩放后的检出（框与五点一起缩放；f==1 时原样返回）。
+//
+// 典型用法是把「当次图源坐标」归一到 LG/1280 坐标系：f = float64(LGWidth) / 图源宽
+// （ScanSource.Scale 已由 LoadScanImage 算好）。
+func (d Detection) Scaled(f float64) Detection {
+	if f == 1 {
+		return d
+	}
+	d.X, d.Y, d.W, d.H = d.X*f, d.Y*f, d.W*f, d.H*f
+	for i := range d.Landmarks {
+		d.Landmarks[i][0] *= f
+		d.Landmarks[i][1] *= f
+	}
+	return d
 }
 
 // Options 人脸流水线配置。
@@ -306,74 +334,8 @@ func loadModelFile(dir string, candidates []string) (string, error) {
 	return "", fmt.Errorf("在 %s 未找到模型文件（候选：%s）", dir, strings.Join(candidates, ", "))
 }
 
-// L2Normalize 原地 L2 归一化（零向量原样返回）。
-func L2Normalize(v []float32) []float32 {
-	var sum float64
-	for _, x := range v {
-		sum += float64(x) * float64(x)
-	}
-	n := math.Sqrt(sum)
-	if n == 0 {
-		return v
-	}
-	for i := range v {
-		v[i] = float32(float64(v[i]) / n)
-	}
-	return v
-}
-
-// CosineSimilarity 余弦相似度（与模长无关）。
-func CosineSimilarity(a, b []float32) float64 {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	var dot, na, nb float64
-	for i := 0; i < n; i++ {
-		dot += float64(a[i]) * float64(b[i])
-		na += float64(a[i]) * float64(a[i])
-		nb += float64(b[i]) * float64(b[i])
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(na) * math.Sqrt(nb))
-}
-
-// vectorLiteral float32 切片 → pgvector 字面量 "[v1,v2,...]"。
-func vectorLiteral(v []float32) string {
-	var sb strings.Builder
-	sb.Grow(len(v) * 9)
-	sb.WriteByte('[')
-	for i, x := range v {
-		if i > 0 {
-			sb.WriteByte(',')
-		}
-		sb.WriteString(strconv.FormatFloat(float64(x), 'f', 6, 32))
-	}
-	sb.WriteByte(']')
-	return sb.String()
-}
-
-// parseVector 解析 pgvector 文本表示 "[v1,v2,...]"。
-func parseVector(s string) []float32 {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "[")
-	s = strings.TrimSuffix(s, "]")
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := make([]float32, 0, len(parts))
-	for _, p := range parts {
-		f, err := strconv.ParseFloat(strings.TrimSpace(p), 32)
-		if err != nil {
-			return nil
-		}
-		out = append(out, float32(f))
-	}
-	return out
-}
+// L2Normalize / CosineSimilarity / vectorLiteral / parseVector 已收敛到
+// internal/vecutil（审查 P2-06）：向量小工具全仓只有一份实现，调用方按精度策略传参。
 
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {

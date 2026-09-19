@@ -52,6 +52,7 @@ import (
 	"panoalbum/internal/config"
 	"panoalbum/internal/faces"
 	"panoalbum/internal/ortx"
+	"panoalbum/internal/sweep"
 )
 
 type options struct {
@@ -297,10 +298,14 @@ func scanOne(ctx context.Context, opts faces.Options, det *faces.Detector, rec *
 		return 0, 0, err
 	}
 
-	// 旧脸必须在删除前读出：删掉之后就再也找不回用户的命名关联了。
-	olds, err := opts.Store.FacesByMedia(ctx, m.ID)
-	if err != nil {
-		return 0, 0, fmt.Errorf("读取旧人脸失败: %w", err)
+	// 坐标归一（P0-02）：faces.bbox 与命名迁移 IoU 统一在 LG/1280 坐标系。
+	// 当次图源是原图时 dets 为原图坐标，不入库前归一会让 BestFaceMatch 拿原图坐标
+	// 与库内 LG 坐标直接比 IoU（≈0），用户命名静默丢失。
+	// 注意：特征对齐（EmbedFace）仍用**图源坐标**的 landmarks（与 img 一致），只有
+	// 入库框与命名迁移用归一后的 lgDets。
+	lgDets := make([]faces.Detection, len(dets))
+	for i, d := range dets {
+		lgDets[i] = d.Scaled(src.Scale)
 	}
 
 	// 先把全部特征算完再动数据库。EmbedFace 的失败是**会话级**的（ORT 推理出错时
@@ -323,52 +328,70 @@ func scanOne(ctx context.Context, opts faces.Options, det *faces.Detector, rec *
 		return 0, 0, fmt.Errorf("%d 张检出人脸全部特征提取失败，保留旧数据待下轮重试", len(dets))
 	}
 
-	if err := opts.Store.DeleteFacesByMedia(ctx, m.ID); err != nil {
-		return 0, 0, fmt.Errorf("清理旧人脸失败: %w", err)
-	}
-
+	// 整体替换在**单事务 + pg_advisory_xact_lock(media_id)** 内完成（P1-04）：
+	// 两个 facesgen 并发处理同一媒体时，锁把「删旧 → 逐张插入 → 回填标记」串行化，
+	// 事务保证中途失败整体回滚（旧数据保留、标记不回填，下轮重试），不再出现
+	// 交错「A删→B删→A插×n→B插×n」导致的人脸翻倍。
 	newClusters := 0
 	saved := 0
-	for i, d := range dets {
-		emb := embs[i]
-		if emb == nil {
-			continue // 本张脸特征提取失败：连同行一起丢弃（旧行已在上一步删除）
+	err = opts.Store.WithMediaTx(ctx, m.ID, func(st *faces.Store) error {
+		// 旧脸在锁内重读：拿到的一定是最新状态（另一实例刚提交的重扫结果、或用户
+		// 在扫描期间改的命名），且必须在删除前读出——删掉就再也找不回命名关联了。
+		olds, err := st.FacesByMedia(ctx, m.ID)
+		if err != nil {
+			return fmt.Errorf("读取旧人脸失败: %w", err)
 		}
-		// 命名迁移：同一张脸重扫前后框几乎重合，取重叠度最高的旧脸即可；
-		// 旧脸未命中或旧脸本身未命名时 personID 为空串，等价于不迁移。
-		old, matched := faces.BestFaceMatch(olds, d)
-		personID, isPet := "", false
-		if matched {
-			personID, isPet = old.PersonID, old.IsPet
+		if err := st.DeleteFacesByMedia(ctx, m.ID); err != nil {
+			return fmt.Errorf("清理旧人脸失败: %w", err)
 		}
 
-		clusterID := ""
-		if personID != "" && old.ClusterID != "" {
-			clusterID = old.ClusterID // 已命名：簇与命名一起保留，见函数注释
-		} else {
-			// 与已有簇质心比较：命中则归入，否则新建簇（增量聚类）。
-			// NearestClusters 会排除「本媒体已有脸所属的簇」，保证同媒体内最多一张脸进同一簇。
-			refs, err := opts.Store.NearestClusters(ctx, m.ID, emb, 5)
-			if err != nil {
-				return saved, newClusters, fmt.Errorf("查询相似簇失败: %w", err)
+		for i := range dets {
+			emb := embs[i]
+			if emb == nil {
+				continue // 本张脸特征提取失败：连同行一起丢弃（旧行已在上一步删除）
 			}
-			var sim float64
-			clusterID, sim = faces.PickCluster(emb, refs, opts.MergeSim)
-			if clusterID == "" {
-				clusterID = faces.NewClusterID()
-				newClusters++
-				// 打印最近相似度，便于按自有语料标定 FACE_MERGE_SIM
-				log.Printf("  %s 新建聚类 %s（最近簇相似度 %.3f）", m.Filename, clusterID, sim)
+			// 命名迁移：同一张脸重扫前后框几乎重合，取重叠度最高的旧脸即可；
+			// 旧脸未命中或旧脸本身未命名时 personID 为空串，等价于不迁移。
+			// （双方都在 LG/1280 坐标系：lgDets 已归一，库内 bbox 也恒为 LG 坐标。）
+			old, matched := faces.BestFaceMatch(olds, lgDets[i])
+			personID, isPet := "", false
+			if matched {
+				personID, isPet = old.PersonID, old.IsPet
 			}
-		}
-		if err := opts.Store.SaveFace(ctx, m.ID, d, emb, clusterID, personID, isPet); err != nil {
-			return saved, newClusters, fmt.Errorf("写入人脸失败: %w", err)
-		}
-		saved++
-	}
 
-	if err := opts.Store.MarkScanned(ctx, m.ID); err != nil {
-		return saved, newClusters, fmt.Errorf("回填扫描标记失败: %w", err)
+			clusterID := ""
+			if personID != "" && old.ClusterID != "" {
+				clusterID = old.ClusterID // 已命名：簇与命名一起保留，见函数注释
+			} else {
+				// 与已有簇质心比较：命中则归入，否则新建簇（增量聚类）。
+				// NearestClusters 会排除「本媒体已有脸所属的簇」，保证同媒体内最多一张脸进同一簇；
+				// 同事务内本媒体刚插入的行对它可见，语义与逐条自动提交一致。
+				refs, err := st.NearestClusters(ctx, m.ID, emb, 5)
+				if err != nil {
+					return fmt.Errorf("查询相似簇失败: %w", err)
+				}
+				var sim float64
+				clusterID, sim = faces.PickCluster(emb, refs, opts.MergeSim)
+				if clusterID == "" {
+					clusterID = faces.NewClusterID()
+					newClusters++
+					// 打印最近相似度，便于按自有语料标定 FACE_MERGE_SIM
+					log.Printf("  %s 新建聚类 %s（最近簇相似度 %.3f）", m.Filename, clusterID, sim)
+				}
+			}
+			if err := st.SaveFace(ctx, m.ID, lgDets[i], emb, clusterID, personID, isPet); err != nil {
+				return fmt.Errorf("写入人脸失败: %w", err)
+			}
+			saved++
+		}
+
+		if err := st.MarkScanned(ctx, m.ID); err != nil {
+			return fmt.Errorf("回填扫描标记失败: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return saved, newClusters, err
 	}
 	return saved, newClusters, nil
 }
@@ -387,19 +410,9 @@ func runWatch(ctx context.Context, opts faces.Options, thumbDir string, interval
 	defer rec.Close()
 
 	log.Printf("人脸增量扫描已启动：每 %s 扫描一次（提供器=%s，合并阈值=%.3f）", interval, det.Provider(), opts.MergeSim)
-	sweepOnce(ctx, opts, det, rec, thumbDir)
-
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("收到退出信号，人脸增量扫描停止")
-			return
-		case <-t.C:
-			sweepOnce(ctx, opts, det, rec, thumbDir)
-		}
-	}
+	sweep.Loop(ctx, interval, "人脸增量扫描", func(ctx context.Context) {
+		sweepOnce(ctx, opts, det, rec, thumbDir)
+	})
 }
 
 // sweepOnce 扫描一轮；无待办时静默（避免刷日志）。

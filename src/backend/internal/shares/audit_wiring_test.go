@@ -135,9 +135,10 @@ func TestShareAuditNothingWhenStoreFails(t *testing.T) {
 		r.DELETE("/shares/:id", h.Delete)
 	}
 
-	// Create：请求体合法 ⇒ 走到 TargetOwnedBy ⇒ 库不可达 ⇒ 500，且不写审计。
+	// Create：请求体合法（target_id 是合法 UUID；非 UUID 在 handler 层就被 400 拦掉，
+	// 见 public_guard_test.go）⇒ 走到 TargetOwnedBy ⇒ 库不可达 ⇒ 500，且不写审计。
 	post := shareReq(h, "7c6b1b9c-cba2-4394-b982-67d9038421f3", http.MethodPost,
-		"/shares", `{"kind":"album","target_id":"a-1"}`, reg)
+		"/shares", `{"kind":"album","target_id":"3f3d7bad-6795-4e48-a039-79c44b206c67"}`, reg)
 	// Delete：走到 GetByID ⇒ 库不可达 ⇒ 500，且不写审计。
 	del := shareReq(h, "7c6b1b9c-cba2-4394-b982-67d9038421f3", http.MethodDelete,
 		"/shares/3f3d7bad-6795-4e48-a039-79c44b206c67", "", reg)

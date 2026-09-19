@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"panoalbum/internal/embed"
+	"panoalbum/internal/vecutil"
 )
 
 // TextEncoder 文本塔最小接口（便于测试注入假实现，避免依赖 ORT/CGO）。
@@ -253,7 +254,7 @@ func encodeLabel(ctx context.Context, enc TextEncoder, fam embed.ModelFamily, td
 		if len(v) != len(sum) {
 			continue // 维度不一致的模板跳过（正常不会发生）
 		}
-		u := embed.L2Normalize(append([]float32(nil), v...)) // 拷贝后再归一化，避免污染调用方数据
+		u := vecutil.L2Normalize(append([]float32(nil), v...)) // 拷贝后再归一化，避免污染调用方数据
 		for j := range sum {
 			sum[j] += u[j]
 		}
@@ -266,7 +267,7 @@ func encodeLabel(ctx context.Context, enc TextEncoder, fam embed.ModelFamily, td
 	for i := range sum {
 		sum[i] /= float32(n)
 	}
-	return embed.L2Normalize(sum), nil
+	return vecutil.L2Normalize(sum), nil
 }
 
 // Suggest 对一张媒体的图像向量产出建议（不落库）。
@@ -291,7 +292,7 @@ func (c *Classifier) Suggest(vec []float32) []Suggestion {
 			Tag:        l.label,
 			Class:      l.class,
 			Group:      l.group,
-			Confidence: embed.CosineSimilarity(vec, l.vec),
+			Confidence: vecutil.CosineSimilarity(vec, l.vec),
 		})
 	}
 	if len(scored) == 0 {
@@ -348,7 +349,7 @@ func (c *Classifier) AllScores(vec []float32) []Suggestion {
 			Tag:        l.label,
 			Class:      l.class,
 			Group:      l.group,
-			Confidence: embed.CosineSimilarity(vec, l.vec),
+			Confidence: vecutil.CosineSimilarity(vec, l.vec),
 		})
 	}
 	sort.SliceStable(scored, func(i, j int) bool { return scored[i].Confidence > scored[j].Confidence })

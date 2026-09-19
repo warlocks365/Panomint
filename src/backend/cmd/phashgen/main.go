@@ -34,6 +34,7 @@ import (
 
 	"panoalbum/internal/config"
 	"panoalbum/internal/phash"
+	"panoalbum/internal/sweep"
 )
 
 type options struct {
@@ -172,19 +173,9 @@ func runWatch(ctx context.Context, st *phash.Store, thumbDir string, interval ti
 		interval = 30 * time.Second
 	}
 	log.Printf("感知哈希增量扫描已启动：每 %s 扫描一次", interval)
-	sweepOnce(ctx, st, thumbDir)
-
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("收到退出信号，感知哈希增量扫描停止")
-			return
-		case <-t.C:
-			sweepOnce(ctx, st, thumbDir)
-		}
-	}
+	sweep.Loop(ctx, interval, "感知哈希增量扫描", func(ctx context.Context) {
+		sweepOnce(ctx, st, thumbDir)
+	})
 }
 
 // sweepOnce 扫描一轮；无待办时静默（避免刷日志）。

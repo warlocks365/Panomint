@@ -7,6 +7,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+
+	"panoalbum/internal/mediascope"
 )
 
 // 媒体写操作：收藏 / 评级 / 软删 / 回收站（API v1.1 §3）。
@@ -19,6 +21,33 @@ func (s *Store) ownerOf(ctx context.Context, id string) (ownerID string, deleted
 		return "", false, ErrNotFound
 	}
 	return ownerID, deleted, err
+}
+
+// readAccessOf 单条媒体「读」访问判定原语（Detail/Thumb/Download 共用；P2-01）。
+//
+// 与 ownerOf 的分工：ownerOf 只回答「属主是谁」，是**写路径**的判定输入
+// （写仍仅限属主/owner/admin）；读访问的口径是
+// 「属主 ∪（media.space='shared' 且调用者是共享空间成员或属主）∪ owner/admin 角色」，
+// 与 GET /media?space=shared 的列表口径一致 —— 谓词出自 mediascope.ReadCond
+// （**单一真源**，本包不再手写成员判定）。
+//
+// 媒体不存在 → ErrNotFound（与 ownerOf 同形，畸形 id 的 22P02 原样透出由上层映射）；
+// 无权 → allowed=false（403 还是 404 由调用方按端点的存在性预言机策略决定）。
+func (s *Store) readAccessOf(ctx context.Context, id, userID, role string) (ownerID string, deleted, allowed bool, err error) {
+	cond, args := mediascope.ReadCond(2, userID, role, "")
+	err = s.Pool.QueryRow(ctx,
+		`SELECT owner_id, deleted_at IS NOT NULL, `+cond+` FROM media WHERE id = $1`,
+		append([]any{id}, args...)...).Scan(&ownerID, &deleted, &allowed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, false, ErrNotFound
+	}
+	return ownerID, deleted, allowed, err
+}
+
+// readAllowed 读访问的布尔形态（缩略图判定用：无权与不存在都必须收敛为同一个 404）。
+func (s *Store) readAllowed(ctx context.Context, id, userID, role string) (bool, error) {
+	_, _, allowed, err := s.readAccessOf(ctx, id, userID, role)
+	return allowed, err
 }
 
 // SetFavorite 收藏切换：favorites 相册成员模型（DDL 无 is_favorite 字段，与 timeline 过滤一致）。
@@ -224,15 +253,46 @@ func (s *Store) Restore(ctx context.Context, id string) (string, error) {
 	return path, err
 }
 
-// Purge 永久删除（回收站中）；返回媒体 path 供调用方清理文件。
-func (s *Store) Purge(ctx context.Context, id string) (string, error) {
-	var path string
-	err := s.Pool.QueryRow(ctx,
+// Purge 永久删除（回收站中）；返回媒体 path（供调用方清理文件与审计）
+// 与顺带解除的引用数（供审计 detail 记「顺带解除 N 处引用」）。
+//
+// 外键背景（P1-02）：albums.cover_media_id / people.cover_media_id /
+// media.duplicate_of / media.live_photo_pair_id 四处曾是无 ON DELETE 规则的
+// NO ACTION 外键，被引用的媒体 DELETE 必撞 23503（回收站「删不掉」）。
+// 迁移 00027 已把四处改为 ON DELETE SET NULL；这里仍在**同一事务**里显式
+// UPDATE 置 NULL，原因有二：
+//  1. 解除的引用计数要写进审计 detail，DB 级联拿不到计数；
+//  2. 对迁移尚未应用的部署兜底 —— 显式解引用后 DELETE 不再依赖 FK 规则。
+func (s *Store) Purge(ctx context.Context, id string) (path string, refsCleared int, err error) {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+	defer tx.Rollback(ctx) // 提交成功后 Rollback 是 no-op（pgx 约定）
+	for _, q := range []string{
+		`UPDATE albums SET cover_media_id = NULL WHERE cover_media_id = $1`,
+		`UPDATE people SET cover_media_id = NULL WHERE cover_media_id = $1`,
+		`UPDATE media SET duplicate_of = NULL WHERE duplicate_of = $1`,
+		`UPDATE media SET live_photo_pair_id = NULL WHERE live_photo_pair_id = $1`,
+	} {
+		ct, err := tx.Exec(ctx, q, id)
+		if err != nil {
+			return "", 0, err
+		}
+		refsCleared += int(ct.RowsAffected())
+	}
+	err = tx.QueryRow(ctx,
 		`DELETE FROM media WHERE id = $1 AND deleted_at IS NOT NULL RETURNING path`, id).Scan(&path)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
+		return "", 0, ErrNotFound
 	}
-	return path, err
+	if err != nil {
+		return "", 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", 0, err
+	}
+	return path, refsCleared, nil
 }
 
 // ListTrash 回收站列表（按删除时间倒序，上限 500 条）。

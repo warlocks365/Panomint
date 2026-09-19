@@ -146,20 +146,11 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		return
 	}
 
-	var jobID string
-	if err := h.Pool.QueryRow(ctx,
-		`INSERT INTO transcode_jobs (media_id, kind, profile, status)
-		 VALUES ($1, 'hls', $2, 'pending') RETURNING id`, req.MediaID, req.Profile).Scan(&jobID); err != nil {
-		httperr.Fail(c, http.StatusInternalServerError, "INSERT_FAILED", "创建失败", err)
-		return
-	}
-	_, err = h.Q.Enqueue(ctx, queue.Job{Kind: "transcode", Payload: map[string]string{
-		"job_id":   jobID,
-		"media_id": req.MediaID,
-		"profile":  req.Profile,
-	}})
+	// 与 CLI 批量补排共用同一份「写行+入队、失败回滚删行」语义（P1-02）：
+	// 入队失败时任务行会被回滚删除，不留下永久阻断自动补排的 pending 僵尸行。
+	jobID, err := enqueueOne(ctx, h.Pool, h.Q, req.MediaID, req.Profile)
 	if err != nil {
-		httperr.Fail(c, http.StatusInternalServerError, "ENQUEUE_FAILED", "任务入队失败", err)
+		httperr.Fail(c, http.StatusInternalServerError, "ENQUEUE_FAILED", "任务创建或入队失败", err)
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})

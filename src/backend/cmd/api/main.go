@@ -67,6 +67,13 @@ func main() {
 	defer q.Close()
 
 	r := gin.New()
+	// gin 默认信任 0.0.0.0/0（把全部来源当可信代理），此时 ClientIP() 直接取
+	// X-Forwarded-For 最左端——完全由客户端伪造：IP 限流可逐请求换 XFF 旁路，
+	// 审计/日志的 IP 字段也会失真。这里只信任配置的反代地址（默认本机 nginx 与
+	// docker 网桥，TRUSTED_PROXIES 可覆盖），其余来源的 XFF 一律忽略。
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Fatal("可信代理配置错误（TRUSTED_PROXIES）", zap.Error(err))
+	}
 	r.Use(
 		middleware.RequestID(),
 		middleware.Recovery(log),
@@ -253,6 +260,9 @@ func main() {
 	// 漏配的话浏览器直连该路径会拿到 index.html（本项目已因此踩坑三次）。
 	authed.GET("/user/ui-prefs", permRead, geoH.GetUIPrefs) // {map_slider_pos,map_filter_side,map_default_provider,map_default_zoom}
 	authed.PUT("/user/ui-prefs", permRead, geoH.PutUIPrefs)
+	// Job000034 用户自助改密：只要求已登录（对自己的口令不需要额外权限），
+	// handler 内部会验证旧口令 + 吊销全部会话。/user 前缀已在 nginx 反代组内，无需改 nginx。
+	authed.PUT("/user/password", authH.ChangePassword)
 	authed.GET("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.GetMapConfig)
 	authed.PUT("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.PutMapConfig)
 
@@ -397,6 +407,28 @@ func main() {
 	r.GET("/health", h.Live)
 	r.GET("/ready", h.Ready)
 	r.GET("/metrics", h.Metrics())
+
+	// P2-04：分块上传会话残留清扫（UploadTmp 下 mtime 超 24h 的 .part/.json）。
+	// 启动时扫一次，之后每 6h 周期清扫——中断的上传（网络断、用户放弃）否则永久残留。
+	// 失败只记 warn：清扫是维护动作，不该阻断启动。
+	sweepUploads := func() {
+		n, err := media.SweepStaleUploads(cfg.UploadTmp, media.StaleUploadTTL, time.Now())
+		if err != nil {
+			log.Warn("分块上传残留清扫失败", zap.Error(err))
+			return
+		}
+		if n > 0 {
+			log.Info("分块上传残留清扫完成", zap.Int("removed", n))
+		}
+	}
+	sweepUploads()
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			sweepUploads()
+		}
+	}()
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 

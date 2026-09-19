@@ -9,7 +9,6 @@ package embed
 // 这样后端在未启用 CGO 的环境仍可完整编译，AI 能力只是不可用而已。
 
 import (
-	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -123,36 +122,5 @@ func ModelDirFromEnv() string {
 	return filepath.Join("assets", "models", "clip")
 }
 
-// L2Normalize 原地 L2 归一化（零向量原样返回）。
-func L2Normalize(v []float32) []float32 {
-	var sum float64
-	for _, x := range v {
-		sum += float64(x) * float64(x)
-	}
-	n := math.Sqrt(sum)
-	if n == 0 {
-		return v
-	}
-	for i := range v {
-		v[i] = float32(float64(v[i]) / n)
-	}
-	return v
-}
-
-// CosineSimilarity 余弦相似度（输入已归一化时等价于点积）。
-func CosineSimilarity(a, b []float32) float64 {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	var dot, na, nb float64
-	for i := 0; i < n; i++ {
-		dot += float64(a[i]) * float64(b[i])
-		na += float64(a[i]) * float64(a[i])
-		nb += float64(b[i]) * float64(b[i])
-	}
-	if na == 0 || nb == 0 {
-		return 0
-	}
-	return dot / (math.Sqrt(na) * math.Sqrt(nb))
-}
+// L2Normalize / CosineSimilarity / VectorLiteral 已收敛到 internal/vecutil（审查 P2-06）：
+// 向量小工具全仓只有一份实现，各包按自身精度策略传参。

@@ -76,6 +76,13 @@ func (h *Handler) Create(c *gin.Context) {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "target_id 不能为空")
 		return
 	}
+	// 非 UUID 的 target_id 在 handler 层先拦掉：放任它进 SQL 会让 PG 抛 22P02，
+	// 落成 QUERY_FAILED 500 并把 PG 原文写进日志 —— 与 pgxutil.IsMalformedID 的约定一致，
+	// 只是这里在触库前就能判，直接 400。
+	if !uuidRe.MatchString(req.TargetID) {
+		errResp(c, http.StatusBadRequest, "INVALID_PARAMS", "target_id 必须是合法 UUID")
+		return
+	}
 	if req.ExpireAt != nil && !req.ExpireAt.After(time.Now()) {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "expire_at 必须是未来时间")
 		return
@@ -207,6 +214,16 @@ func (h *Handler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// sharePassword 公开访问密码取值：**X-Share-Password 请求头优先**，?password= 查询串保留兼容。
+// 查询串会进入代理访问日志、浏览器历史与 Referer，新客户端应一律走头；
+// query 仅作前端切换前的过渡兼容，切换完成后随契约一并下线。
+func sharePassword(c *gin.Context) string {
+	if p := c.GetHeader("X-Share-Password"); p != "" {
+		return p
+	}
+	return c.Query("password")
+}
+
 // guardPublic 公开端点公共校验：token 存在 → 未过期/未超量/密码正确。
 // 通过返回 *Share；否则已写错误响应并返回 nil。
 func (h *Handler) guardPublic(c *gin.Context) *Share {
@@ -219,7 +236,7 @@ func (h *Handler) guardPublic(c *gin.Context) *Share {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return nil
 	}
-	switch code := checkAccess(sh, c.Query("password"), time.Now()); code {
+	switch code := checkAccess(sh, sharePassword(c), time.Now()); code {
 	case "":
 		return sh
 	case "EXPIRED":
@@ -227,7 +244,7 @@ func (h *Handler) guardPublic(c *gin.Context) *Share {
 	case "MAX_VIEWS":
 		errResp(c, http.StatusForbidden, "MAX_VIEWS", "分享已达最大访问次数")
 	case "PASSWORD_REQUIRED":
-		errResp(c, http.StatusForbidden, "PASSWORD_REQUIRED", "该分享需要密码（?password=）")
+		errResp(c, http.StatusForbidden, "PASSWORD_REQUIRED", "该分享需要密码（X-Share-Password 头或 ?password=）")
 	default: // WRONG_PASSWORD
 		errResp(c, http.StatusForbidden, "WRONG_PASSWORD", "访问密码错误")
 	}
@@ -247,6 +264,11 @@ func (h *Handler) PublicGet(c *gin.Context) {
 		return
 	}
 	items, err := h.Store.ListItems(ctx, sh)
+	if errors.Is(err, ErrTargetLost) {
+		// 分享目标（相册）已被删除但 share_links 未级联清理：访客应得到 404 而不是 500。
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "分享目标已删除")
+		return
+	}
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
@@ -269,6 +291,11 @@ func (h *Handler) PublicThumb(c *gin.Context) {
 	ctx := c.Request.Context()
 	mediaID := c.Param("id")
 	ok, err := h.Store.MediaInShare(ctx, sh, mediaID)
+	if errors.Is(err, ErrTargetLost) {
+		// 分享目标（相册）已被删除但 share_links 未级联清理：访客应得到 404 而不是 500。
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "分享目标已删除")
+		return
+	}
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
@@ -290,11 +317,17 @@ func (h *Handler) PublicThumb(c *gin.Context) {
 	base := filepath.Base(*name)
 	dir := os.Getenv("THUMB_DIR")
 	if dir == "" {
-		dir = "./testdata/thumbnails"
+		dir = "./data/thumbnails"
 	}
 	path := filepath.Join(dir, base)
 	if !strings.HasPrefix(filepath.Clean(path), filepath.Clean(dir)) {
 		errResp(c, http.StatusBadRequest, "BAD_PATH", "非法路径")
+		return
+	}
+	// 文件缺失时 c.File 会回落 net/http 默认纯文本 404；先 Stat 返回统一 JSON
+	// （与 internal/media/thumb.go 的 FILE_MISSING 对齐，走 httperr 封套）。
+	if _, err := os.Stat(path); err != nil {
+		errResp(c, http.StatusNotFound, "FILE_MISSING", "文件不在磁盘上")
 		return
 	}
 	c.Header("Cache-Control", "public, max-age=86400")
@@ -311,6 +344,11 @@ func (h *Handler) PublicHLS(c *gin.Context) {
 	ctx := c.Request.Context()
 	mediaID := c.Param("id")
 	ok, err := h.Store.MediaInShare(ctx, sh, mediaID)
+	if errors.Is(err, ErrTargetLost) {
+		// 分享目标（相册）已被删除但 share_links 未级联清理：访客应得到 404 而不是 500。
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "分享目标已删除")
+		return
+	}
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return

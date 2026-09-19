@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"panoalbum/internal/embed"
+	"panoalbum/internal/vecutil"
 )
 
 const dim = embed.EmbeddingDim
@@ -23,7 +24,7 @@ func mix(n int) []float32 {
 	for i := 0; i < n; i++ {
 		v[i] = 1
 	}
-	return embed.L2Normalize(v)
+	return vecutil.L2Normalize(v)
 }
 
 func newTestClassifier(minSim, topR float64, maxTags int, labels []labelVec) *Classifier {

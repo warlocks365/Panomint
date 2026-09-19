@@ -3,6 +3,7 @@ package media
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -47,6 +48,93 @@ func TestParseContentRange(t *testing.T) {
 		if _, err := parseContentRange(s); err == nil {
 			t.Fatalf("%q 应报错", s)
 		}
+	}
+}
+
+// ---- 单文件上限（P1-05：UPLOAD_MAX_BYTES，默认 10GiB；测试用小上限替换） ----
+
+// withMaxBytes 临时替换单文件上限并注册还原。
+func withMaxBytes(t *testing.T, n int64) {
+	t.Helper()
+	orig := uploadMaxBytes
+	uploadMaxBytes = func() int64 { return n }
+	t.Cleanup(func() { uploadMaxBytes = orig })
+}
+
+func TestParseContentRangeRejectsOversizedTotal(t *testing.T) {
+	withMaxBytes(t, 1000)
+	// 客户端自报 total 超限 → errTooLarge（调用方映射 413，与格式错误的 400 分开）
+	if _, err := parseContentRange("bytes 0-99/1001"); !errors.Is(err, errTooLarge) {
+		t.Fatalf("total 超上限应为 errTooLarge，实际 %v", err)
+	}
+	// 边界：恰好等于上限放行
+	if _, err := parseContentRange("bytes 0-999/1000"); err != nil {
+		t.Fatalf("total 等于上限应放行: %v", err)
+	}
+}
+
+func TestWholeFileUploadRejectsOversized(t *testing.T) {
+	withMaxBytes(t, 100)
+	h := newTestHandler(t)
+	// 整文件上传（无 Content-Range）：fh.Size 超限 → 413，不落盘
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	fw, err := w.CreateFormFile("file", "big.jpg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(bytes.Repeat([]byte("a"), 101)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/media/upload", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := doUpload(h, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("超限整文件应 413，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if code, _ := errEnvelope(t, rec); code != "TOO_LARGE" {
+		t.Fatalf("错误码应为 TOO_LARGE，实际 %q", code)
+	}
+}
+
+func TestChunkedUploadRejectsOversizedTotal(t *testing.T) {
+	withMaxBytes(t, 100)
+	h := newTestHandler(t)
+	// 分块：Content-Range 自报 total 超限 → 413（在 parseContentRange 拦截）
+	rec := doUpload(h, newChunkReq(t, bytes.Repeat([]byte("a"), 10), 0, 9, 101, ""))
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("超限 total 应 413，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+	if code, _ := errEnvelope(t, rec); code != "TOO_LARGE" {
+		t.Fatalf("错误码应为 TOO_LARGE，实际 %q", code)
+	}
+	// 未超限的分块流程不受上限替换影响（对照）
+	rec = doUpload(h, newChunkReq(t, bytes.Repeat([]byte("a"), 10), 0, 9, 100, ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("未超限首块应 200，实际 %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnsureFreeSpace(t *testing.T) {
+	// 正常目录 + 合理需求 → 放行（探测真实卷剩余空间）
+	if ue := ensureFreeSpace(t.TempDir(), 1); ue != nil {
+		t.Fatalf("1 字节需求应放行: %v", ue)
+	}
+	// 天文数字需求 → 507（任何真实卷都不可能满足）
+	ue := ensureFreeSpace(t.TempDir(), 1<<62)
+	if ue == nil || ue.status != http.StatusInsufficientStorage || ue.code != "INSUFFICIENT_STORAGE" {
+		t.Fatalf("空间不足应 507 INSUFFICIENT_STORAGE，实际 %+v", ue)
+	}
+	// 需求 <= 0 → 不探测直接放行
+	if ue := ensureFreeSpace(filepath.Join(t.TempDir(), "nonexistent"), 0); ue != nil {
+		t.Fatalf("need<=0 应放行: %v", ue)
+	}
+	// 探测失败（目录不存在）→ 放行（探测不可信时不误杀，ENOSPC 由写入路径兜底）
+	if ue := ensureFreeSpace(filepath.Join(t.TempDir(), "nonexistent"), 1<<40); ue != nil {
+		t.Fatalf("探测失败应放行: %v", ue)
 	}
 }
 

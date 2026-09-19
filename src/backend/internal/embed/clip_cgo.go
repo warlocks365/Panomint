@@ -28,6 +28,7 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 
 	"panoalbum/internal/ortx"
+	"panoalbum/internal/vecutil"
 )
 
 // modelSpec 描述一个模型族的文件与接口差异。
@@ -266,6 +267,11 @@ func (e *Encoder) Close() {
 // EncodeText 文本 → 512 维 L2 归一化向量。
 func (e *Encoder) EncodeText(ctx context.Context, text string) ([]float32, error) {
 	ids := e.tok.Encode(text)
+
+	// 会话与复用张量非并发安全：先加锁，再触碰共享输入/输出张量（写输入→Run→拷输出 全段串行化）。
+	e.muText.Lock()
+	defer e.muText.Unlock()
+
 	dst := e.textIn.GetData()
 	if len(dst) < len(ids) {
 		return nil, fmt.Errorf("文本输入张量过小: %d < %d", len(dst), len(ids))
@@ -285,9 +291,6 @@ func (e *Encoder) EncodeText(ctx context.Context, text string) ([]float32, error
 		}
 	}
 
-	e.muText.Lock()
-	defer e.muText.Unlock()
-
 	if err := e.text.Run(); err != nil {
 		return nil, fmt.Errorf("文本推理失败: %w", err)
 	}
@@ -297,7 +300,7 @@ func (e *Encoder) EncodeText(ctx context.Context, text string) ([]float32, error
 	}
 	res := make([]float32, EmbeddingDim)
 	copy(res, out)
-	return L2Normalize(res), nil
+	return vecutil.L2Normalize(res), nil
 }
 
 // EncodeImage 图像文件 → 512 维 L2 归一化向量。
@@ -325,14 +328,16 @@ func (e *Encoder) EncodePixels(ctx context.Context, px []float32) ([]float32, er
 	if len(px) != 3*ImageSize*ImageSize {
 		return nil, fmt.Errorf("像素长度应为 %d，实得 %d", 3*ImageSize*ImageSize, len(px))
 	}
+
+	// 会话与复用张量非并发安全：先加锁，再触碰共享输入/输出张量（写输入→Run→拷输出 全段串行化）。
+	e.muVision.Lock()
+	defer e.muVision.Unlock()
+
 	dst := e.visIn.GetData()
 	if len(dst) != len(px) {
 		return nil, fmt.Errorf("图像输入张量长度不符: %d != %d", len(dst), len(px))
 	}
 	copy(dst, px)
-
-	e.muVision.Lock()
-	defer e.muVision.Unlock()
 
 	if err := e.vision.Run(); err != nil {
 		return nil, fmt.Errorf("图像推理失败: %w", err)
@@ -343,5 +348,5 @@ func (e *Encoder) EncodePixels(ctx context.Context, px []float32) ([]float32, er
 	}
 	res := make([]float32, EmbeddingDim)
 	copy(res, out)
-	return L2Normalize(res), nil
+	return vecutil.L2Normalize(res), nil
 }

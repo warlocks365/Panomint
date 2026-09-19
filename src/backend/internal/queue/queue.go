@@ -106,6 +106,30 @@ func (q *Queue) Enqueue(ctx context.Context, job Job) (string, error) {
 // ErrStop 处理器返回它表示任务永久失败（直接进死信，不重试）。
 var ErrStop = errors.New("queue: 永久失败，不重试")
 
+// deadLetterScript 死信路径原子化（P1-03）：按载荷精确 LREM 本任务，成功才 RPUSH 进死信。
+// 不能用 LMOVE(processing, failed, LEFT, RIGHT)：BRPOPLPUSH 把本任务压入 processing 头部，
+// 但多 worker 并发时别的任务可能随后压到头部，LMOVE 会把**别人的任务**移进死信，
+// 而本任务永远卡在 processing。
+var deadLetterScript = redis.NewScript(`
+local removed = redis.call('LREM', KEYS[1], 1, ARGV[1])
+if removed > 0 then
+  redis.call('RPUSH', KEYS[2], ARGV[1])
+end
+return removed
+`)
+
+// promoteDelayedScript 到期延迟任务提升原子化（P2-14）：
+// 逐条 ZREM→LPUSH 在进程崩溃窗口内会丢任务（ZREM 成功、LPUSH 未执行即退出），
+// 单条 Lua 保证「取出+移除+入队」要么全做要么不做。
+var promoteDelayedScript = redis.NewScript(`
+local items = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+for _, it in ipairs(items) do
+  redis.call('ZREM', KEYS[1], it)
+  redis.call('LPUSH', KEYS[2], it)
+end
+return #items
+`)
+
 // Handler 任务处理函数；返回 nil=成功(Ack)，ErrStop=死信，其他 error=按指数退避重试。
 type Handler func(ctx context.Context, job Job) error
 
@@ -128,8 +152,9 @@ func (q *Queue) ConsumeOnce(ctx context.Context, block time.Duration, h Handler)
 	case herr == nil:
 		return true, q.rdb.LRem(ctx, q.key("processing"), 1, res).Err()
 	case errors.Is(herr, ErrStop) || job.Attempts >= q.cfg.MaxRetries:
-		// 死信（AC-04：重试 ≤ MaxRetries 次后进入死信）
-		return true, q.rdb.LMove(ctx, q.key("processing"), q.key("failed"), "LEFT", "RIGHT").Err()
+		// 死信（AC-04：重试 ≤ MaxRetries 次后进入死信）；按载荷精确移除，见 deadLetterScript。
+		return true, deadLetterScript.Run(ctx, q.rdb,
+			[]string{q.key("processing"), q.key("failed")}, res).Err()
 	default:
 		// 指数退避重试：Attempts+1 后入延迟队列
 		job.Attempts++
@@ -144,22 +169,9 @@ func (q *Queue) ConsumeOnce(ctx context.Context, block time.Duration, h Handler)
 
 // PromoteDelayed 将到期的延迟任务提升回 waiting（Worker 每次拉取前调用）。
 func (q *Queue) PromoteDelayed(ctx context.Context) error {
-	now := float64(time.Now().UnixMilli())
-	items, err := q.rdb.ZRangeByScore(ctx, q.key("delayed"), &redis.ZRangeBy{
-		Min: "-inf", Max: fmt.Sprint(now),
-	}).Result()
-	if err != nil {
-		return err
-	}
-	for _, it := range items {
-		if err := q.rdb.ZRem(ctx, q.key("delayed"), it).Err(); err != nil {
-			return err
-		}
-		if err := q.rdb.LPush(ctx, q.key("waiting"), it).Err(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return promoteDelayedScript.Run(ctx, q.rdb,
+		[]string{q.key("delayed"), q.key("waiting")},
+		time.Now().UnixMilli()).Err()
 }
 
 // Len 各状态任务数（监控用）。

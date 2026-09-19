@@ -48,10 +48,14 @@ func main() {
 	case "worker":
 		fs := flag.NewFlagSet("worker", flag.ExitOnError)
 		hlsDir := fs.String("hlsdir", "./data/hls", "HLS 输出目录")
-		mediaRoot := fs.String("mediaroot", envOr("MEDIA_ROOT", "./testdata/media"), "既有索引媒体根目录")
+		mediaRoot := fs.String("mediaroot", envOr("MEDIA_ROOT", ""), "既有索引媒体根目录（必填；或设 MEDIA_ROOT）")
 		uploadDir := fs.String("uploaddir", envOr("UPLOAD_DIR", "./data/media"), "上传媒体根目录")
 		count := fs.Int("count", 0, "处理 N 个任务后退出（0=持续消费）")
 		_ = fs.Parse(os.Args[2:])
+		if *mediaRoot == "" {
+			// 不给默认路径（P2-07）：忘传参时静默读写错误目录比直接报错更糟。
+			log.Fatal("worker 需要 -mediaroot（或设 MEDIA_ROOT）")
+		}
 
 		db := openPG(ctx, cfg.PGDSN)
 		defer db.Close()

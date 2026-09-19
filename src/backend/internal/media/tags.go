@@ -348,19 +348,29 @@ func buildTagMediaWhere(scope MediaScope, tagID, cursor string) (string, []any, 
 
 // ListMediaByTag 按标签分页浏览媒体（仅已确认关联）；复合游标风格与时间轴一致。
 // 可见性口径见 buildTagMediaWhere：scope 由 handler 解析后传入，零值（未解析）即空结果。
+//
+// total 口径（P2-02，与 timeline.go 的 List 完全一致）：计数用**无游标**的 where ——
+// total 是「当前筛选全集」的大小，供 UI 显示；带游标计数会随翻页逐页递减，没有意义。
+// 带/不带游标的两种 where 由同一个 buildTagMediaWhere 组装（单一入口，不会分叉）。
 func (s *Store) ListMediaByTag(ctx context.Context, scope MediaScope, tagID, cursor string, limit int) (*ListResult, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	where, args, err := buildTagMediaWhere(scope, tagID, cursor)
+	baseWhere, baseArgs, err := buildTagMediaWhere(scope, tagID, "")
 	if err != nil {
 		return nil, err
 	}
 	var total int
 	if err := s.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM media m JOIN media_tags mt ON mt.media_id = m.id WHERE `+where,
-		args...).Scan(&total); err != nil {
+		`SELECT count(*) FROM media m JOIN media_tags mt ON mt.media_id = m.id WHERE `+baseWhere,
+		baseArgs...).Scan(&total); err != nil {
 		return nil, err
+	}
+	where, args := baseWhere, baseArgs
+	if cursor != "" {
+		if where, args, err = buildTagMediaWhere(scope, tagID, cursor); err != nil {
+			return nil, err
+		}
 	}
 	args = append(args, limit+1)
 	rows, err := s.Pool.Query(ctx, `

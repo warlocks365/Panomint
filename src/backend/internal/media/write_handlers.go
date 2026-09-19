@@ -1,6 +1,7 @@
 package media
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"panoalbum/internal/audit"
 	"panoalbum/internal/httperr"
@@ -47,6 +49,9 @@ func writeLookupError(c *gin.Context, err error) {
 // 错误映射统一走 writeLookupError —— 本函数的调用方遍布 /media/** 的读写端点
 // （Detail/Favorite/Rating/Delete/Restore/Purge/…），故畸形 id 的 404 口径与
 // 「不回显 PG 原文」在这里一次性生效，不需要每个端点各判一遍（单一真源）。
+//
+// 口径：**写路径**（仅属主/owner/admin，见 canAccess）。读路径（Detail/Thumb/Download）
+// 用 checkReadAccess —— 共享空间成员对 space='shared' 的媒体有读权限（P2-01）。
 func (h *Handler) checkAccess(c *gin.Context, id string) (ownerID string, ok bool) {
 	ownerID, _, err := h.Store.ownerOf(c.Request.Context(), id)
 	if err != nil {
@@ -60,10 +65,56 @@ func (h *Handler) checkAccess(c *gin.Context, id string) (ownerID string, ok boo
 	return ownerID, true
 }
 
+// checkReadAccess 校验单条媒体的「读」访问（Detail/Download 共用；P2-01）。
+//
+// 与 checkAccess 的差别：读路径的口径是
+// 「属主 ∪（media.space='shared' 且调用者是共享空间成员）∪ owner/admin」，
+// 与 GET /media?space=shared 的列表口径一致（判定收敛在 mediascope.ReadCond，
+// 本包不另写一份成员判定）。缩略图走 thumbAccess（无权收敛为 404 同形，
+// 与本函数的 403 不同 —— 二进制资源不产出存在性预言机，见 thumb.go 注释）。
+func (h *Handler) checkReadAccess(c *gin.Context, id string) (ownerID string, ok bool) {
+	ownerID, err := readAccessCheck(c.Request.Context(), h.Store.readAccessOf,
+		c.GetString("user_id"), c.GetString("role"), id)
+	if err != nil {
+		writeReadAccessError(c, err)
+		return "", false
+	}
+	return ownerID, true
+}
+
+// readAccessLookup Detail/Download 读访问判定所需的唯一 DB 能力。
+// 签名与 Store.readAccessOf 逐字相同（方法值可直接传入）；抽成函数类型是为了让
+// 「无权 → ErrForbidden / 不存在 → ErrNotFound」的判定口径能被无库单测直接钉住。
+type readAccessLookup func(ctx context.Context, id, userID, role string) (ownerID string, deleted, allowed bool, err error)
+
+// readAccessCheck 读访问判定（纯逻辑，不碰 gin）：放行返回 ownerID；
+// 媒体不存在 → ErrNotFound；无权 → ErrForbidden；DB 错误原样透出（不得折叠成 404/403，
+// 否则故障会被伪装成「不存在」或「无权」）。
+func readAccessCheck(ctx context.Context, lookup readAccessLookup, userID, role, id string) (string, error) {
+	ownerID, _, allowed, err := lookup(ctx, id, userID, role)
+	if err != nil {
+		return "", err
+	}
+	if !allowed {
+		return "", ErrForbidden
+	}
+	return ownerID, nil
+}
+
+// writeReadAccessError 读访问失败的响应映射：ErrForbidden → 403（读详情是元数据端点，
+// 与列表的 403 口径一致）；其余（ErrNotFound / 畸形 id / DB 错误）走 writeLookupError。
+func writeReadAccessError(c *gin.Context, err error) {
+	if errors.Is(err, ErrForbidden) {
+		errResp(c, http.StatusForbidden, "FORBIDDEN", "无权访问该媒体")
+		return
+	}
+	writeLookupError(c, err)
+}
+
 // Detail GET /media/:id
 func (h *Handler) Detail(c *gin.Context) {
 	id := c.Param("id")
-	if _, ok := h.checkAccess(c, id); !ok {
+	if _, ok := h.checkReadAccess(c, id); !ok {
 		return
 	}
 	d, err := h.Store.GetDetail(c.Request.Context(), id)
@@ -356,11 +407,22 @@ func (h *Handler) Purge(c *gin.Context) {
 	if !ok {
 		return
 	}
-	path, err := h.Store.Purge(c.Request.Context(), id)
+	path, refsCleared, err := h.Store.Purge(c.Request.Context(), id)
 	if errors.Is(err, ErrNotFound) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或不在回收站")
 		return
 	} else if err != nil {
+		// 防御残留路径（P1-02）：迁移 00027 已把指向 media 的四处外键改为
+		// ON DELETE SET NULL，且 Purge 在 DELETE 前同事务显式解引用，理论上不再撞
+		// 23503；若仍撞（迁移未应用、或未来新增了他处 NO ACTION 引用），映射为 409
+		// 并说明原因，而不是落到通用 500「更新失败」（伪服务故障，用户无可操作指引）。
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			log.Printf("[media] Purge 仍撞外键约束（23503，应为残留引用路径）id=%s: %v", id, err)
+			errResp(c, http.StatusConflict, "PURGE_CONFLICT",
+				"媒体仍被其他数据引用（相册/人物封面、去重原件或 Live Photo 配对），无法彻底清除")
+			return
+		}
 		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
@@ -371,9 +433,10 @@ func (h *Handler) Purge(c *gin.Context) {
 	// detail 记 path 的理由：purge 会把 media 行**整行删除**，此后 target_id 再也查不回
 	// 任何东西（GetDetail 只会说"不存在或已删除"）。path 是这条媒体在库里最后的痕迹，
 	// 也是事后唯一能回答"到底销毁了什么"的线索 —— 行没了，审计还在，这才是审计的意义。
-	// 键名 path / owner_id 均不含敏感子串，不会被 RedactDetail 剔除。
+	// 键名 path / owner_id / refs_cleared 均不含敏感子串，不会被 RedactDetail 剔除。
+	// refs_cleared：Purge 同事务顺带解除的封面/配对/原件引用数（P1-02）。
 	h.record(c, audit.ActionMediaPurge, audit.TargetMedia, id,
-		map[string]any{"owner_id": ownerID, "path": path})
+		map[string]any{"owner_id": ownerID, "path": path, "refs_cleared": refsCleared})
 	// 尽力清理磁盘文件（仅允许删除已知根目录下的文件）
 	if abs, ok := h.ResolvePath(path); ok {
 		_ = removeFile(abs)
@@ -384,7 +447,8 @@ func (h *Handler) Purge(c *gin.Context) {
 // Pano360 GET /media/:id/360（360 播放元数据，契约 §13）
 func (h *Handler) Pano360(c *gin.Context) {
 	id := c.Param("id")
-	if _, ok := h.checkAccess(c, id); !ok {
+	// 读端点用读口径（P2-01）：shared 空间成员对 space='shared' 媒体同样可读元数据。
+	if _, ok := h.checkReadAccess(c, id); !ok {
 		return
 	}
 	d, err := h.Store.GetDetail(c.Request.Context(), id)

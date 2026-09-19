@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"panoalbum/internal/embed"
+	"panoalbum/internal/vecutil"
 )
 
 // stubEncoder 计数型假文本塔：任意输入都返回同一个 512 维单位向量（e0）。
@@ -371,7 +372,7 @@ func TestPGLabelVectorCacheSaveGuards(t *testing.T) {
 // 8c. 向量字面量序列化必须能被 ParseVectorLiteral 精确回读，且不出现科学计数法。
 func TestVectorLiteralRoundTrip(t *testing.T) {
 	in := []float32{0, 1, -0.5, 1e-8, 3.4e38, 1.2345678e-30, -0.99999994}
-	s := vectorLiteral(in)
+	s := vecutil.Literal(in, -1)
 	if strings.ContainsAny(s, "eE") {
 		t.Errorf("字面量不得出现科学计数法（pgvector 输入最稳妥的形式是定点）：%s", s)
 	}

@@ -17,11 +17,33 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	"panoalbum/internal/httperr"
 	"panoalbum/internal/index"
 	"panoalbum/internal/queue"
 )
+
+// uploadMaxBytes 单文件上传上限（字节，P1-05）：读 UPLOAD_MAX_BYTES，默认 10GiB。
+// 读取方式与 internal/config 的 env() 同型（环境变量优先、空值/非法值回退默认）；
+// 不经过 config.Load 是因为本包不持有 Config（Handler 由 cmd/api 按字段装配），
+// 与 THUMB_DIR 等既有环境变量读取点保持同一习惯。var 形式便于测试替换。
+var uploadMaxBytes = func() int64 {
+	const def = int64(10) << 30 // 10GiB
+	v := strings.TrimSpace(os.Getenv("UPLOAD_MAX_BYTES"))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// errTooLarge 客户端自报的 total 超过单文件上限（UPLOAD_MAX_BYTES）。
+// 与格式/范围错误（400）分开：调用方映射为 413。
+var errTooLarge = errors.New("文件超过单文件上传上限")
 
 // 上传（API v1.1 §3 POST /media/upload）：
 //   - 单请求整文件：multipart 字段 file，不带 Content-Range；
@@ -56,6 +78,10 @@ func parseContentRange(h string) (*chunkRange, error) {
 	if total <= 0 || start > end || end >= total {
 		return nil, errors.New("Content-Range 范围非法")
 	}
+	// 客户端自报的 total 不得照单全收：超过单文件上限直接拒绝（P1-05）
+	if total > uploadMaxBytes() {
+		return nil, errTooLarge
+	}
 	return &chunkRange{Start: start, End: end, Total: total}, nil
 }
 
@@ -68,6 +94,9 @@ type uploadMeta struct {
 	Space      string `json:"space"`
 	TakenAt    string `json:"taken_at,omitempty"`
 	Total      int64  `json:"total"`
+	// CreatedAt 会话创建时间（RFC3339，P2-04）：TTL 清扫的辅助判定字段；
+	// 清扫主判定仍以文件 mtime 为准（见 SweepStaleUploads）。
+	CreatedAt string `json:"created_at,omitempty"`
 }
 
 // sanitizeFilename 文件名清洗：去路径成分，防穿越。
@@ -131,8 +160,19 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 	cr, err := parseContentRange(c.GetHeader("Content-Range"))
+	if errors.Is(err, errTooLarge) {
+		errResp(c, http.StatusRequestEntityTooLarge, "TOO_LARGE",
+			fmt.Sprintf("文件超过单文件上传上限（%d 字节）", uploadMaxBytes()))
+		return
+	}
 	if err != nil {
 		errResp(c, http.StatusBadRequest, "BAD_RANGE", err.Error())
+		return
+	}
+	// 整文件上传：multipart 自报大小同样受单文件上限约束（P1-05，落盘前拦截）
+	if cr == nil && fh.Size > uploadMaxBytes() {
+		errResp(c, http.StatusRequestEntityTooLarge, "TOO_LARGE",
+			fmt.Sprintf("文件超过单文件上传上限（%d 字节）", uploadMaxBytes()))
 		return
 	}
 
@@ -198,6 +238,7 @@ func (h *Handler) Upload(c *gin.Context) {
 			Space:      c.DefaultPostForm("space", "personal"),
 			TakenAt:    c.PostForm("taken_at"),
 			Total:      cr.Total,
+			CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 		}
 		if meta.Filename == "" {
 			errResp(c, http.StatusBadRequest, "BAD_REQUEST", "文件名非法")
@@ -244,6 +285,11 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 
+	// 落盘前检查目标卷剩余空间（P1-05）：不足以容纳本块直接 507，不写半个文件
+	if ue := ensureFreeSpace(h.UploadTmp, fh.Size); ue != nil {
+		errResp(c, ue.status, ue.code, ue.msg)
+		return
+	}
 	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "WRITE_FAILED", "写入失败", err)
@@ -304,6 +350,25 @@ type uploadError struct {
 
 func (e *uploadError) Error() string { return e.msg }
 
+// ensureFreeSpace 落盘前检查 dir 所在卷的剩余空间是否够 need 字节（P1-05）。
+// 不足返回 507 uploadError；探测本身失败时**放行**（返回 nil）—— Statfs 在某些
+// 文件系统/挂载形态下可能失败，探测不可信时不该误杀上传：真写满时 io.Copy 会
+// 以 ENOSPC 失败并走既有的 500 清理路径。freeBytes 的跨平台实现见 diskspace_*.go。
+func ensureFreeSpace(dir string, need int64) *uploadError {
+	if need <= 0 {
+		return nil
+	}
+	free, err := freeBytes(dir)
+	if err != nil {
+		fmt.Printf("磁盘剩余空间探测失败 dir=%s（放行，写入时 ENOSPC 兜底）: %v\n", dir, err)
+		return nil
+	}
+	if free < uint64(need) {
+		return &uploadError{http.StatusInsufficientStorage, "INSUFFICIENT_STORAGE", "磁盘剩余空间不足，无法完成上传"}
+	}
+	return nil
+}
+
 // ingest 完成文件入库：落盘 → hash 去重 → 元数据 → 写 media → 缩略图入队。
 // r 为完整文件内容（单次上传的 part 或分块合并后的 .part 文件）。
 func (h *Handler) ingest(ctx context.Context, r io.Reader, meta uploadMeta) (id string, dup bool, err error) {
@@ -320,6 +385,10 @@ func (h *Handler) ingest(ctx context.Context, r io.Reader, meta uploadMeta) (id 
 	abs := filepath.Join(h.UploadDir, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return "", false, err
+	}
+	// 落盘前检查目标卷剩余空间（P1-05）：整文件需容下 fh.Size，分块合并需容下 total
+	if ue := ensureFreeSpace(filepath.Dir(abs), meta.Total); ue != nil {
+		return "", false, ue
 	}
 	out, err := os.Create(abs)
 	if err != nil {
@@ -345,6 +414,12 @@ func (h *Handler) ingest(ctx context.Context, r io.Reader, meta uploadMeta) (id 
 	if err == nil {
 		_ = os.Remove(abs)
 		return existID, true, nil
+	}
+	// P2-03：必须区分「无重复」（ErrNoRows，继续 INSERT）与「库故障」——
+	// 后者若被静默当作无重复，故障期间会插入重复媒体（落盘已完成的脏数据）。
+	if !errors.Is(err, pgx.ErrNoRows) {
+		_ = os.Remove(abs)
+		return "", false, err
 	}
 
 	// 元数据提取（照片 EXIF / 视频 ffprobe）
@@ -455,7 +530,7 @@ func nilIfEmpty(s string) any {
 // Download GET /media/:id/download（原文件流，attachment）
 func (h *Handler) Download(c *gin.Context) {
 	id := c.Param("id")
-	if _, ok := h.checkAccess(c, id); !ok {
+	if _, ok := h.checkReadAccess(c, id); !ok {
 		return
 	}
 	var rel string

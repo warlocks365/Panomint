@@ -83,6 +83,11 @@ const (
 	// ActionRoleChange 角色与权限变更。
 	ActionRoleChange = "admin.role.change"
 
+	// ActionPasswordChange 用户**自助**改密（PUT /user/password，Job000034）。
+	// 与 admin.user.update 的"重置密码"区分开：自助改密**必须验证旧口令**且
+	// **吊销全部会话**，两者在审计里要能一眼分开。
+	ActionPasswordChange = "user.password.change"
+
 	// ActionShareCreate 创建分享链接。
 	ActionShareCreate = "share.create"
 	// ActionShareRevoke 撤销分享链接。

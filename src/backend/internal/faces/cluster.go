@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"panoalbum/internal/vecutil"
 )
 
 // NewClusterID 生成新的聚类 ID（UUID v4 文本，faces.cluster_id 为 VARCHAR(64)）。
@@ -46,7 +48,7 @@ func PickCluster(emb []float32, refs []ClusterRef, mergeSim float64) (string, fl
 		if r.ClusterID == "" || len(r.Centroid) != len(emb) {
 			continue
 		}
-		if sim := CosineSimilarity(emb, r.Centroid); sim > bestSim {
+		if sim := vecutil.CosineSimilarity(emb, r.Centroid); sim > bestSim {
 			bestSim, bestID = sim, r.ClusterID
 		}
 	}

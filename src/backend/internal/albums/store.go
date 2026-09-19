@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -34,14 +35,17 @@ var (
 
 // Summary GET /albums 列表项。
 type Summary struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Kind            string    `json:"kind"`
-	Description     string    `json:"description"`
-	CoverMediaID    *string   `json:"cover_media_id"`
-	CoverMediaThumb *string   `json:"cover_media_thumb,omitempty"`
-	MediaCount      int       `json:"media_count"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Kind            string  `json:"kind"`
+	Description     string  `json:"description"`
+	CoverMediaID    *string `json:"cover_media_id"`
+	CoverMediaThumb *string `json:"cover_media_thumb,omitempty"`
+	// FirstMediaID 相册首项媒体 id（与详情同序：manual 按 sort_key，smart 按 taken_at DESC）。
+	// 前端列表用它直接拼缩略图 URL，不必为每个相册再发一次详情请求（消除 N+1）。
+	FirstMediaID *string   `json:"first_media_id,omitempty"`
+	MediaCount   int       `json:"media_count"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Detail GET /albums/:id 响应。
@@ -53,8 +57,24 @@ type Detail struct {
 	CoverMediaID *string          `json:"cover_media_id"`
 	Criteria     *Criteria        `json:"criteria"`
 	Items        []media.MediaRef `json:"items"`
-	OwnerID      string           `json:"-"`
-	Type         string           `json:"-"`
+	// Truncated 条目数触服务端硬上限（albumItemsHardLimit）被截断时为 true。
+	Truncated bool   `json:"truncated"`
+	OwnerID   string `json:"-"`
+	Type      string `json:"-"`
+}
+
+// albumItemsHardLimit 相册条目服务端硬上限：smart 相册空条件 = 属主全库媒体，
+// 无上限时一次 GET（含匿名公开分享链路 shares.ListItems → Get）会把数万行 MediaRef
+// 序列化成单个 JSON，构成匿名可触发的内存/带宽放大面。
+// SQL 取上限+1 行，用多出的那一行判别「恰好满」与「被截断」。
+const albumItemsHardLimit = 5000
+
+// capItems 应用条目硬上限：超出即截断并返回 truncated=true。
+func capItems(items []media.MediaRef) ([]media.MediaRef, bool) {
+	if len(items) > albumItemsHardLimit {
+		return items[:albumItemsHardLimit], true
+	}
+	return items, false
 }
 
 // Comment 相册评论（扁平返回）。
@@ -127,6 +147,17 @@ const listAlbumsSQL = `
 	ORDER BY a.type = 'favorites' DESC, a.updated_at DESC`
 
 // List 相册列表：本人相册；含首图回填与媒体计数。
+//
+// 查询次数不随相册数增长（修复前为 1+3N 次串行往返）：
+//   - manual/favorites 相册：一条 GROUP BY 聚合查询同时取回计数与首图（计数/首图同源，
+//     不会出现"计数可见集与首图可见集口径漂移"）；
+//   - smart 相册：条件是每册一份的动态 SQL，无法聚合，仍每册 2 次（计数 + 首图）；
+//   - 封面缩略图：全部相册的有效封面收齐后一条批量查询取回。
+//
+// ⚠️ 聚合查询的可见性谓词主体是 userID 而不是逐相册的 r.ownerID：这不是偷懒 ——
+// listAlbumsSQL 已收窄为 `WHERE a.owner_id = $1`，本批行的属主**恒等于** userID，
+// 二者是同一口径（不是近似）。若未来 listAlbumsSQL 放宽（如共享相册入列表），
+// 这里必须改回逐属主谓词或按属主分组聚合。
 func (s *Store) List(ctx context.Context, userID string) ([]Summary, error) {
 	rows, err := s.Pool.Query(ctx, listAlbumsSQL, userID)
 	if err != nil {
@@ -152,10 +183,51 @@ func (s *Store) List(ctx context.Context, userID string) ([]Summary, error) {
 		return nil, err
 	}
 
+	// manual/favorites：一条聚合查询取回全部相册的计数 + 首图（按 sort_key ASC, taken_at DESC 同详情序）。
+	// 读路径与写入端同一口径：按相册属主（恒等于 userID，见函数头注释）的可见集过滤 ——
+	// AddItems 的修复只保证"以后不会再塞进来"，挡不住库里已存在的历史行（相册里的他人 media）。
+	counts := map[string]int{}
+	firsts := map[string]*string{}
+	var manualIDs []string
+	for _, r := range raws {
+		if r.typ != "smart" {
+			manualIDs = append(manualIDs, r.ID)
+		}
+	}
+	if len(manualIDs) > 0 {
+		vis, visArgs := mediascope.VisibleCondFor(2, userID, "m")
+		args := append([]any{manualIDs}, visArgs...)
+		aggRows, err := s.Pool.Query(ctx, `
+			SELECT ai.album_id, count(*)::int,
+			       (array_agg(ai.media_id ORDER BY ai.sort_key ASC, m.taken_at DESC))[1]
+			FROM album_items ai JOIN media m ON m.id = ai.media_id
+			WHERE ai.album_id = ANY($1::uuid[]) AND m.deleted_at IS NULL AND `+vis+`
+			GROUP BY ai.album_id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for aggRows.Next() {
+			var albumID string
+			var cnt int
+			var firstID *string
+			if err := aggRows.Scan(&albumID, &cnt, &firstID); err != nil {
+				aggRows.Close()
+				return nil, err
+			}
+			counts[albumID] = cnt
+			firsts[albumID] = firstID
+		}
+		if err := aggRows.Err(); err != nil {
+			aggRows.Close()
+			return nil, err
+		}
+		aggRows.Close()
+	}
+
 	out := make([]Summary, 0, len(raws))
+	var coverIDs []string
 	for _, r := range raws {
 		sum := r.Summary
-		var firstID *string
 		if r.typ == "smart" {
 			// 智能相册：条件实时计数 + 取首项（与详情同序 taken_at DESC）。
 			// 属主传**相册属主**（r.ownerID），不是调用者 —— 本函数虽然只列本人相册，
@@ -169,34 +241,50 @@ func (s *Store) List(ctx context.Context, userID string) ([]Summary, error) {
 				return nil, err
 			}
 			_ = s.Pool.QueryRow(ctx, `SELECT m.id FROM media m WHERE `+where+`
-				ORDER BY m.taken_at DESC, m.id DESC LIMIT 1`, args...).Scan(&firstID)
+				ORDER BY m.taken_at DESC, m.id DESC LIMIT 1`, args...).Scan(&sum.FirstMediaID)
 		} else {
-			// 读路径与写入端同一口径：按**相册属主**的可见集过滤。
-			// AddItems 的修复只保证"以后不会再塞进来"，挡不住库里已存在的历史行
-			// （相册里的他人 media）—— 读路径过滤是兜住历史数据的唯一办法。
-			vis, visArgs := mediascope.VisibleCondFor(2, r.ownerID, "m")
-			args := append([]any{r.ID}, visArgs...)
-			if err := s.Pool.QueryRow(ctx,
-				`SELECT count(*)::int FROM album_items ai JOIN media m ON m.id = ai.media_id
-				 WHERE ai.album_id = $1 AND m.deleted_at IS NULL AND `+vis, args...).Scan(&sum.MediaCount); err != nil {
-				return nil, err
-			}
-			_ = s.Pool.QueryRow(ctx, `
-				SELECT ai.media_id FROM album_items ai JOIN media m ON m.id = ai.media_id
-				WHERE ai.album_id = $1 AND m.deleted_at IS NULL AND `+vis+`
-				ORDER BY ai.sort_key ASC, m.taken_at DESC LIMIT 1`, args...).Scan(&firstID)
+			sum.MediaCount = counts[r.ID]
+			sum.FirstMediaID = firsts[r.ID]
 		}
-		sum.CoverMediaID = effectiveCover(sum.CoverMediaID, firstID)
+		sum.CoverMediaID = effectiveCover(sum.CoverMediaID, sum.FirstMediaID)
 		if sum.CoverMediaID != nil {
-			// cover_media_id 可被 PATCH 设成任意 media id：取缩略图前也要过可见集，
-			// 否则 List 会把他人 media 的 thumbnail_sm 直接交给调用者。
-			thumbVis, thumbVisArgs := mediascope.VisibleCondFor(2, r.ownerID, "m")
-			thumbArgs := append([]any{*sum.CoverMediaID}, thumbVisArgs...)
-			_ = s.Pool.QueryRow(ctx,
-				`SELECT thumbnail_sm FROM media m WHERE m.id = $1 AND m.deleted_at IS NULL AND `+thumbVis,
-				thumbArgs...).Scan(&sum.CoverMediaThumb)
+			coverIDs = append(coverIDs, *sum.CoverMediaID)
 		}
 		out = append(out, sum)
+	}
+
+	// 封面缩略图：一条批量查询取回全部有效封面的 thumbnail_sm，再回填。
+	// cover_media_id 可被 PATCH 设成任意 media id：批量查询同样要过可见集，
+	// 否则 List 会把他人 media 的 thumbnail_sm 直接交给调用者（不在结果集 = 不可见，回填 nil）。
+	if len(coverIDs) > 0 {
+		vis, visArgs := mediascope.VisibleCondFor(2, userID, "m")
+		args := append([]any{coverIDs}, visArgs...)
+		thumbRows, err := s.Pool.Query(ctx,
+			`SELECT m.id, m.thumbnail_sm FROM media m WHERE m.id = ANY($1::uuid[]) AND m.deleted_at IS NULL AND `+vis,
+			args...)
+		if err != nil {
+			return nil, err
+		}
+		thumbs := map[string]*string{}
+		for thumbRows.Next() {
+			var id string
+			var thumb *string
+			if err := thumbRows.Scan(&id, &thumb); err != nil {
+				thumbRows.Close()
+				return nil, err
+			}
+			thumbs[id] = thumb
+		}
+		if err := thumbRows.Err(); err != nil {
+			thumbRows.Close()
+			return nil, err
+		}
+		thumbRows.Close()
+		for i := range out {
+			if out[i].CoverMediaID != nil {
+				out[i].CoverMediaThumb = thumbs[*out[i].CoverMediaID]
+			}
+		}
 	}
 	return out, nil
 }
@@ -243,36 +331,40 @@ func (s *Store) Get(ctx context.Context, id string) (*Detail, error) {
 	if d.Type == "smart" {
 		// 属主传相册属主（d.OwnerID）：公开分享链路（shares.ListItems）在这里是**匿名**调用，
 		// 绝不能改用调用者身份，否则匿名分享会被 fail-closed 打死。
+		// LIMIT 硬上限+1：空条件智能相册 = 属主全库媒体，无上限即 DoS 面（截断见 capItems）。
 		where, args := buildCriteriaWhere(d.Criteria, d.OwnerID)
 		rows, err := s.Pool.Query(ctx, `SELECT `+media.MediaRefColumns+` FROM media m WHERE `+where+`
-			ORDER BY m.taken_at DESC, m.id DESC`, args...)
+			ORDER BY m.taken_at DESC, m.id DESC LIMIT `+strconv.Itoa(albumItemsHardLimit+1), args...)
 		if err != nil {
 			return nil, err
 		}
-		d.Items, err = scanMediaRows(rows)
+		items, err := scanMediaRows(rows)
 		if err != nil {
 			return nil, err
 		}
+		d.Items, d.Truncated = capItems(items)
 	} else {
 		// 读路径按**相册属主** d.OwnerID 收窄可见集，兜住历史脏行（AddItems 修复前的越权插入）。
 		//
 		// ⚠️ 主体必须是相册属主而不是调用者：本函数同时服务公开分享链路
 		// （shares.Store.ListItems → 本函数），那条链路是**匿名**的、根本没有调用者身份，
 		// 且分享是**有意**让匿名可见的。用调用者身份会把匿名分享整条 fail-closed 打死。
+		// LIMIT 硬上限+1：与 smart 分支同一截断口径。
 		vis, visArgs := mediascope.VisibleCondFor(2, d.OwnerID, "m")
 		args := append([]any{id}, visArgs...)
 		rows, err := s.Pool.Query(ctx, `
 			SELECT `+media.MediaRefColumns+`
 			FROM album_items ai JOIN media m ON m.id = ai.media_id
 			WHERE ai.album_id = $1 AND m.deleted_at IS NULL AND `+vis+`
-			ORDER BY ai.sort_key ASC, m.taken_at DESC`, args...)
+			ORDER BY ai.sort_key ASC, m.taken_at DESC LIMIT `+strconv.Itoa(albumItemsHardLimit+1), args...)
 		if err != nil {
 			return nil, err
 		}
-		d.Items, err = scanMediaRows(rows)
+		items, err := scanMediaRows(rows)
 		if err != nil {
 			return nil, err
 		}
+		d.Items, d.Truncated = capItems(items)
 	}
 	return &d, nil
 }
@@ -429,9 +521,12 @@ func (s *Store) RemoveItem(ctx context.Context, albumID, mediaID string) error {
 }
 
 // ListComments 评论列表（按时间升序扁平返回）。
+//
+// user_name 兜底固定为 '用户'，**绝不回落到 u.email**：评论列表会随相册详情/分享链路
+// 展示给相册访问者，邮箱属于账号隐私字段，display_name 为空也不能拿它凑数。
 func (s *Store) ListComments(ctx context.Context, albumID string) ([]Comment, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT c.id, c.user_id, COALESCE(NULLIF(u.display_name,''), u.email),
+		SELECT c.id, c.user_id, COALESCE(NULLIF(u.display_name,''), '用户'),
 		       c.parent_id, c.content, c.created_at
 		FROM album_comments c JOIN users u ON u.id = c.user_id
 		WHERE c.album_id = $1

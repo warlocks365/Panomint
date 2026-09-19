@@ -198,3 +198,37 @@ func VisibleCondFor(start int, userID, alias string) (string, []any) {
 		"\t\tOR (%[3]s = 'shared' AND %[2]s))",
 		start, sharedVerdict(start), qual(alias, "space"), qual(alias, "owner_id")), []any{userID}
 }
+
+// RolePrivileged 全局特权角色（owner/admin）：绕过一切归属判定、见全量，
+// 这是刻意的管理员语义（与 media 包写路径 canAccess 的取值保持一致 ——
+// 取值若漂移，两侧必须同时改，故也收敛进本包）。
+func RolePrivileged(role string) bool { return role == "owner" || role == "admin" }
+
+// ReadCond 单条媒体「读」访问的完整判定（P2-01：Detail / Thumb / Download 共用）。
+//
+// 口径 = 属主 ∪（media.space='shared' 且调用者是共享空间成员或属主）∪ owner/admin 角色。
+//
+// 为什么也必须收敛在本包：/media?space=shared 的**列表**可见性（Conds 的 shared 臂）
+// 与单条媒体的详情/缩略图/下载曾各写一份 —— detail.go 的 canAccess 只认本人/owner/admin，
+// 造成「列表可见、点进去 403」的口径断裂（共享空间功能对成员实际不可用）。
+// 现在单条读判定与列表判定共用同一个 sharedVerdict：改口径只改一处，两侧自动跟随。
+//
+// 返回值约定（与 VisibleCondFor 同族）：
+//   - owner/admin 角色 → ("true", nil)：特权短路，不进 SQL、不占参数位；
+//   - userID 为空 → (FailClosed, nil)：无主体即「谁也看不见」，
+//     绝不能返回不绑定主体的谓词（历史越权事故的同形，见包文档）；
+//   - 其余 → (谓词, [userID])：谓词占位符 $start 绑定调用者，args 恰好 1 个元素。
+//
+// 与 VisibleCondFor 的差别：VisibleCondFor 是「调用者可见集合」的**行过滤**谓词
+// （personal 臂要求 space='personal' AND owner_id=$n）；ReadCond 是「这一条媒体
+// 能不能读」的**单行判定**（属主不受 space 限制 —— 属主读自己的 shared 媒体当然合法）。
+func ReadCond(start int, userID, role, alias string) (string, []any) {
+	if RolePrivileged(role) {
+		return "true", nil
+	}
+	if userID == "" {
+		return FailClosed, nil
+	}
+	return fmt.Sprintf("(%[3]s = $%[1]d OR (%[4]s = 'shared' AND %[2]s))",
+		start, sharedVerdict(start), qual(alias, "owner_id"), qual(alias, "space")), []any{userID}
+}

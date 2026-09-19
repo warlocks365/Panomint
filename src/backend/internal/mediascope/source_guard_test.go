@@ -329,8 +329,9 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 	},
 	regKey("internal/media/write.go", "DELETE FROM media"): {
 		UserFacing: false,
-		Reason:     "Purge 永久删除写路径，调用前已过 h.checkAccess（write_handlers.go:353），只 RETURNING path 供清文件与审计。",
-		Evidence:   "media/write.go:227-236；write_handlers.go:351-357。",
+		Reason: "Purge 永久删除写路径，调用前已过 h.checkAccess（write_handlers.go Purge），只 RETURNING path 供清文件与审计。" +
+			"P1-02：DELETE 前同事务显式 UPDATE 解除 albums/people 封面与 duplicate_of/live_photo_pair_id 引用（计数入审计）。",
+		Evidence: "media/write.go Purge（事务内解引用 + DELETE ... RETURNING path）；write_handlers.go Purge。",
 	},
 	regKey("internal/media/upload.go", "INSERT INTO media"): {
 		UserFacing: false,
@@ -342,13 +343,12 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 
 	regKey("internal/media/write.go", "FROM media"): {
 		UserFacing: true, // 取严：同特征还覆盖 ListTrash（面向用户），见 Reason 第 3 点
-		Reason: "三处性质不同：① :16 ownerOf 是**归属判定原语**（只取 owner_id/deleted_at，供 checkAccess/thumbAccess 使用）；" +
-			"② :158 GetEdits 与 :231 Purge(RETURNING path) 是写路径的前置读/删除，handler 调用前已 checkAccess；" +
-			"③ :258 ListTrash 直接面向终端用户（GET /media/trash），但 WHERE 内联 `m.owner_id = $1` 绑定调用者，" +
-			"writer 侧把 c.GetString(\"user_id\") 传进来（write_handlers.go:315），本就不返回他人媒体 —— " +
-			"故未接 mediascope 是**有意为之**（其注释 write.go:245-254 说明了为何不补 space='personal'：纯负收益）。",
-		Evidence: "media/write.go:14-22 ownerOf；:153-173 GetEdits；:227-236 Purge；:238-275 ListTrash（:259 的 m.owner_id = $1）；" +
-			"write_handlers.go:313-321 Trash、:48-59 checkAccess。",
+		Reason: "① ownerOf 是**写路径归属判定原语**（只取 owner_id/deleted_at，供 checkAccess 使用）；readAccessOf 是**读路径判定原语**" +
+			"（P2-01，谓词出自 mediascope.ReadCond，供 checkReadAccess/readAllowed 使用）；② GetEdits 与 Purge(RETURNING path) 是写路径的前置读/删除，" +
+			"handler 调用前已 checkAccess；③ ListTrash 直接面向终端用户（GET /media/trash），但 WHERE 内联 `m.owner_id = $1` 绑定调用者，" +
+			"writer 侧把 c.GetString(\"user_id\") 传进来（write_handlers.go Trash），本就不返回他人媒体 —— " +
+			"故未接 mediascope 是**有意为之**（其注释说明了为何不补 space='personal'：纯负收益）。",
+		Evidence: "media/write.go ownerOf / readAccessOf / GetEdits / Purge / ListTrash；write_handlers.go Trash、checkAccess、checkReadAccess。",
 	},
 	regKey("internal/shares/store.go", "JOIN media"): {
 		UserFacing: false,
@@ -396,19 +396,22 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 	regKey("internal/media/thumb.go", "FROM media"): {
 		UserFacing: true,
 		Reason: "GET /media/:id/thumb 交付**二进制媒体内容**；曾是可绕过 GET /media/:id 的 IDOR 侧门（实测 viewer 拿到他人 200 + 7474 字节）。" +
-			"现先判归属再取列，无权与不存在同形 404。",
-		Evidence: "media/thumb.go:33-42（h.thumbAccess 先于 SELECT）；:68-83 thumbAccessCheck → ownerOf + canAccess。",
+			"现先判读访问再取列，无权与不存在同形 404。P2-01 后读口径扩为「属主 ∪ shared 成员 ∪ owner/admin」，" +
+			"判定与 Detail/Download 共用 readAccessOf → mediascope.ReadCond（单一真源）。",
+		Evidence: "media/thumb.go（h.thumbAccess 先于 SELECT；thumbAccessCheck → Store.readAllowed → readAccessOf）。",
 	},
 	regKey("internal/media/detail.go", "FROM media"): {
 		UserFacing: true,
-		Reason:     "GET /media/:id 详情，返回 media 全字段；归属由 handler 层 checkAccess 在调用 Store.GetDetail **之前**判定。",
-		Evidence:   "media/detail.go:102-120；write_handlers.go:61-67（Detail 先 h.checkAccess）。",
+		Reason: "GET /media/:id 详情，返回 media 全字段；读访问由 handler 层 checkReadAccess 在调用 Store.GetDetail **之前**判定" +
+			"（P2-01：口径扩为「属主 ∪ shared 成员 ∪ owner/admin」，与 /media?space=shared 列表同口径）。",
+		Evidence: "media/detail.go GetDetail；write_handlers.go Detail（先 h.checkReadAccess → Store.readAccessOf）。",
 	},
 	regKey("internal/media/upload.go", "FROM media"): {
-		UserFacing: true, // 取严：同特征覆盖 :463 Download（面向用户）与 :342 上传去重（内部）
-		Reason: "两处性质不同：① :463 GET /media/:id/download 交付**原文件流**，调用前已过 h.checkAccess（:457）；" +
-			"② :342 上传时的同人同 hash 去重，WHERE 自带 `owner_id = $2`（= 上传者自己），不跨用户。",
-		Evidence: "media/upload.go:454-467（Download + checkAccess）；:334-347（hash 去重，owner_id = meta.OwnerID）。",
+		UserFacing: true, // 取严：同特征覆盖 Download（面向用户）与上传去重（内部）
+		Reason: "两处性质不同：① Download（GET /media/:id/download）交付**原文件流**，调用前已过 h.checkReadAccess" +
+			"（P2-01 读口径：属主 ∪ shared 成员 ∪ owner/admin）；② 上传时的同人同 hash 去重，" +
+			"WHERE 自带 `owner_id = $2`（= 上传者自己），不跨用户。",
+		Evidence: "media/upload.go（Download + checkReadAccess；hash 去重 owner_id = meta.OwnerID，P2-03 已修吞错）。",
 	},
 	regKey("internal/albums/store.go", "FROM media"): {
 		UserFacing: true,
@@ -533,14 +536,14 @@ var visibilityWiring = map[string][]wiringRef{
 	},
 	"internal/media/thumb.go": {
 		{File: "internal/media/thumb.go", Func: "Thumb", Symbol: "h.thumbAccess("},
-		{File: "internal/media/thumb.go", Func: "thumbAccessCheck", Symbol: "canAccess("},
+		{File: "internal/media/thumb.go", Func: "thumbAccess", Symbol: "h.Store.readAllowed"},
 	},
 	"internal/media/detail.go": {
-		{File: "internal/media/write_handlers.go", Func: "Detail", Symbol: "h.checkAccess("},
-		{File: "internal/media/write_handlers.go", Func: "checkAccess", Symbol: "h.Store.ownerOf("},
+		{File: "internal/media/write_handlers.go", Func: "Detail", Symbol: "h.checkReadAccess("},
+		{File: "internal/media/write_handlers.go", Func: "checkReadAccess", Symbol: "h.Store.readAccessOf"},
 	},
 	"internal/media/upload.go": {
-		{File: "internal/media/upload.go", Func: "Download", Symbol: "h.checkAccess("},
+		{File: "internal/media/upload.go", Func: "Download", Symbol: "h.checkReadAccess("},
 	},
 	"internal/media/write.go": {
 		{File: "internal/media/write.go", Symbol: "m.owner_id = $1"},

@@ -96,7 +96,19 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 	u, err := h.Store.FindByEmail(c.Request.Context(), req.Email)
-	if err != nil || !VerifyPassword(u.PasswordHash, req.Password) {
+	if err != nil {
+		if errors.Is(err, ErrBadCredentials) {
+			// 用户不存在：与「密码错」同形 401，不暴露账号是否存在（枚举面）。
+			errResp(c, http.StatusUnauthorized, "BAD_CREDENTIALS", ErrBadCredentials.Error())
+			return
+		}
+		// 库故障不是「凭证错误」（P2-11）：报 401 会让客户端反复重试密码，
+		// 监控也看不到 500。
+		log.Printf("auth: 登录查询用户失败: %v", err)
+		errResp(c, http.StatusInternalServerError, "INTERNAL", "服务器内部错误")
+		return
+	}
+	if !VerifyPassword(u.PasswordHash, req.Password) {
 		errResp(c, http.StatusUnauthorized, "BAD_CREDENTIALS", ErrBadCredentials.Error())
 		return
 	}

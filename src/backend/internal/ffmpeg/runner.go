@@ -96,6 +96,11 @@ type Task struct {
 	canceled  bool
 	once      sync.Once
 	lookErr   error
+	// finished 与 sendWG 配合 broadcast 的锁外发送（见 broadcast 注释）：
+	// finished 置位后不再接受新订阅、broadcast 直接返回；finish 等 sendWG 归零
+	// 后再关闭订阅 channel，避免「send on closed channel」panic。
+	finished bool
+	sendWG   sync.WaitGroup
 }
 
 // New 创建任务。args 不含二进制名；进度标志由封装自动注入（-hide_banner -nostats -progress pipe:1）。
@@ -169,10 +174,9 @@ func (t *Task) Start(ctx context.Context) error {
 func (t *Task) SubscribeProgress(buf int) <-chan Progress {
 	ch := make(chan Progress, buf)
 	t.mu.Lock()
-	select {
-	case <-t.done:
+	if t.finished {
 		close(ch)
-	default:
+	} else {
 		t.subs = append(t.subs, ch)
 	}
 	t.mu.Unlock()
@@ -268,10 +272,23 @@ func (t *Task) scanStderr(r io.Reader) {
 	}
 }
 
+// broadcast 锁内快照订阅者、**锁外发送**（P1-03 管线）：
+// Done 帧为「终帧必达」是阻塞发送——若持 mu 发送，某个缓冲满且不再读取的失联订阅者
+// 会让 scanStdout 永远卡在锁内 → finish 拿不到 mu → t.done 永不关闭 → 任务整体死锁。
+// 锁外发送后，失联订阅者最多泄漏其自身这一路发送（由 sendWG 兜底关 channel），
+// 不再拖死任务。sendWG + finished 保证 finish 不会在发送途中 close 这些 channel
+// （否则就是 send on closed channel 的 panic）。
 func (t *Task) broadcast(p Progress) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, ch := range t.subs {
+	if t.finished {
+		t.mu.Unlock()
+		return
+	}
+	t.sendWG.Add(1)
+	subs := append([]chan Progress(nil), t.subs...)
+	t.mu.Unlock()
+	defer t.sendWG.Done()
+	for _, ch := range subs {
 		if p.Done {
 			ch <- p // 终帧必达
 		} else {
@@ -308,11 +325,21 @@ func (t *Task) finish(waitErr error) {
 				Duration:   t.res.Duration,
 			}
 		}
-		for _, ch := range t.subs {
-			close(ch)
-		}
+		// finished 与 close(done) 都必须在 mu 内完成之前的「关订阅 channel」之前：
+		// finished 置位后 SubscribeProgress 不再 append、broadcast 不再读取 t.subs，
+		// 因此此刻 subs 快照就是全部需要关闭的 channel。
+		t.finished = true
+		subs := t.subs
 		t.mu.Unlock()
 		close(t.done)
+		// 等在途 broadcast 发送完毕再关闭 channel；失联订阅者的阻塞发送
+		// 只会卡住这个收尾 goroutine，不再拖死 Wait/Cancel。
+		go func() {
+			t.sendWG.Wait()
+			for _, ch := range subs {
+				close(ch)
+			}
+		}()
 	})
 }
 

@@ -93,7 +93,13 @@ type Detail struct {
 // ErrNotFound 媒体不存在或无权限。
 var ErrNotFound = errors.New("媒体不存在")
 
-// canAccess 访问控制：本人，或 owner/admin 角色。
+// ErrForbidden 媒体存在但调用者无权访问（读路径用；写路径的无权在 handler 直接 403）。
+var ErrForbidden = errors.New("无权访问该媒体")
+
+// canAccess **写路径**访问控制：本人，或 owner/admin 角色。
+// 读路径（Detail/Thumb/Download）不用本函数 —— 其口径扩为
+// 「属主 ∪ 共享空间成员（space='shared'）∪ owner/admin」（P2-01），
+// 判定收敛在 mediascope.ReadCond（单一真源），入口是 Store.readAccessOf。
 func canAccess(userID, role, ownerID string) bool {
 	return userID == ownerID || role == "owner" || role == "admin"
 }

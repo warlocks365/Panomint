@@ -20,15 +20,18 @@ import (
 // GET /media/:id 是 403 —— 缩略图成了绕过保护的侧门。若修成 403，则只是把一个泄漏
 // 换成另一个泄漏（存在性预言机），所以断言必须钉住「404 而非 403」与「逐字节同形」。
 
-// fakeLookup 充当 *Store.ownerOf（签名逐字相同，故可直接替换以便无库单测）。
-func fakeLookup(owner string, err error) mediaOwnerLookup {
-	return func(context.Context, string) (string, bool, error) { return owner, false, err }
+// fakeLookup 充当 *Store.readAllowed（签名逐字相同，故可直接替换以便无库单测）。
+// allowed=true 覆盖「属主 / shared 成员 / owner/admin」全部放行形态 —— 具体属于哪一种
+// 由 readAccessOf → mediascope.ReadCond 在 SQL 层判定（该层有自己的测试），
+// 本层只钉「判定结果的响应映射」。
+func fakeLookup(allowed bool, err error) mediaReadLookup {
+	return func(context.Context, string, string, string) (bool, error) { return allowed, err }
 }
 
 // ---- 判定层：无权必须被收敛成 ErrNotFound（= 与不存在同一档） ----
 
 func TestThumbAccessCheckDeniesNonOwnerAsNotFound(t *testing.T) {
-	lookup := fakeLookup("u1", nil)
+	lookup := fakeLookup(false, nil) // 非属主且非 shared 成员（readAccessOf 判 allowed=false）
 	err := thumbAccessCheck(context.Background(), lookup, "u2", "member", "m1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("他人媒体必须判为 ErrNotFound（与「不存在」不可区分），实际 %v", err)
@@ -36,20 +39,21 @@ func TestThumbAccessCheckDeniesNonOwnerAsNotFound(t *testing.T) {
 }
 
 func TestThumbAccessCheckAllowsOwnerAndPrivileged(t *testing.T) {
-	lookup := fakeLookup("u1", nil)
+	lookup := fakeLookup(true, nil) // readAccessOf 放行（含 P2-01 的 shared 成员形态）
 	for _, tc := range []struct{ user, role string }{
 		{"u1", "member"}, // 本人
+		{"u2", "member"}, // shared 空间成员（P2-01：列表可见的媒体，缩略图也必须可读）
 		{"u2", "owner"},  // 全局 owner
 		{"u2", "admin"},  // 管理员
 	} {
 		if err := thumbAccessCheck(context.Background(), lookup, tc.user, tc.role, "m1"); err != nil {
-			t.Fatalf("user=%s role=%s 应放行（与 checkAccess/canAccess 同口径），实际 %v", tc.user, tc.role, err)
+			t.Fatalf("user=%s role=%s 应放行（与 checkReadAccess 同口径），实际 %v", tc.user, tc.role, err)
 		}
 	}
 }
 
 func TestThumbAccessCheckMissingMediaIsNotFound(t *testing.T) {
-	lookup := fakeLookup("", ErrNotFound)
+	lookup := fakeLookup(false, ErrNotFound)
 	if err := thumbAccessCheck(context.Background(), lookup, "u1", "member", "ghost"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("不存在的媒体应为 ErrNotFound，实际 %v", err)
 	}
@@ -57,7 +61,7 @@ func TestThumbAccessCheckMissingMediaIsNotFound(t *testing.T) {
 
 func TestThumbAccessCheckPropagatesDBError(t *testing.T) {
 	dbErr := errors.New("db down")
-	err := thumbAccessCheck(context.Background(), fakeLookup("", dbErr), "u1", "member", "m1")
+	err := thumbAccessCheck(context.Background(), fakeLookup(false, dbErr), "u1", "member", "m1")
 	if !errors.Is(err, dbErr) {
 		t.Fatalf("DB 错误应原样透出（由 handler 映射 500），实际 %v", err)
 	}

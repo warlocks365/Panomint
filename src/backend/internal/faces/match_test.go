@@ -106,3 +106,47 @@ func TestBestFaceMatchEmptyAndUnnamed(t *testing.T) {
 		t.Fatalf("应保留旧簇 ID，实得 %q", got.ClusterID)
 	}
 }
+
+// TestRescanOriginalMatchesLGStored 回归（P0-02）：「LG 旧数据 × 原图重扫」命名迁移必须命中。
+//
+// 场景：旧库 bbox 是 LG/1280 坐标系（历史扫描图源是 LG 缩略图）；重扫时图源换成
+// 3840 宽原图，Detection 为原图坐标。scanOne 入库/匹配前必须 Scaled(LGWidth/原图宽)
+// 归一到 LG 坐标系，否则 IoU 跨坐标系比较 ≈ 0，person_id 静默丢失。
+func TestRescanOriginalMatchesLGStored(t *testing.T) {
+	if LGWidth != 1280 {
+		t.Fatalf("LGWidth 变为 %d，本用例需同步更新", LGWidth)
+	}
+	// LG 缩略图（1280 宽）时代的已命名旧脸
+	olds := []FaceRef{{PersonID: "alice", ClusterID: "c-alice", X: 300, Y: 200, W: 120, H: 150}}
+	// 同一张脸在 3840×2160 原图上的检出（带 3 倍坐标），另加 typical 框漂移
+	newOnOriginal := Detection{
+		X: 912, Y: 606, W: 354, H: 444,
+		Landmarks: [5][2]float64{{930, 630}, {1200, 630}, {1065, 750}, {960, 900}, {1170, 900}},
+		Score:     0.95,
+	}
+
+	// 不归一直接匹配 = 修复前的缺陷行为：IoU≈0，命名丢失（钉死这个反例）
+	if _, ok := BestFaceMatch(olds, newOnOriginal); ok {
+		t.Fatalf("未归一的原图坐标不应命中 LG 旧框（若命中说明坐标系前提已变，需重审本修复）")
+	}
+
+	// 归一到 LG/1280 坐标系后：同一张脸，命名必须迁移成功
+	scale := float64(LGWidth) / 3840.0
+	lg := newOnOriginal.Scaled(scale)
+	got, ok := BestFaceMatch(olds, lg)
+	if !ok {
+		t.Fatalf("原图重扫归一后应命中 LG 旧框（命名会丢失！），实得未命中")
+	}
+	if got.PersonID != "alice" || got.ClusterID != "c-alice" {
+		t.Fatalf("命名迁移结果错误：%q / %q，期望 alice / c-alice", got.PersonID, got.ClusterID)
+	}
+
+	// Scaled 的不变量：框与五点同步缩放，f=1 原样返回
+	if lg.Landmarks[0][0] != 930*scale || lg.Landmarks[0][1] != 630*scale {
+		t.Errorf("landmarks 未同步缩放: %+v", lg.Landmarks[0])
+	}
+	same := newOnOriginal.Scaled(1)
+	if same != newOnOriginal {
+		t.Errorf("Scaled(1) 应原样返回")
+	}
+}

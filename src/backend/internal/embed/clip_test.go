@@ -9,7 +9,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+
+	"panoalbum/internal/vecutil"
 )
 
 // libPath 定位本平台的原生库（assets/lib/onnxruntime-<platform>-*/lib/...）。
@@ -84,13 +87,13 @@ func TestEncodeTextDistinguishesSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sim := CosineSimilarity(a, b)
+	sim := vecutil.CosineSimilarity(a, b)
 	t.Logf("相似度(夕阳 vs 汽车) = %.4f", sim)
 	if sim > 0.99 {
 		t.Errorf("不同语义文本的相似度不应接近 1，实得 %.4f", sim)
 	}
 	// 自相似应为 1
-	if s := CosineSimilarity(a, a); math.Abs(s-1) > 1e-5 {
+	if s := vecutil.CosineSimilarity(a, a); math.Abs(s-1) > 1e-5 {
 		t.Errorf("自相似应≈1，实得 %.6f", s)
 	}
 }
@@ -130,6 +133,54 @@ func TestPreprocessNonSquare(t *testing.T) {
 	px := PreprocessImageData(img)
 	if len(px) != 3*ImageSize*ImageSize {
 		t.Fatalf("长度应为 %d，实得 %d", 3*ImageSize*ImageSize, len(px))
+	}
+}
+
+// TestEncodeTextConcurrent 并发回归（P0-01）：共享输入张量必须在锁内写入。
+// 两个 goroutine 分别编码不同文本，断言各自结果与串行基线一致（张冠李戴会立即暴露）。
+// 需要真实 ORT 运行时；不可用（如缺原生库/驱动）时跳过。
+func TestEncodeTextConcurrent(t *testing.T) {
+	enc, err := NewEncoder(Config{ModelDir: modelDir(t), LibPath: libPath(t)})
+	if err != nil {
+		t.Skipf("ORT 不可用，跳过并发回归: %v", err)
+	}
+	defer enc.Close()
+	ctx := context.Background()
+
+	texts := []string{
+		"a photo of a sunset over the sea",
+		"a photo of a red car on a highway",
+	}
+	baseline := make([][]float32, len(texts))
+	for i, s := range texts {
+		v, err := enc.EncodeText(ctx, s)
+		if err != nil {
+			t.Fatalf("串行基线编码失败: %v", err)
+		}
+		baseline[i] = v
+	}
+
+	const rounds = 20
+	for r := 0; r < rounds; r++ {
+		var wg sync.WaitGroup
+		got := make([][]float32, len(texts))
+		errs := make([]error, len(texts))
+		for i, s := range texts {
+			wg.Add(1)
+			go func(i int, s string) {
+				defer wg.Done()
+				got[i], errs[i] = enc.EncodeText(ctx, s)
+			}(i, s)
+		}
+		wg.Wait()
+		for i := range texts {
+			if errs[i] != nil {
+				t.Fatalf("并发编码失败: %v", errs[i])
+			}
+			if sim := vecutil.CosineSimilarity(got[i], baseline[i]); math.Abs(sim-1) > 1e-5 {
+				t.Fatalf("第 %d 轮：文本 %d 并发结果与串行基线不一致（相似度 %.6f），疑似输入张量串台", r, i, sim)
+			}
+		}
 	}
 }
 

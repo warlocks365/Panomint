@@ -171,8 +171,11 @@ func NewDetector(o Options) (*Detector, error) {
 //
 // ⚠️ minpx 的坐标系不因输入变大而漂移：lb 由**本次实际使用的 size** 推导，
 // MapDetection 又用同一个 lb 反向映射，所以"画布坐标 → 源图坐标"的缩放系数恒为
-// letterbox 实际缩放系数的倒数，与 size 取值无关 —— minpx 始终判定在源图
-// （LG 缩略图）坐标系，语义与标定时完全一致。
+// letterbox 实际缩放系数的倒数，与 size 取值无关。
+//
+// ⚠️ minpx 标定在 **LG/1280 坐标系**（见 Options.MinFacePx / faces.LGWidth），
+// 而本函数返回的是当次图源坐标——喂原图（宽 ≠1280）时必须按 `MinFacePx × 图源宽 / LGWidth`
+// 换算，否则 24px@LG 在原图上会被当成 24px@原图（≈8px@LG），过滤阈值语义漂移（P0-02）。
 func (d *Detector) Detect(img image.Image) ([]Detection, error) {
 	b := img.Bounds()
 	srcLong := b.Dx()
@@ -217,7 +220,8 @@ func (d *Detector) Detect(img image.Image) ([]Detection, error) {
 		return nil, err
 	}
 	out := make([]Detection, 0, len(dets))
-	minPx := float64(d.opts.MinFacePx)
+	// MinFacePx 标定在 LG/1280 坐标系：换算到当次图源坐标再判定（源宽 1280 时与旧行为一致）。
+	minPx := float64(d.opts.MinFacePx) * float64(b.Dx()) / float64(LGWidth)
 	for _, det := range dets {
 		m := lb.MapDetection(det)
 		if m.W < minPx || m.H < minPx {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,6 +32,28 @@ func ValidUserStatus(s string) bool { return s == StatusActive || s == StatusDis
 // Store 账户数据访问。
 type Store struct {
 	Pool *pgxpool.Pool
+
+	// permMu/permCache HasPerm 的进程内缓存（P2-12）：权限是低频变更数据，
+	// 而 RequirePerm 每个受保护请求都至少查一次库。TTL 30s；
+	// CreateRole / UpdateUser 等变更路径成功后主动调 InvalidatePermCache。
+	permMu    sync.RWMutex
+	permCache map[string]permCacheEntry
+}
+
+// permCacheEntry 一条缓存的判定结果（key 为 role+"\x00"+perm）。
+type permCacheEntry struct {
+	ok        bool
+	expiresAt time.Time
+}
+
+// permCacheTTL 权限缓存有效期：角色权限变更最坏延迟 30s 生效（变更路径已主动失效，这只是兜底）。
+const permCacheTTL = 30 * time.Second
+
+// InvalidatePermCache 清空 HasPerm 缓存（角色/用户角色变更后调用）。
+func (s *Store) InvalidatePermCache() {
+	s.permMu.Lock()
+	s.permCache = nil
+	s.permMu.Unlock()
 }
 
 // User 用户记录（含角色名）。
@@ -210,6 +233,29 @@ func HashPassword(password string) (string, error) {
 	return string(h), err
 }
 
+// PasswordHash 读取某用户的当前口令哈希（自助改密时校验旧口令用）。
+func (s *Store) PasswordHash(ctx context.Context, userID string) (string, error) {
+	var h string
+	err := s.Pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id = $1::uuid`, userID).Scan(&h)
+	return h, err
+}
+
+// SetPassword 精确覆写某用户的口令哈希（自助改密用）。
+//
+// 刻意不复用 UpdateUser：那是一条"按请求体增量改用户"的通用路径（含角色/状态/显示名的
+// normalize 与 patch 拼接），而改密只需动一个字段。套通用路径会把"自助改密"与
+// "管理员改用户"的语义缠在一起，日后调整任一侧的校验都容易误伤另一侧。
+func (s *Store) SetPassword(ctx context.Context, userID, hash string) error {
+	tag, err := s.Pool.Exec(ctx, `UPDATE users SET password_hash = $1 WHERE id = $2::uuid`, hash, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("用户不存在")
+	}
+	return nil
+}
+
 func hashRefresh(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
@@ -226,28 +272,38 @@ func (s *Store) CreateSession(ctx context.Context, userID, refreshToken, ip, ua 
 
 // RotateSession 轮换：校验旧 refresh → 吊销旧会话 → 签发新会话。
 // 返回用户 ID；若旧令牌已被吊销（重放攻击特征），吊销该用户全部会话并报错。
+//
+// 吊销是**单条原子 UPDATE**（P2-10）：旧实现「先 SELECT revoked 再 UPDATE」存在竞态窗口——
+// 两个并发请求可都读到 revoked=false、各自签出新会话，重放检测形同虚设。
+// 现在靠 `revoked=false` 条件让并发换发只有一个能命中；0 行时再 SELECT 区分
+// 「不存在/已过期」与「已吊销（重放）」，保持既有重放检测语义不变。
 func (s *Store) RotateSession(ctx context.Context, oldRefresh, newRefresh, ip, ua string) (string, error) {
 	h := hashRefresh(oldRefresh)
 	var userID string
-	var revoked bool
-	err := s.Pool.QueryRow(ctx,
-		`SELECT user_id, revoked FROM sessions WHERE refresh_token_hash = $1 AND expires_at > now()`, h).
-		Scan(&userID, &revoked)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err := s.Pool.QueryRow(ctx, `
+		UPDATE sessions SET revoked = true
+		WHERE refresh_token_hash = $1 AND revoked = false AND expires_at > now()
+		RETURNING user_id`, h).Scan(&userID)
+	if err == nil {
+		return userID, s.CreateSession(ctx, userID, newRefresh, ip, ua)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	// 0 行：区分「会话不存在/已过期」与「已吊销（重放）」。
+	var replayUserID string
+	selErr := s.Pool.QueryRow(ctx,
+		`SELECT user_id FROM sessions WHERE refresh_token_hash = $1 AND expires_at > now()`, h).
+		Scan(&replayUserID)
+	if errors.Is(selErr, pgx.ErrNoRows) {
 		return "", errors.New("会话不存在或已过期")
 	}
-	if err != nil {
-		return "", err
+	if selErr != nil {
+		return "", selErr
 	}
-	if revoked {
-		// 重放检测：旧令牌被二次使用 → 整链吊销
-		_, _ = s.Pool.Exec(ctx, `UPDATE sessions SET revoked = true WHERE user_id = $1`, userID)
-		return "", errors.New("检测到令牌重放，已吊销全部会话")
-	}
-	if _, err := s.Pool.Exec(ctx, `UPDATE sessions SET revoked = true WHERE refresh_token_hash = $1`, h); err != nil {
-		return "", err
-	}
-	return userID, s.CreateSession(ctx, userID, newRefresh, ip, ua)
+	// 重放检测：旧令牌被二次使用 → 整链吊销
+	_, _ = s.Pool.Exec(ctx, `UPDATE sessions SET revoked = true WHERE user_id = $1`, replayUserID)
+	return "", errors.New("检测到令牌重放，已吊销全部会话")
 }
 
 // RevokeSession 登出吊销。
@@ -258,14 +314,33 @@ func (s *Store) RevokeSession(ctx context.Context, refreshToken string) error {
 }
 
 // HasPerm 角色权限判定（精确匹配 + 前缀通配 'media:*' 可覆盖 'media:read'）。
+// 带 30s 进程内缓存（见 Store.permCache）；库故障的结果**不缓存**，直接向上返回错误。
 func (s *Store) HasPerm(ctx context.Context, role, perm string) (bool, error) {
+	key := role + "\x00" + perm
+	s.permMu.RLock()
+	e, hit := s.permCache[key]
+	s.permMu.RUnlock()
+	if hit && time.Now().Before(e.expiresAt) {
+		return e.ok, nil
+	}
+
 	var ok bool
 	err := s.Pool.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM role_permissions rp JOIN roles r ON r.id = rp.role_id
 			WHERE r.name = $1 AND (rp.perm = $2 OR rp.perm = split_part($2, ':', 1) || ':*'))`,
 		role, perm).Scan(&ok)
-	return ok, err
+	if err != nil {
+		return false, err
+	}
+
+	s.permMu.Lock()
+	if s.permCache == nil {
+		s.permCache = map[string]permCacheEntry{}
+	}
+	s.permCache[key] = permCacheEntry{ok: ok, expiresAt: time.Now().Add(permCacheTTL)}
+	s.permMu.Unlock()
+	return ok, nil
 }
 
 // CreateUser 管理员创建用户。
@@ -475,6 +550,10 @@ func (s *Store) UpdateUser(ctx context.Context, id string, in UserUpdate) (*User
 		return nil, err
 	}
 	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
+	if in.Role != nil {
+		// 用户角色变更：权限判定缓存立即失效（否则旧角色权限最长残留 30s）。
+		s.InvalidatePermCache()
+	}
 	return &u, nil
 }
 

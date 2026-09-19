@@ -38,6 +38,7 @@ import (
 
 	"panoalbum/internal/config"
 	"panoalbum/internal/embed"
+	"panoalbum/internal/sweep"
 	"panoalbum/internal/tags"
 )
 
@@ -243,19 +244,9 @@ func runWatch(ctx context.Context, st *tags.Store, clf *tags.Classifier, limit i
 	}
 	app := &tags.Applier{Store: st, Clf: clf, ConfirmAI: confirm, Logger: log.Default()}
 	log.Printf("增量 AI 打标已启动：每 %s 扫描一次", interval)
-	sweepOnce(ctx, app, st, limit, dry)
-
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("收到退出信号，增量打标停止")
-			return
-		case <-t.C:
-			sweepOnce(ctx, app, st, limit, dry)
-		}
-	}
+	sweep.Loop(ctx, interval, "增量打标", func(ctx context.Context) {
+		sweepOnce(ctx, app, st, limit, dry)
+	})
 }
 
 // sweepOnce 扫描并补打标一轮；无待办时静默。

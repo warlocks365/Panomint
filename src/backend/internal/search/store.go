@@ -158,7 +158,10 @@ func (s *Store) query(ctx context.Context, p SearchParams, where, scoreExpr, tex
 
 	selectScore := "NULL::float8"
 	selectTextMatch := "NULL::bool"
-	orderBy := "m.taken_at DESC, m.id DESC"
+	// 显式 NULLS LAST（P2-05）：PG 的 DESC 默认 NULLS FIRST，而上方游标行比较
+	// `(m.taken_at, m.id) < ($n,$m)` 遇 NULL 求值为 NULL（即"不成立"）——若 taken_at
+	// 为 NULL 的行超过一页，翻页后会被永久排除。与 faces/embed/tags 的 ListPending 对齐。
+	orderBy := "m.taken_at DESC NULLS LAST, m.id DESC"
 	if scored {
 		selectScore = "(" + scoreExpr + ")"
 		if textMatchExpr != "" {

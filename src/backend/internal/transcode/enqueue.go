@@ -64,7 +64,7 @@ func EnqueueMissingHLS(ctx context.Context, db *pgxpool.Pool, q *queue.Queue, dr
 			log.Printf("[dry-run] 待入队 media=%s profile=%s src=%dx%d path=%s", id, profile, srcW, srcH, path)
 			continue
 		}
-		if err := enqueueOne(ctx, db, q, id, profile); err != nil {
+		if _, err := enqueueOne(ctx, db, q, id, profile); err != nil {
 			log.Printf("入队失败 media=%s: %v", id, err)
 			res.Failed++
 			continue
@@ -78,13 +78,18 @@ func EnqueueMissingHLS(ctx context.Context, db *pgxpool.Pool, q *queue.Queue, dr
 	return res, nil
 }
 
-// enqueueOne 写一条 transcode_jobs 并入队；入队失败时回滚该行，避免留下无人消费的 pending 记录。
-func enqueueOne(ctx context.Context, db *pgxpool.Pool, q *queue.Queue, mediaID, profile string) error {
+// enqueueOne 写一条 transcode_jobs 并入队，返回任务 id。
+//
+// **写行+入队、失败回滚删行**是「创建转码任务」的唯一语义（P1-02）：
+// API（Handler.CreateJob）与 CLI（EnqueueMissingHLS）两路径共用本函数。
+// 入队失败时回滚该行——否则留下的 status='pending' 僵尸行会让 missingHLSQuery
+// 的 NOT EXISTS 把该媒体**永久**排除在自动补排之外，且 JobStatus 永远返回 pending。
+func enqueueOne(ctx context.Context, db *pgxpool.Pool, q *queue.Queue, mediaID, profile string) (string, error) {
 	var jobID string
 	if err := db.QueryRow(ctx,
 		`INSERT INTO transcode_jobs (media_id, kind, profile, status)
 		 VALUES ($1, 'hls', $2, 'pending') RETURNING id`, mediaID, profile).Scan(&jobID); err != nil {
-		return fmt.Errorf("写转码任务失败: %w", err)
+		return "", fmt.Errorf("写转码任务失败: %w", err)
 	}
 	if _, err := q.Enqueue(ctx, queue.Job{Kind: "transcode", Payload: map[string]string{
 		"job_id":   jobID,
@@ -92,7 +97,7 @@ func enqueueOne(ctx context.Context, db *pgxpool.Pool, q *queue.Queue, mediaID, 
 		"profile":  profile,
 	}}); err != nil {
 		_, _ = db.Exec(ctx, `DELETE FROM transcode_jobs WHERE id = $1`, jobID)
-		return fmt.Errorf("入队失败: %w", err)
+		return "", fmt.Errorf("入队失败: %w", err)
 	}
-	return nil
+	return jobID, nil
 }

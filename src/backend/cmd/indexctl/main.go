@@ -88,7 +88,13 @@ func main() {
 
 	case "worker":
 		fs := flag.NewFlagSet("worker", flag.ExitOnError)
-		thumbDir := fs.String("thumbdir", "./testdata/thumbnails", "缩略图输出目录")
+		// 默认值与 embedgen/facesgen/phashgen 统一为 ./data/thumbnails（P2-18），
+		// 不再指向 testdata（P2-07：生产侧工具不应默认读写测试数据目录）。
+		defThumb := os.Getenv("THUMB_DIR")
+		if defThumb == "" {
+			defThumb = "./data/thumbnails"
+		}
+		thumbDir := fs.String("thumbdir", defThumb, "缩略图输出目录")
 		count := fs.Int("count", 0, "处理 N 个任务后退出（0=持续消费）")
 		_ = fs.Parse(os.Args[2:])
 		w := index.NewThumbWorker(db, q, *thumbDir)

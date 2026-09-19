@@ -25,23 +25,29 @@ const (
 	DefaultValkeyAddr = "127.0.0.1:6379"
 	DefaultMediaRoot  = "./data/media"
 	DefaultCORS       = "http://localhost:5173,http://localhost:8765,http://localhost:8088,http://127.0.0.1:8088"
+	// DefaultTrustedProxies 默认可信代理：本机 nginx（127.0.0.1）与 docker 网桥段（172.16.0.0/12）。
+	DefaultTrustedProxies = "127.0.0.1,172.16.0.0/12"
 )
 
 // Config 服务配置。
 type Config struct {
-	Port         string // API 监听端口
-	PGDSN        string // PostgreSQL 连接串
-	ValkeyAddr   string // Valkey 地址
-	ValkeyPass   string
-	CORSOrigins  []string // 允许的跨域源
-	Env          string   // dev|prod
-	UploadDir    string   // 上传媒体存储根（./data/media）
-	UploadTmp    string   // 分块上传临时目录（./data/uploads）
-	HLSDir       string   // HLS 输出根目录（./data/hls）
-	MediaRoot    string   // 既有索引媒体根（media.path 相对解析回退）
-	AmapKey      string   // 高德逆地理编码 Key（空=不启用，入库时不自动填 place）
-	AmapSecret   string   // 高德安全密钥（空=不带 sig 签名；Key 绑定安全密钥后必填）
-	TileCacheDir string   // 瓦片磁盘缓存目录（Job000009；空=不缓存，高频率拖动易触发高德 429 限流）
+	Port        string // API 监听端口
+	PGDSN       string // PostgreSQL 连接串
+	ValkeyAddr  string // Valkey 地址
+	ValkeyPass  string
+	CORSOrigins []string // 允许的跨域源
+	// TrustedProxies 可信反代的 IP/CIDR 列表（TRUSTED_PROXIES，逗号分隔）。
+	// 只有来自这些地址的请求才采信 X-Forwarded-For；其余来源的 XFF 被忽略。
+	// 显式置空字符串 = 不信任任何代理（ClientIP 退回 RemoteAddr）。
+	TrustedProxies []string
+	Env            string // dev|prod
+	UploadDir      string // 上传媒体存储根（./data/media）
+	UploadTmp      string // 分块上传临时目录（./data/uploads）
+	HLSDir         string // HLS 输出根目录（./data/hls）
+	MediaRoot      string // 既有索引媒体根（media.path 相对解析回退）
+	AmapKey        string // 高德逆地理编码 Key（空=不启用，入库时不自动填 place）
+	AmapSecret     string // 高德安全密钥（空=不带 sig 签名；Key 绑定安全密钥后必填）
+	TileCacheDir   string // 瓦片磁盘缓存目录（Job000009；空=不缓存，高频率拖动易触发高德 429 限流）
 }
 
 func env(key, def string) string {
@@ -73,19 +79,20 @@ func splitOrigins(s string) []string {
 func Load() (Config, error) {
 	loadDotEnv(".env")
 	c := Config{
-		Port:         env("API_PORT", "8080"),
-		PGDSN:        env("PG_DSN", DefaultPGDSN),
-		ValkeyAddr:   env("VALKEY_ADDR", DefaultValkeyAddr),
-		ValkeyPass:   os.Getenv("VALKEY_PASSWORD"),
-		CORSOrigins:  splitOrigins(env("CORS_ORIGINS", DefaultCORS)),
-		Env:          env("APP_ENV", "dev"),
-		UploadDir:    env("UPLOAD_DIR", "./data/media"),
-		UploadTmp:    env("UPLOAD_TMP", "./data/uploads"),
-		HLSDir:       env("HLS_DIR", "./data/hls"),
-		MediaRoot:    env("MEDIA_ROOT", DefaultMediaRoot),
-		AmapKey:      env("AMAP_KEY", ""),       // 空=不启用逆地理编码，入库时 place 留空
-		AmapSecret:   env("AMAP_SECRET", ""),    // 空=请求不带 sig 签名
-		TileCacheDir: env("TILE_CACHE_DIR", ""), // 空=瓦片不缓存
+		Port:           env("API_PORT", "8080"),
+		PGDSN:          env("PG_DSN", DefaultPGDSN),
+		ValkeyAddr:     env("VALKEY_ADDR", DefaultValkeyAddr),
+		ValkeyPass:     os.Getenv("VALKEY_PASSWORD"),
+		CORSOrigins:    splitOrigins(env("CORS_ORIGINS", DefaultCORS)),
+		TrustedProxies: splitOrigins(env("TRUSTED_PROXIES", DefaultTrustedProxies)),
+		Env:            env("APP_ENV", "dev"),
+		UploadDir:      env("UPLOAD_DIR", "./data/media"),
+		UploadTmp:      env("UPLOAD_TMP", "./data/uploads"),
+		HLSDir:         env("HLS_DIR", "./data/hls"),
+		MediaRoot:      env("MEDIA_ROOT", DefaultMediaRoot),
+		AmapKey:        env("AMAP_KEY", ""),       // 空=不启用逆地理编码，入库时 place 留空
+		AmapSecret:     env("AMAP_SECRET", ""),    // 空=请求不带 sig 签名
+		TileCacheDir:   env("TILE_CACHE_DIR", ""), // 空=瓦片不缓存
 	}
 	if err := c.validate(); err != nil {
 		return Config{}, err

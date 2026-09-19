@@ -20,12 +20,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"panoalbum/internal/embed"
+	"panoalbum/internal/vecutil"
 )
 
 // cacheKeyLen 取 SHA-256 十六进制的前 N 位作为 cache_key（碰撞概率对本场景可忽略）。
@@ -224,7 +224,7 @@ func (p *PGLabelVectorCache) Save(ctx context.Context, key string, items []Cache
 		}
 		n := i * 5
 		holders = append(holders, fmt.Sprintf("($%d,$%d,$%d,$%d,$%d::vector)", n+1, n+2, n+3, n+4, n+5))
-		args = append(args, key, it.Label, it.Class, it.Group, vectorLiteral(it.Vec))
+		args = append(args, key, it.Label, it.Class, it.Group, vecutil.Literal(it.Vec, -1))
 		labels = append(labels, it.Label)
 	}
 	if _, err := p.Pool.Exec(ctx, `
@@ -245,24 +245,8 @@ func (p *PGLabelVectorCache) Save(ctx context.Context, key string, items []Cache
 	return nil
 }
 
-// vectorLiteral 把向量序列化为 pgvector 文本字面量 "[v1,v2,...]"。
+// 向量字面量序列化已收敛到 internal/vecutil（审查 P2-06）：本包用 vecutil.Literal(v, -1)。
 //
-// 用 'f' 定点格式（不产生科学计数法，pgvector 的输入解析必定接受）；
-// prec=-1 取能精确回读该 float32 的最短十进制表示，保证「存进去 = 读出来」。
-//
-// 为什么不复用 embed.VectorLiteral：后者用 'f' 定点但**只保留 6 位小数**，对图像向量够用，
-// 而这里的缓存值必须与 ORT 真值**逐位相等**（否则「命中缓存」与「现算」两条路径的相似度
-// 会有 <5e-7 的偏差，缓存路径的正确性就无法用 deepEqual 断言了）。故此处追求无损回读。
-func vectorLiteral(v []float32) string {
-	var b strings.Builder
-	b.Grow(len(v) * 12)
-	b.WriteByte('[')
-	for i, f := range v {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(strconv.FormatFloat(float64(f), 'f', -1, 32))
-	}
-	b.WriteByte(']')
-	return b.String()
-}
+// 为什么精度策略是 -1 而非图像向量的 6 位小数：这里的缓存值必须与 ORT 真值**逐位相等**
+// （否则「命中缓存」与「现算」两条路径的相似度会有 <5e-7 的偏差，
+// 缓存路径的正确性就无法用 deepEqual 断言），故追求无损回读。

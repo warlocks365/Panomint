@@ -205,6 +205,8 @@ func (s *Store) CreateRole(ctx context.Context, in RoleInput) (*Role, error) {
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	// 角色权限落库：HasPerm 缓存立即失效（否则同名旧判定最长残留 30s）。
+	s.InvalidatePermCache()
 	return &Role{Name: norm.Name, Description: norm.Description, Perms: norm.Permissions, Users: 0}, nil
 }
 

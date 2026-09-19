@@ -270,8 +270,22 @@ func (h *Handler) RemoveItem(c *gin.Context) {
 }
 
 // ListComments GET /albums/:id/comments
+//
+// 归属校验与 Get 完全同一口径（getAlbumMeta + canManage，无权 404 同形）：
+// 评论是相册的子资源，读评论 == 读相册内容的一部分。少了这道闸，任何持 media:read
+// 的账号都能枚举任意相册 id 的全部评论 —— 既是跨用户读，又把"该相册存在"泄漏成探测判据。
 func (h *Handler) ListComments(c *gin.Context) {
-	comments, err := h.Store.ListComments(c.Request.Context(), c.Param("id"))
+	id := c.Param("id")
+	ownerID, _, err := h.Store.getAlbumMeta(c.Request.Context(), id)
+	if err != nil {
+		writeAlbumLookupError(c, err)
+		return
+	}
+	if !canManage(c, ownerID) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "相册不存在")
+		return
+	}
+	comments, err := h.Store.ListComments(c.Request.Context(), id)
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
@@ -280,9 +294,17 @@ func (h *Handler) ListComments(c *gin.Context) {
 }
 
 // AddComment POST /albums/:id/comments {content, parent_id?} → 201 {id}
+//
+// 归属校验同 ListComments：无权按 Get 的 404 口径（避免存在性预言机）。
+// 修复前这里只校验相册存在就放行 —— 任何持 album:write 的账号可往他人相册写评论。
 func (h *Handler) AddComment(c *gin.Context) {
 	albumID := c.Param("id")
-	if _, _, err := h.Store.getAlbumMeta(c.Request.Context(), albumID); errors.Is(err, ErrNotFound) {
+	ownerID, _, err := h.Store.getAlbumMeta(c.Request.Context(), albumID)
+	if err != nil {
+		writeAlbumLookupError(c, err)
+		return
+	}
+	if !canManage(c, ownerID) {
 		errResp(c, http.StatusNotFound, "NOT_FOUND", "相册不存在")
 		return
 	}
@@ -311,7 +333,11 @@ func (h *Handler) AddComment(c *gin.Context) {
 	}
 }
 
-// DeleteComment DELETE /albums/:id/comments/:cid（本人或 owner/admin 角色）
+// DeleteComment DELETE /albums/:id/comments/:cid
+//
+// 删除权：评论作者 ∪ 相册属主 ∪ owner/admin 角色。后两者由 canManage 覆盖
+// （相册属主身份经 getAlbumMeta 取得）—— 属主对自己相册下的评论必须有内容治理权，
+// 否则他人写入的评论属主永远清不掉。
 func (h *Handler) DeleteComment(c *gin.Context) {
 	albumID, cid := c.Param("id"), c.Param("cid")
 	author, err := h.Store.GetCommentAuthor(c.Request.Context(), albumID, cid)
@@ -323,9 +349,14 @@ func (h *Handler) DeleteComment(c *gin.Context) {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
-	role := c.GetString("role")
-	if c.GetString("user_id") != author && role != "owner" && role != "admin" {
-		errResp(c, http.StatusForbidden, "FORBIDDEN", "仅评论本人或管理员可删除")
+	// 评论存在 ⇒ 相册必存在（album_comments 外键级联），这里取属主只为权限判定。
+	ownerID, _, err := h.Store.getAlbumMeta(c.Request.Context(), albumID)
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	if c.GetString("user_id") != author && !canManage(c, ownerID) {
+		errResp(c, http.StatusForbidden, "FORBIDDEN", "仅评论本人、相册所有者或管理员可删除")
 		return
 	}
 	if err := h.Store.DeleteComment(c.Request.Context(), cid); err != nil {
