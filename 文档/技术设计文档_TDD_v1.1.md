@@ -144,6 +144,10 @@ title: 技术设计文档 (TDD v1.1)
   <Mark bold>设计原则</Mark>：存储与算力分离；成熟库拼装 + 仅 360 引擎自研；一切外部访问 HTTPS；账户/权限独立后台。
 </Paragraph>
 
+<Paragraph id="job000051SingleSource">
+  <Mark bold>设计原则（增补：单一真源）</Mark>（2026-09-19 增补，Job000051）：谓词 / 错误封套 / 游标 / ID 校验 / 向量工具 / 清扫骨架等<Mark bold>横切逻辑必须收敛到唯一实现包</Mark>，禁止同一份约定抄两处（「抄两份 + 注释承诺同步」正是历史上 MediaRef 列清单 7 份副本、5 份各漂各的的漂移根源）。既有实例：<Mark bold>internal/mediascope</Mark>（媒体可见性谓词 + ReadCond 读口径，GET /media、date-histogram、duplicates、tags/:id/media 等共用同一函数）、<Mark bold>internal/httperr</Mark>（统一错误封套）、<Mark bold>internal/cursor</Mark>（游标编解码）、<Mark bold>internal/pgxutil</Mark>（ID 校验等 pgx 约定）、<Mark bold>internal/vecutil</Mark>（向量工具）、<Mark bold>internal/sweep</Mark>（清扫循环骨架）。<Mark bold>治理机制</Mark>：出现第二份副本即由源码守卫测试拒绝（guard test 静态扫描业务包，发现重复实现直接 fail）。
+</Paragraph>
+
 <Divider id="91fD3LgPHCXOqDazOr6kbH" />
 
 <Heading id="AT0Kmlzrv2fCkjDvkVrJBe" level="2">
