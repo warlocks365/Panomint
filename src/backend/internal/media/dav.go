@@ -110,7 +110,7 @@ func (fs *davFS) listChildren(ctx context.Context, folder string) (dirs map[stri
 	dirs = map[string]bool{}
 	readClause, readArgs := mediascope.ReadCond(3, fs.userID, fs.role, "m")
 	rows, err := fs.h.Store.Pool.Query(ctx,
-		fmt.Sprintf(`SELECT m.id, COALESCE(m.filename,''), COALESCE(m.folder_path,''), m.taken_at, m.size_bytes
+		fmt.Sprintf(`SELECT m.id, COALESCE(m.filename,''), COALESCE(m.folder_path,''), m.taken_at, m.filesize
 			FROM media m
 			WHERE m.deleted_at IS NULL AND m.owner_id = $1 AND m.space = 'personal'
 			  AND (%s = $2 OR $2 = '') AND strpos(COALESCE(m.folder_path,''), $2 || CASE WHEN $2='' THEN '' ELSE '/' END) = 1
@@ -158,7 +158,7 @@ func (f davFileInfo) Name() string { return f.name }
 func (fs *davFS) findByPath(ctx context.Context, folder, file string) (id string, size int64, mod time.Time, err error) {
 	readClause, readArgs := mediascope.ReadCond(4, fs.userID, fs.role, "m")
 	err = fs.h.Store.Pool.QueryRow(ctx,
-		fmt.Sprintf(`SELECT m.id, m.size_bytes, COALESCE(m.taken_at, m.created_at)
+		fmt.Sprintf(`SELECT m.id, m.filesize, COALESCE(m.taken_at, m.created_at)
 			FROM media m
 			WHERE m.deleted_at IS NULL AND m.owner_id = $1 AND m.space = 'personal'
 			  AND COALESCE(m.folder_path,'') = $2 AND COALESCE(m.filename,'') = $3 AND %s`, readClause),
