@@ -205,6 +205,31 @@ func (s *Store) FindByEmail(ctx context.Context, email string) (*User, error) {
 	return &u, nil
 }
 
+// FindByEmailCI 大小写不敏感按邮箱查用户（SSO 用）。
+//
+// 为什么单列而不改 FindByEmail：既有本地登录的账号存在性/口令判断都走 = 精确匹配，
+// 改它等于改变登录语义（含枚举面的微妙变化），不该搭 SSO 的车。SSO 的 email 来自
+// IdP claims，各家 IdP 大小写口径不一（UPN 常大写），JIT 开通前用 lower() 对齐，
+// 避免同一邮箱因大小写被判成两个人、重复开通。
+func (s *Store) FindByEmailCI(ctx context.Context, email string) (*User, error) {
+	var u User
+	err := s.Pool.QueryRow(ctx, `
+		SELECT u.id, u.email, COALESCE(u.display_name,''), u.password_hash, r.name, u.status,
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled
+		FROM users u JOIN roles r ON r.id = u.role_id
+		WHERE lower(u.email) = lower($1)`, email).
+		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
+			&u.MFASecret, &u.MFAEnabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrBadCredentials
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
+	return &u, nil
+}
+
 // FindByID 按 ID 查用户（me 端点与二次验证端点）。
 func (s *Store) FindByID(ctx context.Context, id string) (*User, error) {
 	var u User

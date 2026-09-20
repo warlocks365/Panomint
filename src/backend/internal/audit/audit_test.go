@@ -287,6 +287,7 @@ func TestActionRegistryIsValid(t *testing.T) {
 	registry := map[string]string{
 		"ActionAuditRead":     ActionAuditRead,
 		"ActionLogin":         ActionLogin,
+		"ActionSSOLogin":      ActionSSOLogin,
 		"ActionLogout":        ActionLogout,
 		"ActionTokenRotate":   ActionTokenRotate,
 		"ActionMFASetup":      ActionMFASetup,

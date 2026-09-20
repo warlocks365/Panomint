@@ -56,17 +56,27 @@
         <button class="submit-btn" data-testid="login-submit" type="submit" :disabled="loading">
           {{ loading ? '登录中…' : '登录' }}
         </button>
+
+        <!-- SSO 登录（Job000054）：仅当后端配置了 OIDC 才渲染。整页跳转到 IdP，
+             授权后 IdP 带 code/state 跳回本页，由 onMounted 里的回调分支接手。 -->
+        <template v-if="ssoEnabled">
+          <div class="divider"><span>或</span></div>
+          <button class="sso-btn" data-testid="sso-login" type="button" @click="onSSO">
+            使用 SSO 登录
+          </button>
+        </template>
       </form>
     </div>
   </div>
 </template>
 
 <script setup>
-import { nextTick, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { nextTick, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore, errCode, errMessage, MFA_REQUIRED, MFA_INVALID } from '../stores/auth'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 
 const email = ref('')
@@ -77,6 +87,37 @@ const needCode = ref(false)
 const loading = ref(false)
 const errorMsg = ref('')
 const codeInput = ref(null)
+const ssoEnabled = ref(false)
+
+// SSO 回调（Job000054）：IdP 授权后跳回 /login?code=..&state=..。
+// 有回调参数就直奔 token 交换，不渲染表单流程；失败提示与登录失败同区显示。
+onMounted(async () => {
+  const code = typeof route.query.code === 'string' ? route.query.code : ''
+  const state = typeof route.query.state === 'string' ? route.query.state : ''
+  if (code && state) {
+    loading.value = true
+    errorMsg.value = ''
+    try {
+      await auth.loginWithSSO(code, state)
+      router.push('/timeline')
+      return
+    } catch (e) {
+      errorMsg.value = errMessage(e, 'SSO 登录失败，请重试')
+    } finally {
+      loading.value = false
+    }
+  } else if (route.query.error) {
+    // IdP 侧拒绝（access_denied 等）：不细分原因，同形提示。
+    errorMsg.value = 'SSO 登录未完成'
+  }
+  ssoEnabled.value = await auth.fetchSSOEnabled()
+})
+
+// 整页跳转到后端 /auth/sso/oidc/login（302 再到 IdP 授权页）。
+// 不能用 axios/fetch：需要浏览器真实导航以维持 IdP 的会话 cookie。
+function onSSO() {
+  window.location.href = '/auth/sso/oidc/login'
+}
 
 async function onSubmit() {
   errorMsg.value = ''
@@ -207,5 +248,35 @@ async function onSubmit() {
 .submit-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* SSO 按钮（Job000054）：与主按钮同宽，弱化一级感 */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 14px;
+  color: var(--color-text-disabled);
+  font-size: var(--font-size-sm);
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background-color: var(--color-border);
+}
+.sso-btn {
+  width: 100%;
+  padding: 10px 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  cursor: pointer;
+}
+.sso-btn:hover {
+  background-color: var(--color-surface-hover);
 }
 </style>

@@ -92,6 +92,26 @@ export const useAuthStore = defineStore('auth', {
         new_password: next
       })
       return res.data
+    },
+
+    // ---- SSO/OIDC 回调登录（Job000054）----
+    // IdP 带 code/state 跳回 /login 后调用；响应与密码登录同形（tokenPair）。
+    // SSO 失败错误码与密码登录无关，这里原样上抛，由调用方按 code 分支提示。
+    async loginWithSSO(code, state) {
+      const res = await http.post('/auth/sso/oidc', { code, state }, { skipAuthRefresh: true })
+      saveTokens(res.data, true)
+      await this.fetchMe()
+    },
+
+    // SSO 是否启用（GET /auth/sso/config → {enabled}）。失败按未启用处理——
+    // 按钮不出现比出现一个点不动的按钮好。
+    async fetchSSOEnabled() {
+      try {
+        const res = await http.get('/auth/sso/config', { skipAuthRefresh: true })
+        return !!res.data?.enabled
+      } catch {
+        return false
+      }
     }
   }
 })

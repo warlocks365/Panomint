@@ -108,6 +108,15 @@ func main() {
 	r.POST("/auth/refresh", authH.Refresh)
 	r.POST("/auth/logout", authH.Logout)
 
+	// ===== SSO/OIDC（Job000054，契约 v1.3 补录）=====
+	// 通用 OIDC（Keycloak/Authelia/任意标准 IdP），环境变量 SSO_OIDC_* 配置；
+	// 未配置时 login/callback 404 同形（FailClosed），config 返回 {enabled:false}。
+	// 全部公开端点（token 即凭证，与密码登录同形发 JWT）。
+	ssoH := &auth.SSOHandler{Cfg: auth.SSOConfigFromEnv(), Store: authStore, Secret: secret, Audit: auditRec}
+	r.GET("/auth/sso/config", ssoH.ConfigInfo)
+	r.GET("/auth/sso/oidc/login", ssoH.LoginRedirect)
+	r.POST("/auth/sso/oidc", ssoH.Callback)
+
 	// 鉴权端点
 	authed := r.Group("", auth.AuthRequired(secret))
 	authed.GET("/auth/me", authH.Me)

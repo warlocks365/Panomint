@@ -58,6 +58,9 @@ const (
 	// ActionLogin 登录成功（失败登录不写审计：那是 middleware.Logging + 限流的职责，
 	// 且会引入"任何人可写审计表"的滥用面）。
 	ActionLogin = "auth.login"
+	// ActionSSOLogin SSO/OIDC 登录成功（Job000054）。失败不写（同 Login 的取舍）；
+	// detail 记 jit_created 以区分首次开通与再次登录。
+	ActionSSOLogin = "auth.sso.login"
 	// ActionLogout 登出。
 	ActionLogout = "auth.logout"
 	// ActionTokenRotate 令牌轮换（refresh token / agent_token / 分享口令）。

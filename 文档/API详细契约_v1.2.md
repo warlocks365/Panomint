@@ -1,9 +1,20 @@
-# API 详细契约 (v1.2)
+# API 详细契约 (v1.3)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.2 ｜ 日期：2026-09-19\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.3 ｜ 日期：2026-09-20\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.3 变更说明（2026-09-20，Job000054「SSO/OIDC 登录」）
+
+在 v1.2 基础上补录 §2 SSO/OIDC 三端点的完整语义（v1.2 仅有 `POST /auth/sso/oidc` 一行声明）。实现见 `internal/auth/sso.go`：
+
+1. §2 新增 `GET /auth/sso/config` → `{enabled}`（公开；登录页据此决定是否渲染 SSO 按钮）
+2. §2 新增 `GET /auth/sso/oidc/login` → 302 到 IdP 授权地址（带一次性 state；未配置 404 `NOT_CONFIGURED`）
+3. §2 `POST /auth/sso/oidc` 补全语义：请求 `{code, state}` → 响应**与密码登录同形** `{access_token, refresh_token, expires_in, token_type}`；失败对外一律 401 `SSO_FAILED` 同形（state 错/code 无效/token 换不到/userinfo 失败/`email_verified=false` 不分层——防 IdP 探测面），claims 缺 email 单独 400 `EMAIL_REQUIRED`（管理员可诊断的 IdP scope 配置错误）
+4. 接入方式：通用 OIDC（Keycloak/Authelia/任意标准 IdP），环境变量 `SSO_OIDC_ISSUER / SSO_OIDC_CLIENT_ID / SSO_OIDC_CLIENT_SECRET / SSO_OIDC_REDIRECT_URI / SSO_OIDC_SCOPES`（默认 `openid email profile`）；四项必填缺一即整体未启用（FailClosed）
+5. 账户语义：**JIT 自动开通**——首次 SSO 登录按 email（大小写不敏感）自动建号（角色 `member`，`users.password_hash` 写**随机不可知口令**——schema 不变，密码登录对其自然同形失败，管理端「重置密码」可直接转为混合账号）；再次登录复用既有账号；与本地账号体系并存
+6. 审计：`auth.sso.login`（成功才写，detail 记 `jit_created`；失败不写，同密码登录的取舍）
 
 ## v1.2 变更说明（2026-09-19，Job000051「文档失信收口」）
 
@@ -118,9 +129,20 @@ v1.1 声明的 temp_token 两段式二次验证端点**未实现**：后端无 `
 
 刷新令牌：`{ "refresh_token" }` → `{ "access_token" }`
 
+### GET /auth/sso/config
+
+SSO 启用状态（公开，无需登录）→ `{ "enabled": true|false }`。前端登录页据此决定是否渲染 SSO 按钮。
+
+### GET /auth/sso/oidc/login
+
+SSO 登录入口：后端 discovery（`{issuer}/.well-known/openid-configuration`）后 **302** 到 IdP 授权地址（带一次性 state，10 分钟有效）。未配置 404 `NOT_CONFIGURED`（FailClosed，同 callback 口径）。
+
 ### POST /auth/sso/oidc
 
-OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`
+OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`（**与密码登录完全同形**，含 `expires_in`/`token_type`）。
+- 成功路径：校验 state（签名+过期+一次性）→ code 换 token（HTTP Basic 客户端认证）→ userinfo → email 必需且 `email_verified` 不为显式 false → 账号复用或 JIT 开通（member）→ 签发票据 + 建会话 + 审计 `auth.sso.login`
+- 失败：401 `SSO_FAILED` 同形（一切 SSO 失败不分层）；400 `EMAIL_REQUIRED`（IdP 未返回 email，查 scope）；403 `USER_DISABLED`（账号被禁用）
+- 未配置 404 `NOT_CONFIGURED`
 
 ### POST /auth/logout
 
