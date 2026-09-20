@@ -73,6 +73,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useResponsive } from '../composables/useResponsive'
+import { navIcons as icons } from './navIcons'
 import SearchBar from '../components/search/SearchBar.vue'
 
 const route = useRoute()
@@ -133,41 +134,27 @@ const displayName = computed(
 )
 const avatarChar = computed(() => displayName.value.charAt(0).toUpperCase())
 
-const icons = {
-  timeline:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><rect x="2" y="2" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="7" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="12" width="12" height="3" rx="1" stroke="currentColor" stroke-width="1.4"/></svg>',
-  album:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M2 10l3.5-3.5 3 3L11 7l3 3" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
-  person:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><circle cx="8" cy="5.5" r="2.8" stroke="currentColor" stroke-width="1.4"/><path d="M2.5 14c.8-2.6 2.9-4 5.5-4s4.7 1.4 5.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
-  place:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M8 14.5S3 10 3 6.5A5 5 0 0 1 13 6.5C13 10 8 14.5 8 14.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="8" cy="6.5" r="1.8" stroke="currentColor" stroke-width="1.4"/></svg>',
-  tag:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 2h5l7 7-5 5-7-7V2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="5.5" cy="5.5" r="1" fill="currentColor"/></svg>',
-  folder:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 4a1 1 0 0 1 1-1h3.6l1.6 2H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
-  settings:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M12.4 3.6L11 5M5 11l-1.4 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
-  map:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 4l4-1.5 4 1.5 4-1.5v10L10 14l-4-1.5L2 14V4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6 2.5v11M10 4v11" stroke="currentColor" stroke-width="1.4"/></svg>',
-  toolbox:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><rect x="2" y="5.5" width="12" height="8.5" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M6 5.5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5M2 9h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
-  spaces:
-    '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><ellipse cx="8" cy="4" rx="6" ry="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M2 4v4c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2V4M2 8v4c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2V8" stroke="currentColor" stroke-width="1.4"/></svg>'
-}
-
-const navItems = [
-  { label: '时间轴', to: '/timeline', ready: true, icon: icons.timeline },
-  { label: '地图', to: '/map', ready: true, icon: icons.map },
-  { label: '相册', to: '/albums', ready: true, icon: icons.album },
-  { label: '人物', to: '/people', ready: true, icon: icons.person },
-  { label: '地点', ready: false, icon: icons.place },
-  { label: '标签', to: '/tags', ready: true, icon: icons.tag },
-  { label: '空间', to: '/spaces', ready: true, icon: icons.spaces },
-  { label: '文件夹', ready: false, icon: icons.folder },
-  { label: '工具箱', to: '/toolbox', ready: true, icon: icons.toolbox },
-  { label: '设置', to: '/settings', ready: true, icon: icons.settings }
-]
+const navItems = computed(() => {
+  const items = [
+    { label: '时间轴', to: '/timeline', ready: true, icon: icons.timeline },
+    { label: '地图', to: '/map', ready: true, icon: icons.map },
+    { label: '相册', to: '/albums', ready: true, icon: icons.album },
+    { label: '人物', to: '/people', ready: true, icon: icons.person },
+    { label: '地点', ready: false, icon: icons.place },
+    { label: '标签', to: '/tags', ready: true, icon: icons.tag },
+    { label: '空间', to: '/spaces', ready: true, icon: icons.spaces },
+    { label: '文件夹', ready: false, icon: icons.folder },
+    { label: '工具箱', to: '/toolbox', ready: true, icon: icons.toolbox },
+    { label: '设置', to: '/settings', ready: true, icon: icons.settings }
+  ]
+  // 管理后台仅对 owner/admin 显示入口；服务端仍按 admin:users / admin:system 强校验，
+  // 这里只是门面（自定义角色即使带管理权限但角色名不同，也仍可从 /admin 直达，视图内自判 403）。
+  const role = auth.user?.role
+  if (role === 'owner' || role === 'admin') {
+    items.push({ label: '管理', to: '/admin', ready: true, icon: icons.admin })
+  }
+  return items
+})
 
 function onClickOutside(e) {
   if (menuRef.value && !menuRef.value.contains(e.target)) {

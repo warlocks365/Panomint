@@ -92,6 +92,12 @@ const routes = [
         path: 'settings',
         name: 'settings',
         component: () => import('../views/SettingsView.vue')
+      },
+      // Job000052 管理后台（需 admin:users / admin:system 权限，服务端强校验；入口按角色显示）
+      {
+        path: 'admin',
+        name: 'admin',
+        component: () => import('../views/AdminView.vue')
       }
     ]
   },
