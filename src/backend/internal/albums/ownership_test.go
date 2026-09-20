@@ -221,6 +221,10 @@ func TestDeleteCommentAllowsAlbumOwner(t *testing.T) {
 	if !strings.Contains(body, `c.GetString("user_id") != author && !canManage(c, ownerID)`) {
 		t.Fatal("DeleteComment 的拒绝条件不是「非作者且非属主/管理员」：判定集被改窄或改宽")
 	}
+	// 防枚举：拒绝分支不得是 403（存在性预言机），必须与「评论不存在」同形 404。
+	if strings.Contains(body, "StatusForbidden") {
+		t.Fatal("DeleteComment 拒绝分支返回 403：泄漏「该评论存在但你无权」，必须与不存在同形 404")
+	}
 
 	// 自证：修复前的坏版本（只看作者与角色）必须让断言落空。
 	broken := handlerBody(t, "func (h *Handler) DeleteComment(c *gin.Context) {\n"+

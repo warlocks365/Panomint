@@ -356,7 +356,9 @@ func (h *Handler) DeleteComment(c *gin.Context) {
 		return
 	}
 	if c.GetString("user_id") != author && !canManage(c, ownerID) {
-		errResp(c, http.StatusForbidden, "FORBIDDEN", "仅评论本人、相册所有者或管理员可删除")
+		// 防枚举：与「评论不存在」逐字节同形 404 —— 403 会泄漏「该评论存在但你无权」，
+		// 构成存在性预言机（P0 对抗验证残余观察，2026-09-19 收口）。
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "评论不存在")
 		return
 	}
 	if err := h.Store.DeleteComment(c.Request.Context(), cid); err != nil {
