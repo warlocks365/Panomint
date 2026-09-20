@@ -81,6 +81,17 @@ export const useAuthStore = defineStore('auth', {
       const res = await http.post('/auth/mfa/disable', { code: String(code).trim() })
       await this.fetchMe()
       return res.data
+    },
+
+    // ---- 自助改密（Job000034）----
+    // 成功后服务端吊销该用户**全部**会话（含当前这个），所以这里刻意不 fetchMe——
+    // 任何带旧 token 的请求都会 401。调用方负责登出并引导用新口令重新登录。
+    async changePassword(current, next) {
+      const res = await http.put('/user/password', {
+        current_password: current,
+        new_password: next
+      })
+      return res.data
     }
   }
 })

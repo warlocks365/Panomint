@@ -24,6 +24,36 @@
       </dl>
     </section>
 
+    <!-- 修改密码 -->
+    <section class="card">
+      <h2 class="card-title">修改密码</h2>
+      <p class="card-desc">
+        修改成功后，本账号在<strong>所有设备上的登录状态都会失效</strong>，需要用新密码重新登录
+        —— 这样即使旧密码或旧会话曾经泄漏，也会随之作废。
+      </p>
+
+      <p v-if="pwMsg" class="msg" :class="pwMsgKind === 'error' ? 'msg--error' : 'msg--ok'" data-testid="pw-msg">{{ pwMsg }}</p>
+
+      <div class="actions">
+        <label class="inline-field">
+          <span class="inline-label">当前密码</span>
+          <input v-model="pwCurrent" data-testid="pw-current" type="password" autocomplete="current-password" />
+        </label>
+        <label class="inline-field">
+          <span class="inline-label">新密码（至少 8 位）</span>
+          <input v-model="pwNext" data-testid="pw-next" type="password" autocomplete="new-password" />
+        </label>
+        <label class="inline-field">
+          <span class="inline-label">确认新密码</span>
+          <input v-model="pwConfirm" data-testid="pw-confirm" type="password" autocomplete="new-password" />
+        </label>
+        <button class="btn" data-testid="pw-submit" :disabled="pwBusy || !pwCurrent || !pwNext || !pwConfirm" @click="onChangePassword">
+          {{ pwBusy ? '提交中…' : '修改密码' }}
+        </button>
+      </div>
+      <p class="hint">需要输入当前密码才能修改 —— 只凭开着的登录状态不能换锁。</p>
+    </section>
+
     <!-- 二次验证 -->
     <section class="card">
       <div class="card-head">
@@ -129,9 +159,11 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { useAuthStore, errMessage } from '../stores/auth'
+import { useRouter } from 'vue-router'
+import { useAuthStore, errMessage, errCode } from '../stores/auth'
 
 const auth = useAuthStore()
+const router = useRouter()
 
 const setup = ref(null) // setup 响应：{secret, otpauth_url, digits, period}
 const code = ref('')
@@ -169,6 +201,53 @@ function ok(text) {
 function fail(e, fallback) {
   msgKind.value = 'error'
   msg.value = errMessage(e, fallback)
+}
+
+// ---- 修改密码（Job000034）----
+const pwCurrent = ref('')
+const pwNext = ref('')
+const pwConfirm = ref('')
+const pwBusy = ref(false)
+const pwMsg = ref('')
+const pwMsgKind = ref('ok')
+
+async function onChangePassword() {
+  pwMsg.value = ''
+  // 客户端先挡一遍（服务端仍会再校验，这里的目的是少一次无效往返）
+  if (pwNext.value.length < 8) {
+    pwMsgKind.value = 'error'
+    pwMsg.value = '新密码至少 8 位'
+    return
+  }
+  if (pwNext.value !== pwConfirm.value) {
+    pwMsgKind.value = 'error'
+    pwMsg.value = '两次输入的新密码不一致'
+    return
+  }
+  if (pwNext.value === pwCurrent.value) {
+    pwMsgKind.value = 'error'
+    pwMsg.value = '新密码不能与当前密码相同'
+    return
+  }
+  pwBusy.value = true
+  try {
+    await auth.changePassword(pwCurrent.value, pwNext.value)
+    // 服务端已吊销全部会话（含当前会话）——按后端契约立即登出并引导重新登录。
+    // 先让用户看到成功提示再跳转，否则无声无息被踢回登录页会以为出了故障。
+    pwMsgKind.value = 'ok'
+    pwMsg.value = '密码已修改，所有登录状态已失效，即将跳转到登录页…'
+    setTimeout(async () => {
+      await auth.logout() // 会话已被服务端吊销，这里只为清理本地 token；失败不影响
+      router.push({ name: 'login' })
+    }, 1600)
+  } catch (e) {
+    pwMsgKind.value = 'error'
+    pwMsg.value = errCode(e) === 'WRONG_PASSWORD'
+      ? '当前密码不正确'
+      : errMessage(e, '修改失败，请重试')
+  } finally {
+    pwBusy.value = false
+  }
 }
 
 async function onStartSetup() {
@@ -359,7 +438,8 @@ async function onCopy() {
   color: var(--color-text-secondary);
 }
 
-input[type='text'] {
+input[type='text'],
+input[type='password'] {
   height: 38px;
   width: 160px;
   padding: 0 12px;
@@ -369,7 +449,12 @@ input[type='text'] {
   outline: none;
 }
 
-input[type='text']:focus {
+input[type='password'] {
+  width: 200px;
+}
+
+input[type='text']:focus,
+input[type='password']:focus {
   border-color: var(--color-primary);
 }
 
