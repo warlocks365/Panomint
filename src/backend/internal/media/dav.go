@@ -27,10 +27,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,11 +42,12 @@ import (
 	"panoalbum/internal/mediascope"
 )
 
-// errDAVConflict 映射为 WebDAV 405/409 的冲突（已存在/非空等）。
-var errDAVConflict = errors.New("dav: 目标已存在或不为空")
-
-// errDAVNotFound 映射为 404。
-var errDAVNotFound = errors.New("dav: 不存在")
+// DAV 错误一律用标准库哨兵：x/net/webdav 的状态映射只认 os.IsNotExist/IsExist/
+// IsPermission（statusFromErr），自定义 error 会落到错误的默认码（405/500 混乱）。
+var (
+	errDAVNotFound = fs.ErrNotExist // → 404
+	errDAVConflict = fs.ErrExist    // → 405（目标已存在/不为空/禁止操作）
+)
 
 // DAVHandler 构造带 Basic 认证的 WebDAV 挂载点（FileSystem 按登录用户实例化）。
 func DAVHandler(h *Handler, authStore *auth.Store) http.Handler {
@@ -117,6 +120,7 @@ func (fs *davFS) listChildren(ctx context.Context, folder string) (dirs map[stri
 			  AND %s`, "m.folder_path", readClause),
 		append([]any{fs.userID, folder}, readArgs...)...)
 	if err != nil {
+		log.Printf("[dav] listChildren 查询失败（folder=%q）: %v", folder, err)
 		return nil, nil, err
 	}
 	defer rows.Close()
@@ -130,6 +134,7 @@ func (fs *davFS) listChildren(ctx context.Context, folder string) (dirs map[stri
 		var takenAt time.Time
 		var size int64
 		if err := rows.Scan(&id, &fn, &fp, &takenAt, &size); err != nil {
+			log.Printf("[dav] listChildren scan 失败（folder=%q）: %v", folder, err)
 			return nil, nil, err
 		}
 		rest := strings.TrimPrefix(fp, prefix)
@@ -364,11 +369,14 @@ func (g *davGet) Stat() (os.FileInfo, error) {
 	return davFileInfo{name: st.Name(), size: st.Size(), mod: st.ModTime()}, err
 }
 
-// davDir 目录句柄：Readdir 列子项。
+// davDir 目录句柄：Readdir 有状态分页（x/net walkFS 以 count=4096 反复调用直至 io.EOF；
+// 无状态实现会让它无限循环）。
 type davDir struct {
-	fs     *davFS
-	folder string
-	ctx    context.Context
+	fs      *davFS
+	folder  string
+	ctx     context.Context
+	loaded  bool
+	entries []os.FileInfo
 }
 
 func (d *davDir) Close() error               { return nil }
@@ -391,10 +399,15 @@ func (f davFileInfo) ModTime() time.Time { return f.mod }
 func (davFileInfo) IsDir() bool        { return false }
 func (davFileInfo) Sys() any           { return nil }
 
-func (d *davDir) Readdir(count int) ([]os.FileInfo, error) {
+// load 一次性装载子项（排序保证输出稳定）。
+func (d *davDir) load() error {
+	if d.loaded {
+		return nil
+	}
+	d.loaded = true
 	dirs, files, err := d.fs.listChildren(d.ctx, d.folder)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	out := make([]os.FileInfo, 0, len(dirs)+len(files))
 	for name := range dirs {
@@ -404,12 +417,34 @@ func (d *davDir) Readdir(count int) ([]os.FileInfo, error) {
 		fi := f
 		out = append(out, fi)
 	}
-	if count > 0 && len(out) > count {
-		out = out[:count]
+	sort.Slice(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
+	d.entries = out
+	return nil
+}
+
+// Readdir 实现 os.File.Readdir 契约：count<=0 一次全返；count>0 分批，
+// 耗尽返回 io.EOF（x/net walkFS 依赖此契约终止遍历）。
+func (d *davDir) Readdir(count int) ([]os.FileInfo, error) {
+	if err := d.load(); err != nil {
+		return nil, err
 	}
-	if len(out) == 0 {
+	if count <= 0 {
+		if len(d.entries) == 0 {
+			return nil, io.EOF
+		}
+		out := d.entries
+		d.entries = nil
+		return out, nil
+	}
+	if len(d.entries) == 0 {
 		return nil, io.EOF
 	}
+	n := count
+	if n > len(d.entries) {
+		n = len(d.entries)
+	}
+	out := d.entries[:n]
+	d.entries = d.entries[n:]
 	return out, nil
 }
 
