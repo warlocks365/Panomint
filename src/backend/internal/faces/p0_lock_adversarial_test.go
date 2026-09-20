@@ -93,7 +93,9 @@ func checkDetectErrorPathsUnlock(body string) int {
 //  2. 正常路径 Unlock 在输出头拷贝循环**之后**；
 //  3. Lock 与最终 Unlock 之间的每条 return 都必须先 Unlock（漏一条即死锁）。
 func TestAdversarialDetectLockCoverage(t *testing.T) {
-	body := lockFuncBody(t, "detect.go", "func (d *Detector) Detect(")
+	// 锁体在 detectAt（Job000041 重构：Detect/DetectMulti 共用 detectAt，锁结构原样迁移）；
+	// 本守卫钉的是「锁-张量组-Run-拷贝-Unlock」的顺序与错误路径不漏 Unlock，与载体函数名无关。
+	body := lockFuncBody(t, "detect.go", "func (d *Detector) detectAt(")
 
 	iLock := strings.Index(body, "d.mu.Lock()")
 	iSetFor := strings.Index(body, "d.setFor(size)")

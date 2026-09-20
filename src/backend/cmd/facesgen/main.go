@@ -293,7 +293,14 @@ func scanOne(ctx context.Context, opts faces.Options, det *faces.Detector, rec *
 		// 只记"原图本应可用却没用上"的情形；原图本就不存在属正常，不刷日志。
 		log.Printf("  %s %s", m.Filename, src.FallbackReason)
 	}
-	dets, err := det.Detect(img)
+	// 多尺度（Job000041）：开启时长边>640 的图跑「自适应 ∪ 640」双尺度并跨尺度去重，
+	// 兼得小脸与大脸；静态输入模型/小图自动退化为与 Detect 完全一致的旧路径。
+	var dets []faces.Detection
+	if opts.MultiScale {
+		dets, err = det.DetectMulti(img)
+	} else {
+		dets, err = det.Detect(img)
+	}
 	if err != nil {
 		return 0, 0, err
 	}

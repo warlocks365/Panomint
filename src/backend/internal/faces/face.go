@@ -182,11 +182,15 @@ const (
 	DefaultMergeSimilarity = 0.40
 )
 
-// 模型文件名候选（按顺序取第一个存在的文件；兼容 2023mar / 2026may 动态版 / 通用名）。
+// 模型文件名候选（按顺序取第一个存在的文件）。
+//
+// ⚠️ 顺序即部署策略：2026may（动态输入）**优先** —— 多尺度与自适应输入都只在动态
+// 模型下生效（见 multiscale.go / detect.go 的静态判定），2023mar 仅作存量资产的
+// 兼容回退（其静态 [1,3,640,640] 输入无法服务其它边长）。
 var (
 	yuNetCandidates = []string{
-		"face_detection_yunet_2023mar.onnx",
 		"face_detection_yunet_2026may.onnx",
+		"face_detection_yunet_2023mar.onnx",
 		"face_detection_yunet.onnx",
 	}
 	sFaceCandidates = []string{
@@ -244,6 +248,10 @@ type Options struct {
 	NMSThreshold  float64 // 检测 NMS IoU 阈值（0=默认 0.3）
 	MinFacePx     int     // 最小人脸边长（0=默认 24）
 	MergeSim      float64 // 聚类合并余弦阈值（0=默认 0.40）
+	// MultiScale 多尺度检测（Job000041）：长边>640 的图跑「自适应尺寸 ∪ 640」两尺度
+	// 并跨尺度 IoU 去重，兼得小脸与大脸（benchmark 见 multiscale.go 头注释）。
+	// 环境变量 FACES_MULTISCALE（空=默认开；false/0=关）；静态输入模型自动退化为单尺度。
+	MultiScale bool
 
 	// MediaRoot 原图根目录：MediaItem.Path 相对它解析。空 = 不使用原图，直接用 LG 缩略图。
 	//
@@ -264,6 +272,7 @@ type Options struct {
 //	FACE_DEVICE_ID / FACE_THREADS / FACE_GPU_MEM_MB
 //	FACE_INPUT_SIZE / FACE_CONF / FACE_NMS / FACE_MIN_PX / FACE_MERGE_SIM
 //	FACE_INPUT_MAX   自适应检测输入边长上限（默认 1280；设 640 完全退化回旧行为）
+//	FACES_MULTISCALE 多尺度检测（空=默认开；false/0=关），仅动态输入模型生效
 func OptionsFromEnv() Options {
 	lib := os.Getenv("FACE_LIB")
 	if lib == "" {
@@ -286,7 +295,20 @@ func OptionsFromEnv() Options {
 	// 原图根目录：与索引/缩略图共用同一个 MEDIA_ROOT（回退链见 LoadScanImage）。
 	// 未设置 = 不使用原图，扫描退化为只用 LG 缩略图（即旧行为）。
 	o.MediaRoot = os.Getenv("MEDIA_ROOT")
+	// 多尺度默认开（Job000041 benchmark 裁决：+32% 合影召回，后台扫描耗时可接受）；
+	// 显式 false/0 才关 —— 空串与"没设过"无法区分，布尔只能这样表达"默认开"。
+	o.MultiScale = parseBoolDefaultTrue(os.Getenv("FACES_MULTISCALE"))
 	return o
+}
+
+// parseBoolDefaultTrue ""/true/1/on/y/yes → true；false/0/off/n/no → false。
+// 非法值按 true（默认开），并交由调用方日志关注 —— 静默关功能比静默开更危险。
+func parseBoolDefaultTrue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "off", "n", "no":
+		return false
+	}
+	return true
 }
 
 // ModelDirFromEnv 解析模型目录：优先 FACE_MODEL_DIR，其次仓库内默认位置。

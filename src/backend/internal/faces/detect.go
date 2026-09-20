@@ -184,7 +184,42 @@ func (d *Detector) Detect(img image.Image) ([]Detection, error) {
 	}
 	size := resolveInputSize(d.opts.InputSize, d.staticSize, srcLong,
 		DefaultInputSize, d.opts.InputMax)
+	return d.detectAt(size, img)
+}
 
+// DetectMulti 多尺度检测（Job000041）：按 multiSizes 规划跑一个或多个输入边长，
+// 各尺度结果都已映射回**图源坐标**，跨尺度 IoU 去重后返回并集。
+//
+// 单尺度场景（未开启多尺度 / 静态模型 / 小图）与 Detect 完全同路径——
+// multiSizes 返回单元素列表时二者行为逐字节一致（mergeScales 单尺度过车=恒等，
+// 仍保留检测器内部 NMS 的结果）。
+func (d *Detector) DetectMulti(img image.Image) ([]Detection, error) {
+	b := img.Bounds()
+	srcLong := b.Dx()
+	if b.Dy() > srcLong {
+		srcLong = b.Dy()
+	}
+	adaptive := resolveInputSize(d.opts.InputSize, d.staticSize, srcLong,
+		DefaultInputSize, d.opts.InputMax)
+	sizes := multiSizes(adaptive, d.staticSize, d.opts.MultiScale)
+	if len(sizes) == 1 {
+		return d.detectAt(sizes[0], img)
+	}
+	byScale := make([][]Detection, 0, len(sizes))
+	for _, s := range sizes {
+		dets, err := d.detectAt(s, img)
+		if err != nil {
+			return nil, err
+		}
+		byScale = append(byScale, dets)
+	}
+	return mergeScales(byScale), nil
+}
+
+// detectAt 在给定输入边长下跑一遍检测（letterbox → 推理 → 解码 → minpx 过滤），
+// 返回**源图坐标**结果。Detect/DetectMulti 的唯一执行体。
+func (d *Detector) detectAt(size int, img image.Image) ([]Detection, error) {
+	b := img.Bounds()
 	px, lb := LetterboxPixels(img, size)
 
 	// 会话与输出张量被复用：持锁取张量组、完成 Run 并拷贝输出，随后即可解锁解码。
