@@ -424,7 +424,7 @@ function bucketEnd(key) {
 }
 
 .tl-bar.on {
-  background: #2563eb;
+  background: var(--color-primary);
 }
 
 .tl-empty,

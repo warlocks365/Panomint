@@ -519,7 +519,7 @@ onBeforeUnmount(() => {
 }
 
 .stage-tip {
-  color: #a8acb3;
+  color: var(--color-text-disabled);
   font-size: var(--font-size-md);
 }
 
@@ -664,7 +664,7 @@ onBeforeUnmount(() => {
   width: 44px;
   border: none;
   background: transparent;
-  color: #a8acb3;
+  color: var(--color-text-disabled);
   display: flex;
   align-items: center;
   justify-content: center;

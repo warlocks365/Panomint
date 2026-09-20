@@ -244,7 +244,7 @@ const cardStyle = computed(() => {
 }
 
 .hc-mini.active {
-  border-color: #2563eb;
+  border-color: var(--color-primary);
 }
 
 .hc-mini img {

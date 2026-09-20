@@ -193,7 +193,7 @@ function onUpload(e) {
 }
 
 .ip-shape.active {
-  border: 2px solid #2563eb;
+  border: 2px solid var(--color-primary);
 }
 
 .ip-colors {
@@ -211,7 +211,7 @@ function onUpload(e) {
 }
 
 .ip-color.active {
-  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #2563eb;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--color-primary);
 }
 
 .ip-presets {
@@ -232,7 +232,7 @@ function onUpload(e) {
 }
 
 .ip-preset.active {
-  border: 2px solid #2563eb;
+  border: 2px solid var(--color-primary);
 }
 
 .ip-preset img {
@@ -259,7 +259,7 @@ function onUpload(e) {
 }
 
 .ip-upload.active {
-  border-color: #2563eb;
+  border-color: var(--color-primary);
   color: #0f172a;
 }
 
@@ -269,7 +269,7 @@ function onUpload(e) {
 
 .ip-err {
   font-size: 11px;
-  color: #dc2626;
+  color: var(--color-danger);
   margin-top: 4px;
 }
 </style>

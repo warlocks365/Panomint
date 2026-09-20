@@ -839,7 +839,7 @@ onBeforeUnmount(() => {
 }
 
 .ms-box:focus-within {
-  border-color: #2563eb;
+  border-color: var(--color-primary);
 }
 
 .ms-input {
@@ -861,8 +861,8 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   border: none;
   border-radius: 50%;
-  background: #e2e4e9;
-  color: #646a73;
+  background: var(--color-border);
+  color: var(--color-text-secondary);
   padding: 0;
 }
 
@@ -922,7 +922,7 @@ onBeforeUnmount(() => {
 }
 
 .ms-hint--err {
-  color: #dc2626;
+  color: var(--color-danger);
 }
 
 .mt-title {
@@ -939,7 +939,7 @@ onBeforeUnmount(() => {
 
 .mt-err {
   font-size: 12px;
-  color: #dc2626;
+  color: var(--color-danger);
 }
 
 .mt-icon-btn {
