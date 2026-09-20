@@ -45,6 +45,36 @@ export function publicHlsUrl(token, id, password = '') {
   return withPassword(`${API_BASE}/public/shares/${token}/media/${id}/hls/master.m3u8`, password)
 }
 
+// Job000053：公开侧原文件下载（仅 allow_download=true 的分享可用，服务端 403 同形拦截）。
+// fetch + X-Share-Password 头（密码不进 URL/日志）→ blob → ObjectURL 触发浏览器保存。
+// 文件名优先取 Content-Disposition（filename* / filename），回落调用方传入名。
+// 已知限制：整文件入内存；超大视频待流式方案。
+export async function downloadPublicMedia(token, id, password = '', fallbackName = '') {
+  const res = await fetch(`${API_BASE}/public/shares/${token}/media/${id}/download`, {
+    headers: passwordHeaders(password)
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw { status: res.status, code: body?.error?.code || '', message: body?.error?.message || '' }
+  }
+  const blob = await res.blob()
+  const cd = res.headers.get('Content-Disposition') || ''
+  let name = fallbackName || id
+  const star = cd.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  const plain = cd.match(/filename\s*=\s*"?([^";]+)"?/i)
+  if (star) name = decodeURIComponent(star[1])
+  else if (plain) name = plain[1]
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
+  return name
+}
+
 // 缩略图 blob → ObjectURL（带缓存与去重，参照 timeline/mediaLoader.js 模式）
 const cache = new Map()
 const pending = new Map()

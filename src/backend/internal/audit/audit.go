@@ -92,6 +92,9 @@ const (
 	ActionShareCreate = "share.create"
 	// ActionShareRevoke 撤销分享链接。
 	ActionShareRevoke = "share.revoke"
+	// ActionShareDownload 公开侧原文件下载（Job000053）。
+	// 只记 allow_download=true 的兑现下载；占位拒绝（403）不写 —— 拒绝是常态防御不是事件。
+	ActionShareDownload = "share.download"
 
 	// ActionMediaDelete 移入回收站。
 	ActionMediaDelete = "media.delete"

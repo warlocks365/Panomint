@@ -298,6 +298,7 @@ func TestActionRegistryIsValid(t *testing.T) {
 		"ActionRoleChange":    ActionRoleChange,
 		"ActionShareCreate":   ActionShareCreate,
 		"ActionShareRevoke":   ActionShareRevoke,
+		"ActionShareDownload": ActionShareDownload,
 		"ActionMediaDelete":   ActionMediaDelete,
 		"ActionMediaPurge":    ActionMediaPurge,
 		"ActionMediaRestore":  ActionMediaRestore,

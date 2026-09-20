@@ -50,7 +50,7 @@
     <template v-else-if="phase === 'ready'">
       <header class="share-header">
         <h1 class="share-title">{{ share.title || '全景相册分享' }}</h1>
-        <p class="share-meta">{{ share.items.length }} 项 · 仅支持在线浏览</p>
+        <p class="share-meta">{{ share.items.length }} 项{{ share.allow_download ? ' · 已开放下载' : ' · 仅支持在线浏览' }}</p>
       </header>
 
       <div v-if="!share.items.length" class="center-box">
@@ -81,8 +81,9 @@
             </svg>
             {{ durationLabel(m) }}
           </span>
-          <span v-if="is360(m)" class="badge pano-badge">360</span>
-        </button>
+        <span v-if="is360(m)" class="badge pano-badge">360</span>
+        <ShareDownloadBtn :token="token" :id="m.id" :filename="m.filename" :password="password" :allowed="!!share.allow_download" />
+      </button>
       </div>
 
       <!-- 照片大图 -->
@@ -142,6 +143,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { useRoute } from 'vue-router'
 import Hls from 'hls.js'
 import { fetchPublicShare, loadPublicThumb, loadPublicViewerUrl, measureShareBandwidth, publicHlsUrl, publicThumbUrl } from '../components/shares/publicApi'
+import ShareDownloadBtn from '../components/shares/ShareDownloadBtn.vue'
 import Player360 from '../components/player/360Player.vue'
 
 const route = useRoute()
@@ -440,7 +442,6 @@ onBeforeUnmount(() => {
   font-family: var(--font-family);
   padding-bottom: 40px;
 }
-
 .center-box {
   min-height: 70vh;
   display: flex;
@@ -450,7 +451,6 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 24px;
 }
-
 .tip {
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);

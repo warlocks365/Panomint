@@ -20,6 +20,8 @@ import (
 type Handler struct {
 	Store  *Store
 	HLSDir string // HLS 输出根目录（./data/hls）
+	// MediaRoot 媒体原文件根目录（下载兑现用；与 media.Handler.MediaRoot 同源，main.go 注入）。
+	MediaRoot string
 	// Audit 审计写入器；可为 nil（测试/灰度时静默跳过，见 record）。
 	Audit *audit.Recorder
 }
@@ -278,6 +280,8 @@ func (h *Handler) PublicGet(c *gin.Context) {
 		"title":            sh.Title,
 		"items":            items,
 		"require_password": sh.PasswordHash != nil && *sh.PasswordHash != "",
+		// 下载开关（Job000053）：前端据此渲染下载入口；is_wechat 分享创建时已被强制 false。
+		"allow_download": sh.AllowDownload,
 	})
 }
 
@@ -394,8 +398,76 @@ func (h *Handler) PublicHLS(c *gin.Context) {
 	c.File(full)
 }
 
-// PublicDownload 原文件下载占位：公开路由禁止提供原文件（PRD 核心约束）。
-// allow_download=true 的分享本期也不开放，统一 403，P1 再实现签名下载。
+// PublicDownload GET /public/shares/:token/media/:id/download（Job000053 兑现）。
+//
+// 语义：仅 allow_download=true 且非微信 H5 的分享提供原文件流（attachment）。
+// allow_download=false / is_wechat → 403 NOT_SUPPORTED（与占位期同形文案，不泄露分享存在性之外的信息）。
+//
+// 顺序是安全口径的一部分（与同文件 Thumb/HLS 同模式）：
+// guardPublic（token/口令/过期/max_views）→ 下载开关 → MediaInShare 归属 → 文件解析 →
+// 配额记账（RecordAccess，下载计一次访问，与 max_views 共用同一配额口径）→ 审计 → 出流。
+// 归属判定必须在文件解析之前 —— 否则「不属于分享的媒体 id」会变成文件系统存在性探测。
 func (h *Handler) PublicDownload(c *gin.Context) {
-	errResp(c, http.StatusForbidden, "NOT_SUPPORTED", "公开分享暂不支持原文件下载")
+	sh := h.guardPublic(c)
+	if sh == nil {
+		return
+	}
+	// 微信 H5（is_wechat）按 PRD 核心约束不给原文件。创建时已被强制 allow_download=false，
+	// 这里再拦一道：防历史脏数据/绕开创建入口直接改库的情况。
+	if sh.IsWechat || !sh.AllowDownload {
+		errResp(c, http.StatusForbidden, "NOT_SUPPORTED", "该分享未开放原文件下载")
+		return
+	}
+	ctx := c.Request.Context()
+	mediaID := c.Param("id")
+	ok, err := h.Store.MediaInShare(ctx, sh, mediaID)
+	if errors.Is(err, ErrTargetLost) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "分享目标已删除")
+		return
+	}
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	if !ok {
+		errResp(c, http.StatusForbidden, "FORBIDDEN", "该媒体不属于此分享")
+		return
+	}
+	rel, filename, err := h.Store.MediaOriginal(ctx, mediaID)
+	if errors.Is(err, ErrTargetLost) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "分享目标已删除")
+		return
+	}
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	// 路径解析与 internal/media.ResolvePath 同语义：绝对路径直用；相对路径挂 MediaRoot。
+	abs := rel
+	if !filepath.IsAbs(rel) {
+		root := h.MediaRoot
+		if root == "" {
+			root = "./data/media"
+		}
+		abs = filepath.Join(root, filepath.FromSlash(rel))
+	}
+	st, err := os.Stat(abs)
+	if err != nil || st.IsDir() {
+		errResp(c, http.StatusNotFound, "FILE_MISSING", "文件不在磁盘上")
+		return
+	}
+	// 配额：下载计一次访问（与 max_views 共用同一口径；RecordAccess 同事务写日志+原子自增）。
+	if err := h.Store.RecordAccess(ctx, sh.ID, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "LOG_FAILED", "记录访问失败", err)
+		return
+	}
+	// 审计：动作 share.download；detail 只记非敏感元信息（share token 绝不进 detail，
+	// 目标用 share_id UUID）。键名避开 RedactDetail 敏感子串。
+	h.record(c, audit.ActionShareDownload, audit.TargetShare, sh.ID,
+		map[string]any{"media_id": mediaID, "bytes": st.Size()})
+	name := mediaID
+	if filename != nil && *filename != "" {
+		name = *filename
+	}
+	c.FileAttachment(abs, name)
 }

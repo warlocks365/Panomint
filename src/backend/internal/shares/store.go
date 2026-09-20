@@ -220,6 +220,23 @@ func (s *Store) TargetOwnedBy(ctx context.Context, kind, targetID, userID string
 // 注释互相引用，却没有一处是权威。实测后果是 GET /public/shares/:token（kind=media）
 // 在任意一行 filename/folder_path 为 NULL 时整响应 500。
 
+// MediaOriginal 取媒体原文件的库内相对路径与展示文件名（下载兑现用）。
+// 与 internal/media 的 Download 查询同口径（path, filename / deleted_at IS NULL）；
+// 查不到返回 ErrTargetLost —— 与 MediaInShare 的语义对齐（分享目标已消失 → 404 同形）。
+func (s *Store) MediaOriginal(ctx context.Context, mediaID string) (string, *string, error) {
+	var rel string
+	var filename *string
+	err := s.Pool.QueryRow(ctx,
+		`SELECT path, filename FROM media WHERE id = $1 AND deleted_at IS NULL`, mediaID).Scan(&rel, &filename)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, ErrTargetLost
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	return rel, filename, nil
+}
+
 // ListItems 分享内容：media 单条 / album 全量（smart 由 albums.Store 实时计算）。
 func (s *Store) ListItems(ctx context.Context, sh *Share) ([]media.MediaRef, error) {
 	if sh.Kind == "album" {

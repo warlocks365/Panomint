@@ -208,7 +208,7 @@ func main() {
 	authed.DELETE("/albums/:id/comments/:cid", permAlbumWrite, albumsH.DeleteComment)
 
 	// Stage 2 分享（种子无 share:write，member 角色持 share:create，owner/admin 由 share:* 通配覆盖）
-	sharesH := &shares.Handler{Store: &shares.Store{Pool: pool, Albums: &albums.Store{Pool: pool}}, HLSDir: cfg.HLSDir, Audit: auditRec}
+	sharesH := &shares.Handler{Store: &shares.Store{Pool: pool, Albums: &albums.Store{Pool: pool}}, HLSDir: cfg.HLSDir, MediaRoot: cfg.MediaRoot, Audit: auditRec}
 	permShare := auth.RequirePerm(authStore, "share:create")
 	authed.POST("/shares", permShare, sharesH.Create)
 	authed.GET("/shares", permShare, sharesH.List)
@@ -278,7 +278,7 @@ func main() {
 	r.GET("/public/shares/:token", sharesH.PublicGet)
 	r.GET("/public/shares/:token/media/:id/thumb", sharesH.PublicThumb)
 	r.GET("/public/shares/:token/media/:id/hls/*file", sharesH.PublicHLS)
-	r.GET("/public/shares/:token/media/:id/download", sharesH.PublicDownload) // 占位：统一 403，P1 实现
+	r.GET("/public/shares/:token/media/:id/download", sharesH.PublicDownload) // Job000053：allow_download=true 兑现原文件（含审计+访问配额）
 
 	// Phase 4 P1：分享页 OG 封面（服务端渲染最简 HTML；社交抓取器不执行 JS，只看初始 HTML）。
 	// 绝对 URL 由请求 Host 动态拼出，不写死域名；受密码保护的分享只返回中性卡片（不泄露标题与缩略图）。
