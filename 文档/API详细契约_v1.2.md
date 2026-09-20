@@ -730,25 +730,32 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 ---
 
 
-## 16. WebDAV（媒体直读直写）
+## 16. WebDAV（媒体直读直写，Job000055 落地）
 
-> 对应 PRD §1.4「WebDAV 直出媒体」。支持通过 WebDAV 协议直接挂载为文件系统，用于 PC 端 SMB 替代或第三方工具直读。
+> 对应 PRD §1.4「WebDAV 直出媒体」。支持通过 WebDAV 协议直接挂载为文件系统，用于 PC 端 SMB 替代或第三方工具直读。**2026-09-20 落地（用户裁决：完整读写）**，实现 `internal/media/dav.go`（`x/net/webdav`）。
+
+**树形与语义（v1）**：
+- 挂载点 `/dav/`；树 = **个人空间媒体库的 folder_path 目录树**（相册/标签不进 DAV——它们是虚拟组织，DAV 是文件夹语义）。根 = 个人库根。
+- `GET /dav/:path` 下载原文件（owner + 未删除 + mediascope 读口径双保险）
+- `PUT /dav/:path` 整文件上传 → 与 HTTP 上传**同一 ingest 管线**（去重/缩略图队列/EXIF）；`folder_path` 取自 URL 目录；**不支持覆盖**（已存在 → 405，先 DELETE 再 PUT）
+- `DELETE /dav/:path` 软删入回收站（与网页端同语义，可恢复；purge 走网页端）
+- `MOVE /dav/:path` 文件=改 `folder_path`/`filename`（纯组织变更不动存储实体）；目录=前缀批量改；目标已存在 → 405
+- `MKCOL /dav/:path` **虚拟目录**：folder_path 由 media 行派生、无独立目录表 → 恒 201，首次 PUT 进该目录时显形（已知限制，登记簿）
+- `PROPFIND` 标准属性（size/mtime/isplaycollection）；EXIF 自定义属性 v1 不提供
+- 不支持：随机写（仅整文件 PUT，契约明示）、`COPY`、跨用户/共享空间（v1 仅个人库）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/dav/` | 列目录（按 folder\_path 映射） |
 | GET | `/dav/:path` | 下载原文件（权限校验） |
 | PUT | `/dav/:path` | 上传文件（触发索引流水线） |
-| PROPFIND | `/dav/:path` | 获取属性（EXIF/大小/时间） |
+| PROPFIND | `/dav/:path` | 获取属性 |
 | MOVE | `/dav/:path` | 移动/重命名（更新 folder\_path） |
 | DELETE | `/dav/:path` | 删除（软删入回收站） |
-| MKCOL | `/dav/:path` | 创建目录 |
+| MKCOL | `/dav/:path` | 创建目录（虚拟，见上） |
 
-- 认证：HTTP Basic Auth（独立后台账户或应用密码）
-
-- 中间件：Go 标准库 `golang.org/x/net/webdav` 或 `sablier`
-
-- 限制：不支持随机写（仅整文件 PUT）；大文件断点续传用 `Content-Range`
+- 认证：HTTP Basic Auth（邮箱 + 主密码 或 **应用密码** `users.app_password_hash`——DDL 预留列的首个消费方）；不经 JWT
+- 前端无独立 UI；挂载地址 = `https://<domain>/dav/`（设置页可后续加展示）
 
 
 ---

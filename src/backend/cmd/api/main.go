@@ -146,6 +146,15 @@ func main() {
 	permRead := auth.RequirePerm(authStore, "media:read")
 	permWrite := auth.RequirePerm(authStore, "media:write")
 
+	// ===== WebDAV 直读直写（Job000055，契约 §16）=====
+	// 树=个人空间 folder_path 目录树；Basic 认证（主密码或应用密码），不经 JWT。
+	// 方法集超出 gin 的 Any（PROPFIND/MKCOL/MOVE/LOCK…），逐方法注册并整体包给 webdav.Handler 分发。
+	davHandler := media.DAVHandler(mediaH, authStore)
+	for _, m := range []string{"GET", "HEAD", "PUT", "DELETE", "PROPFIND", "MKCOL", "MOVE", "OPTIONS", "LOCK", "UNLOCK"} {
+		r.Handle(m, "/dav", gin.WrapH(davHandler))
+		r.Handle(m, "/dav/*path", gin.WrapH(davHandler))
+	}
+
 	authed.GET("/media", permRead, mediaH.List)
 	// Phase 3 媒体端点（静态段 trash 优先于 :id，gin 自动处理优先级）
 	authed.GET("/media/trash", permRead, mediaH.Trash)

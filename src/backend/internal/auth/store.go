@@ -230,6 +230,19 @@ func (s *Store) FindByEmailCI(ctx context.Context, email string) (*User, error) 
 	return &u, nil
 }
 
+// AppPasswordHash 读取用户的应用密码哈希（WebDAV/第三方客户端用，Job000055）。
+// 未设置返回空串（调用方回落主密码）。app_password_hash 是 DDL 早为"API 专用
+// 应用密码"预留的列——WebDAV Basic 认证是它的第一个消费方。
+func (s *Store) AppPasswordHash(ctx context.Context, userID string) (string, error) {
+	var hash string
+	err := s.Pool.QueryRow(ctx,
+		`SELECT COALESCE(app_password_hash,'') FROM users WHERE id = $1`, userID).Scan(&hash)
+	if err != nil {
+		return "", err
+	}
+	return hash, nil
+}
+
 // FindByID 按 ID 查用户（me 端点与二次验证端点）。
 func (s *Store) FindByID(ctx context.Context, id string) (*User, error) {
 	var u User

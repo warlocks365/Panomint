@@ -339,6 +339,22 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 		Evidence:   "media/upload.go:393-410。",
 	},
 
+	// ---- WebDAV（Job000055，契约 §16）：Basic 认证后即"该用户的文件系统"，行为等价于 SMB 挂载 ----
+
+	regKey("internal/media/dav.go", "FROM media"): {
+		UserFacing: true, // 检出内容经 GET/PROPFIND 流给**已认证本人**——等价于下载自己的文件
+		Reason: "WebDAV 读路径（listChildren/findByPath/folderExists/OpenFile）：可见性判定 = Basic 认证身份（fs.userID 来自认证中间件）" +
+			"AND m.owner_id = $1 AND m.space='personal' AND m.deleted_at IS NULL，另叠加本包 ReadCond 双保险；" +
+			"绝不返回他人媒体——owner 谓词写死在查询里，非可选。",
+		Evidence: "media/dav.go: listChildren（ReadCond(3,…)）/findByPath（ReadCond(4,…)）/OpenFile；DAVHandler 的 Basic 认证在进 FS 之前完成。",
+	},
+	regKey("internal/media/dav.go", "UPDATE media"): {
+		UserFacing: false,
+		Reason: "WebDAV 写路径（RemoveAll 目录软删 / Rename 组织变更）：只回写 folder_path/filename/deleted_at，" +
+			"不 SELECT 返回媒体内容；owner 限定 fs.userID（Basic 认证身份），跨用户写不可能。",
+		Evidence: "media/dav.go: RemoveAll（UPDATE media SET deleted_at）/Rename（UPDATE media SET folder_path…）；文件级软删复用 Store.SoftDelete（已在 write.go 登记）。",
+	},
+
 	// ---- 归属判定原语 / 布尔判定：判定的输入端，本身不交付媒体内容 ----
 
 	regKey("internal/media/write.go", "FROM media"): {
