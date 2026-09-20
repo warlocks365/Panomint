@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"panoalbum/internal/ffmpeg"
 	"panoalbum/internal/queue"
 )
 
@@ -294,6 +296,27 @@ func (x *Indexer) indexOne(ctx context.Context, ownerID string, e FileEntry) (En
 	mediaID, err := x.insertMedia(ctx, ownerID, e, m)
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("写 media: %w", err)
+	}
+
+	// Job000056：群晖 @eaDir sidecar 缩略图复用（仅新插入走到这里；duplicate 已 return）。
+	// 三档齐全 → 本地 ffmpeg 转 WebP 落位 + 与 worker 同一 UPDATE 落库 → 不入队；
+	// 缺档/未配 THUMB_DIR/转码或落库失败 → 保守回落下方队列生成（不留半成品）。
+	if td := eaThumbDir(); td != "" {
+		if thumbs := FindEAThumbs(e.Path); thumbs != nil {
+			if cerr := ConvertEAThumbs(ctx, td, mediaID, thumbs); cerr == nil {
+				_, uerr := x.db.Exec(ctx,
+					`UPDATE media SET thumbnail_sm=$1, thumbnail_md=$2, thumbnail_lg=$3, updated_at=now()
+					 WHERE id=$4`,
+					filepath.Base(eaThumbPath(td, mediaID, ffmpeg.ThumbSM)),
+					filepath.Base(eaThumbPath(td, mediaID, ffmpeg.ThumbMD)),
+					filepath.Base(eaThumbPath(td, mediaID, ffmpeg.ThumbLG)),
+					mediaID)
+				if uerr == nil {
+					return OutcomeInserted, nil
+				}
+				// 落库失败：已落盘的 WebP 会被 worker 整组覆盖，无需清理；回落入队。
+			}
+		}
 	}
 
 	// 缩略图任务入队（Worker 异步生成三档 WebP）
