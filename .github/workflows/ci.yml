@@ -112,3 +112,54 @@ jobs:
 
       - name: 确认产物
         run: ls -lh dist | head -20
+
+  # Job000057：质量门——三道仓库级守卫（纯 stdlib Python，无额外依赖）。
+  # 这是"规则进机器"的落点：P0 视觉规则/前端组织/反代两组前缀，任何一路漂移即红。
+  quality-gates:
+    name: quality gates（三道守卫）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: P0 规则守卫（emoji 图标/紫粉渐变/AI 模板味/硬编码颜色棘轮）
+        run: python scripts/p0_guard.py
+
+      - name: 前端组织守卫（行数棘轮 + 图标库锁定）
+        run: python scripts/frontend_org_guard.py
+
+      - name: 反代两组前缀核验（后端路由/前端 SPA/nginx 三方真源比对）
+        run: python scripts/verify_reverse_proxy.py
+
+  # Job000057：算力节点 agent 三平台编译 smoke（T6.2「Win/Linux/macOS 三平台」
+  # 的交付证据——Go 交叉编译即三平台，矩阵钉死不许悄悄破窗）。
+  nodeagent-matrix:
+    name: nodeagent 跨平台编译（windows/linux/darwin）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [{goos: windows, ext: .exe}, {goos: linux, ext: ""}, {goos: darwin, ext: ""}]
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/backend/go.mod
+          cache-dependency-path: src/backend/go.sum
+
+      - name: GOOS=${{ matrix.target.goos }} 编译
+        env:
+          GOOS: ${{ matrix.target.goos }}
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o "/tmp/nodeagent${{ matrix.target.ext }}" ./cmd/nodeagent
+
+      - name: 确认产物
+        run: file "/tmp/nodeagent${{ matrix.target.ext }}" && ls -lh "/tmp/nodeagent${{ matrix.target.ext }}"
