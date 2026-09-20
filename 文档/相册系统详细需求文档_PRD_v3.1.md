@@ -1958,6 +1958,13 @@ title: 相册系统详细需求文档 (PRD v3.1)
   实现：RBAC 表；队列 BullMQ/Redis；审计 `audit_log`。
 </BulletedList>
 
+<BulletedList id="job052PlanNote20260920">
+  规划状态（2026-09-20 增补）：管理端点（`/admin/*`，用户/角色/任务队列）后端已交付（Job000016）；
+  **前端管理界面（AdminView）为计划内开发项 Job000052**；同批纳入后续正常开发计划的还有
+  **Job000053 公开分享下载兑现**（`allow_download=true` 时公开侧真实下载，现为占位 403）与
+  **Job000054 SSO/OIDC**（Keycloak/Authelia，见 §6.1 登录）。三项已经用户裁决确认为正式规划，见开发任务计划 Phase 5。
+</BulletedList>
+
 <BulletedList id="eWxJoofBK5qAmH9gMOfEuc">
   参考：管理控制台（索引重建、共享空间管理、用户/角色）采用<Mark bold>独立后台模式</Mark>（参考 PhotoPrism 多用户/管理控制台，不依赖 DSM）。
 </BulletedList>
