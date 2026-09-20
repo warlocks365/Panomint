@@ -1,0 +1,15 @@
+{
+ "components\\map\\MapHoverCard.vue": 7,
+ "components\\map\\MapIconPicker.vue": 14,
+ "components\\map\\MapItemList.vue": 5,
+ "components\\map\\MapTimeline.vue": 23,
+ "components\\player\\360Player.vue": 4,
+ "components\\shares\\ShareManageList.vue": 1,
+ "components\\viewer\\MediaViewer.vue": 9,
+ "styles\\tokens.css": 13,
+ "views\\MapView.vue": 19,
+ "views\\PlayerView.vue": 6,
+ "views\\SettingsView.vue": 6,
+ "views\\SharePublicView.vue": 2,
+ "views\\TagsView.vue": 1
+}
