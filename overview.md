@@ -38,7 +38,7 @@
 | AI 推理 | **Go + CGO + ONNX Runtime**（无 Python 服务） | ORT 1.29.0；`github.com/yalue/onnxruntime_go` |
 | 向量与视觉模型 | Chinese-CLIP（默认）/ OpenAI CLIP；YuNet + SFace（人脸） | 512 维 / 128 维 |
 | 数据库 | PostgreSQL + PostGIS + pgvector | PG 16 / PostGIS 3 / pgvector |
-| 对象存储 | **当前未接入**（compose 有 MinIO 服务，后端零调用；媒体走本地文件系统） | - |
+| 对象存储 | **当前未接入**（后端零调用 MinIO/S3；媒体走本地文件系统）；compose 中 MinIO 为可选 profile `s3` | - |
 | 前端 | Vue3 + Vite + Pinia | 3.x |
 | 地图 | MapLibre GL JS | v6 |
 | 360/VR | Three.js / A-Frame | - |
@@ -114,7 +114,7 @@ Redis 自 2024 年起改用 RSALv2/SSPL 许可，非 OSI 认证开源，不兼�
 
 ```
 全景相册系统项目/
-├── docker-compose.yml              # Valkey + PG + MinIO 服务编排
+├── docker-compose.yml              # PG + Valkey + api/web/worker + caddy 编排（MinIO 为可选 profile s3）
 ├── .env.example                     # 环境变量模板
 ├── src/
 │   └── backend/
@@ -172,8 +172,8 @@ Redis 自 2024 年起改用 RSALv2/SSPL 许可，非 OSI 认证开源，不兼�
 ### 3.5 实施步骤
 
 ```
-Step 1: 创建 docker-compose.yml（Valkey + PG16+PostGIS + MinIO）
-  → 启动验证：docker-compose up，确认三服务均 healthy
+Step 1: 创建 docker-compose.yml（Valkey + PG16+PostGIS；MinIO 列为可选 profile s3）
+  → 启动验证：docker-compose up，确认各服务 healthy
 
 Step 2: 初始化 Go 后端项目骨架
   → go mod init + 目录结构 + 配置加载

@@ -1,7 +1,8 @@
 # 全景相册系统 - 数据层编排
-# 服务: PostgreSQL 16 (+PostGIS 3.4 +pgvector) / Valkey 8 / MinIO
+# 服务: PostgreSQL 16 (+PostGIS 3.4 +pgvector) / Valkey 8 / api/web/worker ×5 / caddy
+#       （MinIO 为可选组件，profile=s3，见文件内 minio 服务注释；Job000036）
 # 依据: TDD v1.1 §2.1 部署拓扑, DDL v1.1
-# 许可: Valkey BSD-3-Clause (替代 Redis RSALv2/SSPL); MinIO AGPL 仅作独立 S3 服务调用
+# 许可: Valkey BSD-3-Clause (替代 Redis RSALv2/SSPL); MinIO AGPL 仅作独立 S3 服务调用（可选）
 
 name: pano-album
 
@@ -42,9 +43,15 @@ services:
       timeout: 3s
       retries: 12
 
+  # ---- 对象存储（可选，默认不启动）----
+  # 后端当前**零调用** MinIO/S3（媒体走本地文件系统，grep src/backend 仅命中人脸 IoU 常量名）。
+  # 依据《部署方案与兼容性 v1.0》O5 裁决（2026-09-20，Job000036）：移出默认部署、改为可选组件，
+  # 需要对象存储时 `docker compose --profile s3 up -d minio` 显式启用，
+  # 并在 .env 取消注释 MINIO_* 段落（MINIO_ROOT_PASSWORD 为启用时必填）。
   minio:
     image: minio/minio:latest
     container_name: pano-minio
+    profiles: ["s3"]
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:

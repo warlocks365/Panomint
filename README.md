@@ -38,7 +38,7 @@ Panomint 是一套 **通用相册系统**：**100% 自研、可自托管**，全
 | 后端 API | Go | `go.mod` 声明 `go 1.26.0`（gin + pgx + goose） |
 | AI 推理 | **Go + CGO + ONNX Runtime**（`github.com/yalue/onnxruntime_go`） | 无 Python 服务。模型：Chinese-CLIP（默认）/ OpenAI CLIP（512 维向量）、YuNet + SFace（人脸）；缺库时以 `_nocgo.go` 构建标签降级 |
 | 数据库 | PostgreSQL + PostGIS + pgvector | PG 16 / PostGIS 3 / pgvector（`docker/db/Dockerfile`） |
-| 对象存储 | — | **当前未接入**：`docker-compose.yml` 有 `minio` 服务，但 `src/backend` 内**零调用**（`grep -rin minio src/backend` 仅命中人脸 IoU 常量 `MatchMinIoU`）；媒体实际走本地文件系统 |
+| 对象存储 | — | **当前未接入**：`src/backend` 内**零调用** MinIO/S3（`grep -rin minio src/backend` 仅命中人脸 IoU 常量 `MatchMinIoU`）；媒体实际走本地文件系统。compose 中 `minio` 为**可选**服务（profile `s3`，Job000036），需要对象存储时 `docker compose --profile s3 up -d minio` 显式启用 |
 | 前端 | Vue 3 + Vite + Pinia | + MapLibre GL（地图）+ Three.js（360/VR）+ hls.js（ABR）+ vue-virtual-scroller |
 | 转码 | ffmpeg（subprocess 调用，不链接 libav*） | NVENC 为可选加速，无 NVIDIA 卡时自动回退 CPU |
 | 消息队列 | **自研队列**（语义对齐 BullMQ） | 基于 Valkey（Redis 协议，`github.com/redis/go-redis/v9`）；waiting / delayed / processing / failed 四态为自行实现，**未引入 BullMQ** |
@@ -48,7 +48,7 @@ Panomint 是一套 **通用相册系统**：**100% 自研、可自托管**，全
 
 ```
 Panomint/
-├── docker-compose.yml          # 容器编排（PG/PostGIS/pgvector + Valkey + MinIO + api/web/worker + caddy）
+├── docker-compose.yml          # 容器编排（PG/PostGIS/pgvector + Valkey + api/web/worker + caddy；MinIO 为可选 profile s3）
 ├── docker/
 │   ├── db/Dockerfile           # PG16 + PostGIS 3 + pgvector 镜像
 │   └── web/Dockerfile          # nginx：静态托管 + SPA 回退 + API 反代（规则清单见独立部署指南）
