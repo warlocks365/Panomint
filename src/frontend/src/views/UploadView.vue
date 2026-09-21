@@ -2,6 +2,11 @@
   <div class="upload-view">
     <h1 class="page-title">上传</h1>
 
+    <div v-if="targetLabel" class="target-banner" data-testid="upload-target">
+      将上传到：{{ targetLabel }}
+      <router-link v-if="backTo" :to="backTo" class="done-link">返回</router-link>
+    </div>
+
     <div
       class="dropzone"
       :class="{ 'dropzone--over': dragOver }"
@@ -44,8 +49,26 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import UploadItem from '../components/upload/UploadItem.vue'
 import { addFiles, clearFinished, queue, retryItem } from '../components/upload/uploadManager'
+
+// Job000066 三入口复用：?folder=<路径>（文件夹页）或 ?album=<id>&albumName=<名>（相册页）
+const route = useRoute()
+const targetFolder = typeof route.query.folder === 'string' ? route.query.folder : ''
+const targetAlbum = typeof route.query.album === 'string' ? route.query.album : ''
+const targetAlbumName = typeof route.query.albumName === 'string' ? route.query.albumName : ''
+const targetLabel = targetAlbum
+  ? '相册「' + (targetAlbumName || targetAlbum) + '」'
+  : targetFolder
+    ? '目录「' + (targetFolder || '全部') + '」'
+    : '个人空间根目录'
+const backTo = targetAlbum
+  ? '/albums/' + targetAlbum
+  : targetFolder
+    ? '/folders'
+    : ''
+const uploadOpts = { folderPath: targetFolder, albumId: targetAlbum }
 
 const uploadIcon =
   '<svg viewBox="0 0 48 48" width="44" height="44" fill="none"><path d="M24 32V14m0 0l-8 8m8-8l8 8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 34v4a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>'
@@ -69,13 +92,13 @@ function onDragLeave(e) {
 function onDrop(e) {
   dragOver.value = false
   if (e.dataTransfer?.files?.length) {
-    addFiles(e.dataTransfer.files)
+    addFiles(e.dataTransfer.files, uploadOpts)
   }
 }
 
 function onPick(e) {
   if (e.target.files?.length) {
-    addFiles(e.target.files)
+    addFiles(e.target.files, uploadOpts)
   }
   e.target.value = ''
 }
@@ -86,6 +109,18 @@ function onClearFinished() {
 </script>
 
 <style scoped>
+.target-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-primary-active-bg);
+  color: var(--color-primary);
+  font-size: var(--font-size-sm);
+}
+
 .upload-view {
   display: flex;
   flex-direction: column;

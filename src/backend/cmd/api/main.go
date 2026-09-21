@@ -166,6 +166,7 @@ func main() {
 	authed.GET("/media/:id", permRead, mediaH.Detail)
 	authed.PATCH("/media/:id", permWrite, mediaH.Patch) // Job000005 备注（仅 notes 字段）
 	authed.POST("/media/upload", permWrite, mediaH.Upload)
+	authed.POST("/media/batch", permWrite, mediaH.Batch) // Job000066 统一批量操作
 	authed.GET("/media/:id/download", permRead, mediaH.Download)
 	authed.GET("/media/:id/thumb", permRead, mediaH.Thumb)
 	authed.POST("/media/:id/favorite", permWrite, mediaH.Favorite)

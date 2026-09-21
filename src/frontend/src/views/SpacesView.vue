@@ -52,7 +52,7 @@
       <div v-if="mediaLoading" class="muted grid-tip">加载中…</div>
       <div v-else-if="mediaItems.length === 0" class="muted grid-tip">该空间暂无媒体</div>
 
-      <MediaTileGrid :items="mediaItems" @open="openItem" />
+      <MediaTileGrid :items="mediaItems" selectable @open="openItem" @changed="loadMedia" />
 
       <div v-if="nextCursor" class="load-more">
         <button class="btn" :disabled="loadingMore" @click="loadMore">

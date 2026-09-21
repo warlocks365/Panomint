@@ -58,6 +58,7 @@
             <button class="btn" :disabled="!items.length" @click="coverPickerOpen = true">设置封面</button>
             <button v-if="album.kind === 'smart'" class="btn" @click="criteriaOpen = true">编辑条件</button>
             <button v-if="album.kind !== 'smart'" class="btn primary" @click="pickerOpen = true">添加媒体</button>
+            <router-link v-if="album.kind !== 'smart'" class="btn" data-testid="album-upload" :to="`/upload?album=${album.id}&albumName=${encodeURIComponent(album.name)}`">上传照片</router-link>
           </div>
         </div>
       </header>

@@ -26,6 +26,13 @@
           <SearchBar v-if="route.name !== 'map'" />
         </div>
 
+        <router-link class="topbar-upload" data-testid="topbar-upload" to="/upload" title="上传照片/视频">
+          <svg viewBox="0 0 16 16" width="15" height="15" fill="none">
+            <path d="M8 11V4M8 4L5 7m3-3l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M3 11.5v1a1.5 1.5 0 0 0 1.5 1.5h7a1.5 1.5 0 0 0 1.5-1.5v-1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span>上传</span>
+        </router-link>
         <UserMenu />
       </header>
 

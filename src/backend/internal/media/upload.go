@@ -324,6 +324,8 @@ func (h *Handler) Upload(c *gin.Context) {
 }
 
 // respondIngest 统一入库结果响应。
+// Job000066：album_id 表单参数在此单点挂钩——整文件/分块两路入库成功后
+// （含 duplicate：去重命中也挂相册，语义=这张照片属于该相册）都做相册归属校验并插入关联。
 func (h *Handler) respondIngest(c *gin.Context, id string, dup bool, err error) {
 	if err != nil {
 		var ue *uploadError
@@ -334,11 +336,48 @@ func (h *Handler) respondIngest(c *gin.Context, id string, dup bool, err error) 
 		httperr.Fail(c, http.StatusInternalServerError, "INGEST_FAILED", "入库失败", err)
 		return
 	}
+	if albumID := c.PostForm("album_id"); albumID != "" && id != "" {
+		if aerr := h.attachToAlbum(c, albumID, id); aerr != nil {
+			// 关联失败不回滚入库：媒体已在库，仅显式带回警告（前端可重试"添加到相册"）
+			warn := aerr.Error()
+			if dup {
+				c.JSON(http.StatusOK, gin.H{"id": id, "status": "duplicate", "album_warning": warn})
+				return
+			}
+			c.JSON(http.StatusCreated, gin.H{"id": id, "status": "indexing", "album_warning": warn})
+			return
+		}
+	}
 	if dup {
 		c.JSON(http.StatusOK, gin.H{"id": id, "status": "duplicate"})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"id": id, "status": "indexing"})
+}
+
+// attachToAlbum 上传直挂相册：相册须存在且调用者为相册所有者或 owner/admin（与 albums.AddItems 同口径）。
+func (h *Handler) attachToAlbum(c *gin.Context, albumID, mediaID string) error {
+	var albumOwner string
+	err := h.Store.Pool.QueryRow(c.Request.Context(),
+		`SELECT owner_id::text FROM albums WHERE id = $1`, albumID).Scan(&albumOwner)
+	if err != nil {
+		return errors.New("相册不存在")
+	}
+	userID := c.GetString("user_id")
+	mine := albumOwner == userID
+	if !mine {
+		var privileged bool
+		_ = h.Store.Pool.QueryRow(c.Request.Context(),
+			`SELECT EXISTS(SELECT 1 FROM users u JOIN roles r ON u.role_id = r.id
+			 WHERE u.id = $1 AND r.name IN ('owner','admin'))`, userID).Scan(&privileged)
+		mine = privileged
+	}
+	if !mine {
+		return errors.New("无权添加到该相册")
+	}
+	_, err = h.Store.Pool.Exec(c.Request.Context(),
+		`INSERT INTO album_items (album_id, media_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, albumID, mediaID)
+	return err
 }
 
 // uploadError 带 HTTP 状态的上传错误。

@@ -16,7 +16,8 @@ export const queue = reactive({
   active: 0
 })
 
-export function addFiles(fileList) {
+export function addFiles(fileList, opts = {}) {
+  // Job000066：opts = { folderPath, albumId }——三个上传入口（顶栏全局/文件夹/相册）复用同一队列
   const added = []
   for (const file of fileList) {
     const item = reactive({
@@ -30,7 +31,9 @@ export function addFiles(fileList) {
       speed: 0,
       error: '',
       uploadId: null,
-      chunked: file.size > CHUNK_SIZE
+      chunked: file.size > CHUNK_SIZE,
+      folderPath: opts.folderPath || '',
+      albumId: opts.albumId || ''
     })
     queue.items.push(item)
     added.push(item)
@@ -75,6 +78,8 @@ function postChunk(item, offset, end, onProgress) {
   const fd = new FormData()
   fd.append('file', item.file.slice(offset, end + 1), item.name)
   fd.append('space', 'personal')
+  if (item.folderPath) fd.append('folder_path', item.folderPath)
+  if (item.albumId) fd.append('album_id', item.albumId)
   if (item.uploadId) fd.append('upload_id', item.uploadId)
   const headers = {}
   if (item.chunked) {

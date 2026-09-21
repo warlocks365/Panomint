@@ -1,39 +1,75 @@
 <template>
-  <div class="media-grid">
-    <div
-      v-for="m in items"
-      :key="m.id"
-      class="media-tile"
-      :title="m.filename"
-      data-testid="media-tile"
-      @click="$emit('open', m)"
-    >
-      <img
-        v-if="thumbOf(m.id)"
-        class="tile-thumb"
-        :src="thumbOf(m.id)"
-        :alt="m.filename"
-        loading="lazy"
-      />
-      <span v-else class="tile-icon" v-html="typeIcon(m)"></span>
-      <span class="tile-name">{{ m.filename }}</span>
-      <span class="tile-meta">{{ formatDate(m.taken_at) }}</span>
+  <div>
+    <div class="media-grid" :class="{ 'media-grid--selecting': selectable && batch.count.value > 0 }">
+      <div
+        v-for="m in items"
+        :key="m.id"
+        class="media-tile"
+        :class="{ 'media-tile--selected': batch.selected.has(m.id) }"
+        :title="m.filename"
+        data-testid="media-tile"
+        @click="onTileClick(m)"
+      >
+        <label v-if="selectable" class="tile-check" @click.stop>
+          <input
+            type="checkbox"
+            :checked="batch.selected.has(m.id)"
+            data-testid="tile-check"
+            @change="batch.toggle(m.id)"
+          />
+        </label>
+        <img
+          v-if="thumbOf(m.id)"
+          class="tile-thumb"
+          :src="thumbOf(m.id)"
+          :alt="m.filename"
+          loading="lazy"
+        />
+        <span v-else class="tile-icon" v-html="typeIcon(m)"></span>
+        <span class="tile-name">{{ m.filename }}</span>
+        <span class="tile-meta">{{ formatDate(m.taken_at) }}</span>
+      </div>
     </div>
+
+    <BatchBar
+      v-if="selectable && batch.count.value > 0"
+      :count="batch.count.value"
+      @meta="batch.onMeta"
+      @tags="batch.onTags"
+      @move="batch.onMove"
+      @copy="batch.onCopy"
+      @share="batch.onShare"
+      @space="batch.onShareSpace"
+      @delete="batch.onDelete"
+      @clear="batch.clear"
+    />
+    <p v-if="selectable && batch.lastResult.value" class="batch-result" data-testid="batch-result">
+      {{ batch.lastResult.value }}
+    </p>
   </div>
 </template>
 
 <script setup>
-// 通用媒体磁贴网格（Job000065）：从 SpacesView/FoldersView 抽出的共用件——
-// 缩略图异步加载（loadThumbUrl 是 Promise，.then 落响应式表）+ 失败回退类型图标 + 点击转发。
-// 两视图的磁贴样式/语义完全一致（逐字对齐），之前各写一份是重复债。
+// 通用媒体磁贴网格（Job000065 抽出；Job000066 增批量选择）：selectable 开启勾选模式，
+// 勾选后吸底操作栏——七模块行为统一（useBatchOps → /media/batch）。
 import { reactive, watch } from 'vue'
 import { loadThumbUrl } from '../timeline/mediaLoader'
+import BatchBar from './BatchBar.vue'
+import { useBatchOps } from './useBatchOps'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
-  preload: { type: Number, default: 120 } // 预载前 N 张缩略图，超出保留类型图标
+  preload: { type: Number, default: 120 }, // 预载前 N 张缩略图，超出保留类型图标
+  selectable: { type: Boolean, default: false } // 批量操作模式（勾选 + 操作栏）
 })
-defineEmits(['open'])
+const emit = defineEmits(['open', 'changed'])
+
+const batch = useBatchOps(() => emit('changed'))
+
+function onTileClick(m) {
+  // 勾选模式下点击=打开预览；勾选由复选框负责（stop 传播）
+  emit('open', m)
+}
 
 const icons = {
   photo:
@@ -82,7 +118,38 @@ watch(() => props.items, (list) => ensureThumbs(list), { immediate: true })
   gap: 12px;
 }
 
+.media-tile--selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.tile-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  padding: 2px;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.tile-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.batch-result {
+  margin: 8px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
 .media-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
