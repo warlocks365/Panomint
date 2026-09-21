@@ -407,16 +407,19 @@ const thumbImgState = new Map() // cover_id -> 已发起加载（去重，防重
 function ensureThumbImage(id) {
   if (!map || !id || map.hasImage(id) || thumbImgState.has(id)) return
   thumbImgState.set(id, 1)
-  const img = new Image()
-  img.crossOrigin = 'anonymous'
-  img.onload = () => {
-    if (map) map.addImage(id, img) // addImage 触发重绘，晚到的图自动显形
-  }
-  img.onerror = () => {
-    // 加载失败/无缩略图 → 回退为图标显示（与当前标记图标同形，视觉上仍是一个标记）
-    if (map && !map.hasImage(id) && clusterIconEl.value) map.addImage(id, clusterIconEl.value)
-  }
-  img.src = loadThumbUrl({ id }, 'sm')
+  // loadThumbUrl 返回 Promise（fetch blob→ObjectURL）——resolve 出真实 URL 再挂到 Image；
+  // 失败（含 429/无缩略图之外的错误与 404 回退也失败的情形）注册回退为当前标记图标
+  loadThumbUrl({ id }, 'sm')
+    .then((url) => {
+      const img = new Image()
+      img.onload = () => {
+        if (map) map.addImage(id, img) // addImage 触发重绘，晚到的图自动显形
+      }
+      img.src = url
+    })
+    .catch(() => {
+      if (map && !map.hasImage(id) && clusterIconEl.value) map.addImage(id, clusterIconEl.value)
+    })
 }
 
 let reloadSeq = 0 // 主数据通道代次守卫（同 searchReqId/hoverRequestId 范式）：慢响应后到时丢弃

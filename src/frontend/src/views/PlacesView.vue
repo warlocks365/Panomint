@@ -26,11 +26,10 @@
       >
         <span class="pc-cover">
           <img
-            v-if="p.cover_id"
-            :src="thumbOf(p.cover_id)"
+            v-if="thumbUrls[p.cover_id]"
+            :src="thumbUrls[p.cover_id]"
             :alt="p.name"
             loading="lazy"
-            @error="onThumbError(p.cover_id)"
           />
           <span v-else class="pc-cover-fallback" v-html="icons.place"></span>
           <span class="pc-count">{{ p.count }} 项</span>
@@ -56,15 +55,10 @@ const icons = navIcons
 const places = ref([])
 const loading = ref(true)
 const error = ref('')
-const brokenThumbs = reactive(new Set()) // 加载失败的封面 id（响应式：失败后卡片回退地点图标）
-
-function thumbOf(id) {
-  return brokenThumbs.has(id) ? '' : loadThumbUrl({ id }, 'sm')
-}
-
-function onThumbError(id) {
-  brokenThumbs.add(id)
-}
+// 封面 objectURL（响应式）。loadThumbUrl 返回 **Promise**（fetch blob→ObjectURL），
+// 必须 .then 取串——直接把返回值当 src 会得到 "[object Promise]" 裂图（本次事故根因）。
+// 加载失败的地点保留 undefined → 卡片回退地点图标。
+const thumbUrls = reactive({})
 
 async function load() {
   loading.value = true
@@ -72,6 +66,12 @@ async function load() {
   try {
     const { data } = await http.get('/geo/places-overview')
     places.value = Array.isArray(data?.places) ? data.places : []
+    for (const p of places.value) {
+      if (!p.cover_id || thumbUrls[p.cover_id]) continue
+      loadThumbUrl({ id: p.cover_id }, 'sm')
+        .then((url) => { thumbUrls[p.cover_id] = url })
+        .catch(() => {})
+    }
   } catch (e) {
     error.value = e.response?.data?.error?.message || '地点加载失败'
   } finally {
