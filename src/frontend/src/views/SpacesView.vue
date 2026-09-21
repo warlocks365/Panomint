@@ -107,14 +107,6 @@ function formatBytes(n) {
   return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i]
 }
 
-watch(mediaItems, (list) => ensureThumbs(list), { immediate: true })
-
-function formatDate(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
 async function fetchMedia(cursor) {
   const params = { space: activeSpace.value, limit: 60 }
   if (cursor) params.cursor = cursor
