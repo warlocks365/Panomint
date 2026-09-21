@@ -118,6 +118,15 @@ function formatDate(iso) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+function selectFolder(path) {
+  selectedPath.value = path
+}
+
+function typeIcon(m) {
+  if (m.is_360) return icons.pano
+  return m.type === 'video' ? icons.video : icons.photo
+}
+
 async function fetchAllMedia() {
   const items = []
   let cursor = ''
