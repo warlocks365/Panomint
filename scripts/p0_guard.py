@@ -28,8 +28,14 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND_SRC = os.path.join(ROOT, "src", "frontend", "src")
 SCAN_EXT = (".vue", ".js", ".ts", ".css", ".html")
-# 令牌定义层：颜色只允许出现在这里（设计 Token 落点）
-COLOR_EXEMPT_FILES = {"src/styles/tokens.css"}
+# 令牌定义层：颜色只允许出现在这里（设计 Token 落点）。
+# ⚠️ 键统一用正斜杠（norm_rel）：FRONTEND_SRC 已是 src 根，rel 不再带 src/ 前缀；
+#    Windows 下 os.path.relpath 给反斜杠，豁免判断与跨平台（CI=Linux）基线比对
+#    都必须先归一，否则豁免静默失效、Linux 下基线键全不匹配（2026-09-21 逮住）。
+COLOR_EXEMPT_FILES = {"styles/tokens.css"}
+# 领域数据豁免：地图图钉调色板这类"颜色即数据"的常量不是样式债——
+# 行内含本标记即跳过（命名即文档；新增豁免必须写清"颜色为何是数据"）。
+COLOR_DATA_MARKERS = ("PIN_COLOR_PALETTE", "DEFAULT_PIN_COLOR")
 # 颜色白名单（P0 规则原文唯一例外 #fff/#000，含其 6 位写法）
 COLOR_WHITELIST = {"#fff", "#ffffff", "#000", "#000000"}
 # 文本符号白名单：✓✕ 类提示文案、⚠ 注释、星级/方向符号——非功能图标
@@ -72,9 +78,10 @@ def iter_scan_files():
 
 
 def scan():
-    """返回 {rule: {relpath: [行号,...]}} 结构的违规表（只含违规行号）。"""
+    """返回 {rule: {relpath: [行号,...]}} 结构的违规表（键统一正斜杠，跨平台稳定）。"""
     hits = {"emoji": {}, "gradient": {}, "ai_copy": {}, "color": {}}
     for rel in sorted(iter_scan_files()):
+        norm_rel = rel.replace("\\", "/")
         full = os.path.join(FRONTEND_SRC, rel)
         with open(full, encoding="utf-8") as f:
             try:
@@ -88,7 +95,7 @@ def scan():
             code_part = stripped.split("//", 1)[0].split("/*", 1)[0]
             for m in EMOJI_RE.finditer(code_part):
                 if m.group(0) not in EMOJI_ALLOWLIST:
-                    hits["emoji"].setdefault(rel, []).append(i)
+                    hits["emoji"].setdefault(norm_rel, []).append(i)
                     break
         # R2 紫粉渐变：整个文件查渐变函数里同时含 banned hex（大小写不敏感）
         low = text.lower()
@@ -96,18 +103,20 @@ def scan():
             body = m.group(0)
             if any(h in body for h in GRADIENT_BANNED_HEXES):
                 ln = low.count("\n", 0, m.start()) + 1
-                hits["gradient"].setdefault(rel, []).append(ln)
+                hits["gradient"].setdefault(norm_rel, []).append(ln)
         # R3 AI 模板味
         for i, line in enumerate(lines, 1):
             if any(r.search(line) for r in AI_COPY_RES):
-                hits["ai_copy"].setdefault(rel, []).append(i)
-        # R4 硬编码颜色（令牌层豁免；白名单豁免；注释行豁免）
-        if rel not in COLOR_EXEMPT_FILES:
+                hits["ai_copy"].setdefault(norm_rel, []).append(i)
+        # R4 硬编码颜色（令牌层豁免；白名单豁免；注释行豁免；领域数据标记豁免）
+        if norm_rel not in COLOR_EXEMPT_FILES:
             for i, line in enumerate(lines, 1):
                 code_part = line.split("//", 1)[0]
+                if any(marker in code_part for marker in COLOR_DATA_MARKERS):
+                    continue
                 for m in HEX_RE.finditer(code_part):
                     if m.group(0).lower() not in COLOR_WHITELIST:
-                        hits["color"].setdefault(rel, []).append(i)
+                        hits["color"].setdefault(norm_rel, []).append(i)
                         break
     return hits
 

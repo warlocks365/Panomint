@@ -33,6 +33,15 @@
   --font-size-md: 14px;
   --font-size-lg: 16px;
 
+
+  /* 增补（Job000058-2 零变化 token 化） */
+  --color-text-on-dark: #e6ebf0;   /* 深色玻璃浮层上的浅色文字（查看器工具条） */
+  --player-bg: #14181d;            /* 360 播放器控制条主题底 */
+  --player-text: #f2f5f8;
+  --player-text-dim: #9aa7b4;
+  --player-success: #7fd18a;         /* 播放器暗底上的成功色 */
+  --player-danger: #ff9b9b;          /* 播放器暗底上的危险色 */
+
   /* 阴影 */
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
 }

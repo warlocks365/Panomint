@@ -359,7 +359,7 @@ onBeforeUnmount(() => {
   margin: -24px;
   width: calc(100% + 48px);
   height: calc(100vh - var(--topbar-height));
-  background: #14181d;
+  background: var(--player-bg);
   overflow: hidden;
   display: flex;
 }
@@ -377,10 +377,10 @@ onBeforeUnmount(() => {
   height: 100%;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 12px;
-  color: #9aa7b4; font-size: var(--font-size-md);
+  color: var(--player-text-dim); font-size: var(--font-size-md);
 }
 .state.error { color: var(--color-danger); }
-.state .msg { font-size: var(--font-size-lg); color: #f2f5f8; }
+.state .msg { font-size: var(--font-size-lg); color: var(--player-text); }
 .state .sub { font-size: var(--font-size-sm); }
 .primary {
   background: var(--color-primary); color: #fff; border: none;
@@ -410,7 +410,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 50%;
   background: rgba(20, 24, 29, 0.6);
-  color: #e6ebf0;
+  color: var(--color-text-on-dark);
   backdrop-filter: blur(6px);
 }
 
@@ -448,7 +448,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 50%;
   background: rgba(20, 24, 29, 0.5);
-  color: #e6ebf0;
+  color: var(--color-text-on-dark);
   backdrop-filter: blur(6px);
 }
 
@@ -479,7 +479,7 @@ onBeforeUnmount(() => {
   padding: 3px 12px;
   border-radius: 999px;
   background: rgba(20, 24, 29, 0.6);
-  color: #e6ebf0;
+  color: var(--color-text-on-dark);
   font-size: var(--font-size-sm);
   font-variant-numeric: tabular-nums;
   backdrop-filter: blur(6px);

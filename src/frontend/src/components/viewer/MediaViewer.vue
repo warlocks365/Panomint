@@ -499,7 +499,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   display: flex;
   align-items: stretch;
-  background-color: #111318;
+  background-color: var(--player-bg);
 }
 
 .stage {
@@ -597,7 +597,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   background: rgba(20, 24, 29, 0.72);
   backdrop-filter: blur(8px);
-  color: #e6ebf0;
+  color: var(--color-text-on-dark);
   font-size: var(--font-size-sm);
   max-width: calc(100% - 24px);
   flex-wrap: wrap;
@@ -617,7 +617,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   padding: 5px 8px;
   background: rgba(255, 255, 255, 0.1);
-  color: #e6ebf0;
+  color: var(--color-text-on-dark);
   font-size: var(--font-size-sm);
 }
 .tb-btn:hover:not(:disabled) {
@@ -636,7 +636,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.1);
-  color: #e6ebf0;
+  color: var(--color-text-on-dark);
   font-size: var(--font-size-sm);
 }
 .tb-count {
@@ -654,10 +654,10 @@ onBeforeUnmount(() => {
   opacity: 0.85;
 }
 .tb-state.saved {
-  color: #7fd18a;
+  color: var(--player-success);
 }
 .tb-state.error {
-  color: #ff9b9b;
+  color: var(--player-danger);
 }
 
 .nav-btn {
@@ -677,7 +677,7 @@ onBeforeUnmount(() => {
 }
 
 .nav-btn:disabled {
-  color: #4a4f57;
+  color: var(--player-text-dim);
   cursor: default;
 }
 </style>

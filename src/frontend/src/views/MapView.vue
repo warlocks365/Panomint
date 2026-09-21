@@ -777,7 +777,7 @@ onBeforeUnmount(() => {
 .map-canvas {
   flex: 1 1 auto;
   min-height: 0;
-  background: #e8edf2;
+  background: var(--color-surface-hover);
 }
 
 /* 浮层容器：绝对定位在画布左上；pointer-events:none 让地图交互完全不受容器遮挡 */
@@ -835,7 +835,7 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 8px;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
-  color: #94a3b8;
+  color: var(--color-text-disabled);
 }
 
 .ms-box:focus-within {
@@ -849,7 +849,7 @@ onBeforeUnmount(() => {
   outline: none;
   background: transparent;
   font-size: 13px;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .ms-clear {
@@ -894,7 +894,7 @@ onBeforeUnmount(() => {
   padding: 7px 8px;
   border-radius: 6px;
   font-size: 13px;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .ms-item:hover {
@@ -912,13 +912,13 @@ onBeforeUnmount(() => {
 .ms-provider {
   flex-shrink: 0;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-text-disabled);
 }
 
 .ms-hint {
   padding: 8px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-secondary);
 }
 
 .ms-hint--err {
@@ -928,12 +928,12 @@ onBeforeUnmount(() => {
 .mt-title {
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .mt-stat {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -949,13 +949,13 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   padding: 3px 10px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
 .mt-icon-btn:hover {
   border-color: rgba(15, 23, 42, 0.28);
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 /* 顶栏第二个按钮（移动端「筛选」）不再抢 auto 外边距，与「图标」并排靠右 */

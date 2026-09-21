@@ -247,6 +247,6 @@ input[type='password']:focus {
 }
 
 .msg--ok {
-  color: var(--color-success, #2e7d32);
+  color: var(--color-success);
 }
 </style>

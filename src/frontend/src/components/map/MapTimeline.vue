@@ -314,7 +314,7 @@ function bucketEnd(key) {
   align-items: center;
   gap: 10px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 /* 移动端折叠开关 */
@@ -328,7 +328,7 @@ function bucketEnd(key) {
   border-radius: 6px;
   padding: 2px 8px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
@@ -347,7 +347,7 @@ function bucketEnd(key) {
 
 .tl-title {
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .tl-range {
@@ -355,7 +355,7 @@ function bucketEnd(key) {
 }
 
 .tl-loading {
-  color: #94a3b8;
+  color: var(--color-text-disabled);
 }
 
 .tl-zoom {
@@ -373,7 +373,7 @@ function bucketEnd(key) {
   border-radius: 6px;
   font-size: 14px;
   line-height: 1;
-  color: #475569;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
@@ -386,7 +386,7 @@ function bucketEnd(key) {
   min-width: 20px;
   text-align: center;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .tl-clear {
@@ -395,13 +395,13 @@ function bucketEnd(key) {
   border-radius: 6px;
   padding: 2px 8px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
 .tl-clear:hover {
   border-color: rgba(15, 23, 42, 0.28);
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .tl-track {
@@ -418,7 +418,7 @@ function bucketEnd(key) {
 .tl-bar {
   flex: 1 1 0;
   min-width: 2px;
-  background: #94a3b8;
+  background: var(--color-text-disabled);
   border-radius: 2px 2px 0 0;
   transition: background 0.15s, height 0.2s ease;
 }
@@ -431,7 +431,7 @@ function bucketEnd(key) {
 .tl-axis {
   margin-top: 4px;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-text-disabled);
 }
 
 .tl-axis {
@@ -450,7 +450,7 @@ function bucketEnd(key) {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: #f8fafc;
+  background: var(--color-bg);
   border-radius: 6px;
   padding: 6px 10px;
 }
@@ -464,7 +464,7 @@ function bucketEnd(key) {
 
 .stat-name {
   font-size: 11px;
-  color: #64748b;
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
@@ -472,7 +472,7 @@ function bucketEnd(key) {
   margin-left: auto;
   font-size: 14px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -485,7 +485,7 @@ function bucketEnd(key) {
 
 .pl-label {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-text-disabled);
   flex-shrink: 0;
 }
 
@@ -512,8 +512,8 @@ function bucketEnd(key) {
 .pl-chip {
   flex-shrink: 0;
   font-size: 11px;
-  color: #475569;
-  background: #f1f5f9;
+  color: var(--color-text-secondary);
+  background: var(--color-bg);
   border: none;
   border-radius: 10px;
   padding: 2px 10px;
@@ -521,8 +521,8 @@ function bucketEnd(key) {
 }
 
 .pl-chip:hover {
-  background: #e2e8f0;
-  color: #0f172a;
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
 }
 
 </style>

@@ -87,7 +87,7 @@ onBeforeUnmount(() => {
 .il-title {
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .il-close {
@@ -97,13 +97,13 @@ onBeforeUnmount(() => {
   border-radius: 6px;
   padding: 2px 8px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
 .il-hint {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-disabled);
   padding: 8px 0;
 }
 
@@ -130,7 +130,7 @@ onBeforeUnmount(() => {
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: 6px;
-  background: #e2e8f0;
+  background: var(--color-surface-hover);
 }
 
 .il-badge {
@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
 
 .il-name {
   font-size: 10px;
-  color: #64748b;
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

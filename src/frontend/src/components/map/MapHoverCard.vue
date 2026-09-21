@@ -148,7 +148,7 @@ const cardStyle = computed(() => {
 
 .hc-loading {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-disabled);
   padding: 12px 0;
   text-align: center;
 }
@@ -156,7 +156,7 @@ const cardStyle = computed(() => {
 .hc-place {
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
   margin-bottom: 10px;
 }
 
@@ -167,7 +167,7 @@ const cardStyle = computed(() => {
   aspect-ratio: 16 / 10;
   border-radius: 8px;
   overflow: hidden;
-  background: #e2e8f0;
+  background: var(--color-surface-hover);
 }
 
 .hc-main img {
@@ -180,7 +180,7 @@ const cardStyle = computed(() => {
 .hc-ph {
   width: 100%;
   height: 100%;
-  background: #cbd5e1;
+  background: var(--color-border);
 }
 
 .hc-badge {
@@ -240,7 +240,7 @@ const cardStyle = computed(() => {
   padding: 0;
   cursor: pointer;
   overflow: hidden;
-  background: #e2e8f0;
+  background: var(--color-surface-hover);
 }
 
 .hc-mini.active {
@@ -255,7 +255,7 @@ const cardStyle = computed(() => {
 
 .hc-stats {
   font-size: 11px;
-  color: #64748b;
+  color: var(--color-text-secondary);
   margin-top: 8px;
 }
 </style>

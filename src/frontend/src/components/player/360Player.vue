@@ -659,10 +659,10 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #14181d;
-  color: #f2f5f8;
+  background: var(--player-bg);
+  color: var(--player-text);
   font-family: var(--font-family);
-  --p-text-dim: #9aa7b4;
+  --p-text-dim: var(--player-text-dim);
   --p-panel: rgba(20, 24, 29, 0.72);
 }
 .pano-container { position: absolute; inset: 0; touch-action: none; }
@@ -680,7 +680,7 @@ onBeforeUnmount(() => {
 .topbar { top: 0; padding-right: 56px; /* 为 PlayerView 右上退出按钮预留空间 */ }
 .controls { bottom: 0; flex-wrap: wrap; }
 .bar button, .bar select {
-  background: transparent; color: #f2f5f8;
+  background: transparent; color: var(--player-text);
   border: 1px solid var(--p-text-dim);
   border-radius: var(--radius-md);
   padding: 6px 12px; font-size: var(--font-size-md);

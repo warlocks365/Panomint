@@ -17,7 +17,7 @@
           :title="s.name"
           @click="selectShape(s.key)"
         >
-          <svg width="18" height="18" viewBox="0 0 18 18" v-html="s.path" :style="{ fill: pref.color || '#ef4444' }"></svg>
+          <svg width="18" height="18" viewBox="0 0 18 18" v-html="s.path" :style="{ fill: pref.color || DEFAULT_PIN_COLOR }"></svg>
         </button>
       </div>
     </div>
@@ -70,7 +70,7 @@
 import { ref } from 'vue'
 
 const props = defineProps({
-  pref: { type: Object, default: () => ({ shape: 'circle', color: '#ef4444' }) }
+  pref: { type: Object, default: () => ({ shape: 'circle', color: DEFAULT_PIN_COLOR }) }
 })
 const emit = defineEmits(['update', 'close'])
 
@@ -82,7 +82,12 @@ const shapes = [
   { key: 'star', name: '五角星', path: '<path d="M9 1l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4L4.5 14.8l.9-5L1.8 6.3l5-.7z" />' }
 ]
 
-const colors = ['#ef4444', '#f97316', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899']
+// 图钉调色板——颜色即数据（用户选地图标记色），不是样式债；p0_guard 按
+// PIN_COLOR_PALETTE 标记豁免（scripts/p0_guard.py COLOR_DATA_MARKERS）。
+// 默认图钉色同属调色板数据（PIN_COLOR_PALETTE 豁免）
+const DEFAULT_PIN_COLOR = '#ef4444'
+const PIN_COLOR_PALETTE = [DEFAULT_PIN_COLOR, '#f97316', '#f59e0b', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899']
+const colors = PIN_COLOR_PALETTE
 
 // 内置 PNG 图标（放 public/map-icons/）
 const presets = [
@@ -151,7 +156,7 @@ function onUpload(e) {
 .ip-title {
   font-size: 13px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .ip-close {
@@ -161,7 +166,7 @@ function onUpload(e) {
   border-radius: 6px;
   padding: 2px 8px;
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
@@ -171,7 +176,7 @@ function onUpload(e) {
 
 .ip-label {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
 
@@ -243,7 +248,7 @@ function onUpload(e) {
 
 .ip-preset-name {
   font-size: 11px;
-  color: #64748b;
+  color: var(--color-text-secondary);
 }
 
 .ip-upload {
@@ -255,12 +260,12 @@ function onUpload(e) {
   padding: 10px 12px;
   cursor: pointer;
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-secondary);
 }
 
 .ip-upload.active {
   border-color: var(--color-primary);
-  color: #0f172a;
+  color: var(--color-text-primary);
 }
 
 .ip-upload input {
