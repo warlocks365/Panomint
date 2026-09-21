@@ -10,62 +10,21 @@
     <p v-else-if="!tree.length" class="comments-tip">暂无评论，来发表第一条评论吧</p>
 
     <ul v-else class="comment-list">
-      <li v-for="c in tree" :key="c.id" class="comment">
-        <div class="comment-row">
-          <span class="avatar">{{ initial(c.user_name) }}</span>
-          <div class="comment-main">
-            <div class="comment-head">
-              <span class="comment-user">{{ c.user_name || '未知用户' }}</span>
-              <span class="comment-time">{{ formatTime(c.created_at) }}</span>
-            </div>
-            <p class="comment-content">{{ c.content }}</p>
-            <div class="comment-ops">
-              <button class="op-btn" @click="toggleReplyBox(c.id)">回复</button>
-              <button
-                v-if="c.replies.length"
-                class="op-btn"
-                @click="toggleReplies(c.id)"
-              >
-                {{ expanded.has(c.id) ? '收起回复' : `展开 ${c.replies.length} 条回复` }}
-              </button>
-              <button v-if="isMine(c)" class="op-btn danger" @click="remove(c)">删除</button>
-            </div>
-
-            <div v-if="replyBoxFor === c.id" class="reply-box">
-              <input
-                v-model.trim="replyContent"
-                class="input"
-                type="text"
-                maxlength="500"
-                placeholder="回复这条评论…"
-                @keyup.enter="submitReply(c.id)"
-              />
-              <button class="btn primary sm" :disabled="!replyContent || posting" @click="submitReply(c.id)">
-                发送
-              </button>
-              <button class="btn sm" @click="replyBoxFor = ''">取消</button>
-            </div>
-
-            <ul v-if="c.replies.length && expanded.has(c.id)" class="reply-list">
-              <li v-for="r in c.replies" :key="r.id" class="comment">
-                <div class="comment-row">
-                  <span class="avatar sm">{{ initial(r.user_name) }}</span>
-                  <div class="comment-main">
-                    <div class="comment-head">
-                      <span class="comment-user">{{ r.user_name || '未知用户' }}</span>
-                      <span class="comment-time">{{ formatTime(r.created_at) }}</span>
-                    </div>
-                    <p class="comment-content">{{ r.content }}</p>
-                    <div class="comment-ops">
-                      <button v-if="isMine(r)" class="op-btn danger" @click="remove(r)">删除</button>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </li>
+      <CommentItem
+        v-for="c in tree"
+        :key="c.id"
+        :comment="c"
+        :expanded="expanded.has(c.id)"
+        :reply-box-open="replyBoxFor === c.id"
+        :reply-content="replyContent"
+        :posting="posting"
+        :my-user-id="myUserId"
+        @toggle-replies="toggleReplies"
+        @toggle-reply-box="toggleReplyBox"
+        @update:reply-content="replyContent = $event"
+        @submit-reply="submitReply"
+        @remove="remove"
+      />
     </ul>
 
     <div class="post-box">
@@ -86,9 +45,12 @@
 </template>
 
 <script setup>
+// 相册评论面板——列表项抽为 CommentItem（Job000058-5 拆分）。
+// 两级树/全局唯一回复框/删除权限判定仍在此，行为语义不变。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { createComment, deleteComment, errMsg, listComments } from './albumApi'
+import CommentItem from './CommentItem.vue'
 
 const props = defineProps({
   albumId: { type: [String, Number], required: true }
@@ -129,22 +91,6 @@ const tree = computed(() => {
 })
 
 const total = computed(() => comments.value.length)
-
-function isMine(c) {
-  return myUserId.value && c.user_id === myUserId.value
-}
-
-function initial(name) {
-  return (name || '?').trim().charAt(0).toUpperCase()
-}
-
-function formatTime(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 function toggleReplies(id) {
   if (expanded.has(id)) expanded.delete(id)
@@ -243,103 +189,10 @@ onMounted(() => {
   font-size: var(--font-size-md);
 }
 
-.comment-list,
-.reply-list {
+.comment-list {
   list-style: none;
   margin: 0;
   padding: 0;
-}
-
-.comment {
-  padding: 10px 0;
-}
-
-.reply-list {
-  margin-top: 8px;
-  padding-left: 8px;
-  border-left: 2px solid var(--color-border);
-}
-
-.comment-row {
-  display: flex;
-  gap: 10px;
-}
-
-.avatar {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-size-md);
-  color: #fff;
-  background-color: var(--color-primary);
-}
-
-.avatar.sm {
-  width: 26px;
-  height: 26px;
-  font-size: var(--font-size-sm);
-}
-
-.comment-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.comment-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.comment-user {
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.comment-time {
-  font-size: var(--font-size-sm);
-  color: var(--color-text-disabled);
-}
-
-.comment-content {
-  margin-top: 2px;
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
-  word-break: break-word;
-}
-
-.comment-ops {
-  margin-top: 4px;
-  display: flex;
-  gap: 12px;
-}
-
-.op-btn {
-  border: none;
-  background: none;
-  padding: 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.op-btn:hover {
-  color: var(--color-primary);
-}
-
-.op-btn.danger:hover {
-  color: var(--color-danger);
-}
-
-.reply-box {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
 }
 
 .post-box {
@@ -392,11 +245,6 @@ onMounted(() => {
 
 .btn.primary:hover {
   background-color: var(--color-primary-hover);
-}
-
-.btn.sm {
-  padding: 6px 12px;
-  font-size: var(--font-size-sm);
 }
 
 .btn:disabled {
