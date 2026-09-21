@@ -13,11 +13,13 @@
       :slider-pos="sliderPos"
       :provider="provider"
       :default-zoom="defaultZoom"
+      :marker-mode="markerMode"
       @update:kind="$emit('update:kind', $event)"
       @update:side="$emit('update:side', $event)"
       @update:slider-pos="$emit('update:sliderPos', $event)"
       @update:provider="$emit('update:provider', $event)"
       @update:default-zoom="$emit('update:defaultZoom', $event)"
+      @update:marker-mode="$emit('update:markerMode', $event)"
       @close="$emit('update:collapsed', true)"
     />
   </div>
@@ -49,6 +51,7 @@ const props = defineProps({
   sliderPos: { type: String, default: 'bottom' },
   provider: { type: String, default: 'auto' },
   defaultZoom: { type: Number, default: null },
+  markerMode: { type: String, default: 'icon' },
   collapsed: { type: Boolean, default: false }
 })
 defineEmits([
@@ -57,6 +60,7 @@ defineEmits([
   'update:sliderPos',
   'update:provider',
   'update:defaultZoom',
+  'update:markerMode',
   'update:collapsed'
 ])
 

@@ -27,6 +27,26 @@
     </section>
 
     <section class="mf-section">
+      <div class="mf-label">标记样式</div>
+      <div class="fc-options">
+        <button
+          class="fc-option"
+          :class="{ active: markerMode !== 'thumb' }"
+          type="button"
+          data-testid="map-marker-icon"
+          @click="$emit('update:markerMode', 'icon')"
+        >图标</button>
+        <button
+          class="fc-option"
+          :class="{ active: markerMode === 'thumb' }"
+          type="button"
+          data-testid="map-marker-thumb"
+          @click="$emit('update:markerMode', 'thumb')"
+        >缩略图</button>
+      </div>
+    </section>
+
+    <section class="mf-section">
       <div class="mf-label">筛选栏位置</div>
       <div class="fc-options">
         <button
@@ -102,6 +122,7 @@ const props = defineProps({
   sliderPos: { type: String, default: 'bottom' },
   provider: { type: String, default: 'auto' },
   defaultZoom: { type: Number, default: null },
+  markerMode: { type: String, default: 'icon' },
   mobile: { type: Boolean, default: false }
 })
 const emit = defineEmits([
@@ -110,6 +131,7 @@ const emit = defineEmits([
   'update:sliderPos',
   'update:provider',
   'update:defaultZoom',
+  'update:markerMode',
   'close'
 ])
 

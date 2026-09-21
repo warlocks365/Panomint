@@ -109,12 +109,14 @@
       :provider="uiPrefs.map_default_provider"
       :default-zoom="uiPrefs.map_default_zoom"
       :collapsed="uiPrefs.map_filter_collapsed"
+      :marker-mode="markerMode"
       @update:kind="kind = $event"
       @update:side="patchPrefs({ map_filter_side: $event })"
       @update:slider-pos="patchPrefs({ map_slider_pos: $event })"
       @update:provider="patchPrefs({ map_default_provider: $event })"
       @update:default-zoom="patchPrefs({ map_default_zoom: $event })"
       @update:collapsed="setFilterCollapsed($event)"
+      @update:marker-mode="setMarkerMode($event)"
     />
 
     <!-- 移动端：筛选栏以浮层形式展开（顶栏「筛选」按钮开关） -->
@@ -130,12 +132,14 @@
         :slider-pos="uiPrefs.map_slider_pos"
         :provider="uiPrefs.map_default_provider"
         :default-zoom="uiPrefs.map_default_zoom"
+        :marker-mode="markerMode"
         mobile
         @update:kind="kind = $event"
         @update:side="patchPrefs({ map_filter_side: $event })"
         @update:slider-pos="patchPrefs({ map_slider_pos: $event })"
         @update:provider="patchPrefs({ map_default_provider: $event })"
         @update:default-zoom="patchPrefs({ map_default_zoom: $event })"
+        @update:marker-mode="setMarkerMode($event)"
         @close="filterOpen = false"
       />
     </div>
@@ -160,6 +164,8 @@ import {
   searchPlaces
 } from '../api/map'
 import { useResponsive } from '../composables/useResponsive'
+import { loadThumbUrl } from '../components/timeline/mediaLoader'
+import { useMapIcon } from '../composables/useMapIcon'
 import MapTimeline from '../components/map/MapTimeline.vue'
 import MapItemList from '../components/map/MapItemList.vue'
 import MapIconPicker from '../components/map/MapIconPicker.vue'
@@ -185,7 +191,6 @@ const listOpen = ref(false)
 const listLoading = ref(false)
 
 const iconPickerOpen = ref(false)
-const iconPref = ref({ shape: 'circle', color: '#ef4444' })
 
 // ---- 界面偏好（Job：筛选栏 + 布局记忆）----
 // 先以默认值渲染，拉到服务端偏好后再覆盖；服务端不可达时保持默认，地图照常可用
@@ -193,14 +198,36 @@ const uiPrefs = ref({
   map_slider_pos: 'bottom',
   map_filter_side: 'left',
   map_filter_collapsed: false, // Job000059：桌面筛选悬浮化收起状态
+  map_marker_mode: 'icon', // Job000060：标记样式 icon|thumb
   map_default_provider: 'auto',
   map_default_zoom: null
 })
 const kind = ref('all') // 媒体类型过滤 all|photo|video|pano
 const filterOpen = ref(false) // 移动端筛选浮层开关
 
+// Job000060：标记样式 icon|thumb（记忆 uiPrefs.map_marker_mode，默认图标）
+const markerMode = computed(() => (uiPrefs.value.map_marker_mode === 'thumb' ? 'thumb' : 'icon'))
+
+// ---- 标记图标偏好（Job000060 抽为 composable useMapIcon）----
+const { iconPref, clusterIconEl, applyIcon, loadIconPref, onIconPrefUpdate } = useMapIcon(() => map, err)
+
+function applyMarkerMode() {
+  if (!map?.getLayer) return
+  map.setLayoutProperty('cluster-circles', 'visibility', markerMode.value === 'icon' ? 'visible' : 'none')
+  map.setLayoutProperty('cluster-thumbs', 'visibility', markerMode.value === 'thumb' ? 'visible' : 'none')
+}
+watch(markerMode, () => {
+  applyMarkerMode()
+  // 模式切换后重下数据（icon_img 属性只在缩略图模式下注入）
+  if (map) map.getSource('clusters')?.setData(toGeoJSON(clusters.value))
+})
+
 function setFilterCollapsed(v) {
   patchPrefs({ map_filter_collapsed: !!v })
+}
+
+function setMarkerMode(m) {
+  patchPrefs({ map_marker_mode: m === 'thumb' ? 'thumb' : 'icon' })
 }
 
 const hoverOpen = ref(false)
@@ -305,70 +332,6 @@ const rasterStyle = {
   layers: [{ id: 'amap-base', type: 'raster', source: 'amap' }]
 }
 
-// ---- 图标：矢量形状 SVG path（填充色由 iconPref.color 控制）----
-const SHAPE_PATHS = {
-  circle: '<circle cx="12" cy="12" r="10" />',
-  triangle: '<path d="M12 2l10 20H2z" />',
-  diamond: '<path d="M12 2l10 10-10 10L2 12z" />',
-  star: '<path d="M12 2l3 6.5 7 .8-5.2 4.7 1.4 7-6.2-3.6L5.8 21l1.4-7L2 9.3l7-.8z" />'
-}
-
-function shapeSvgDataUrl(shape, color) {
-  const path = SHAPE_PATHS[shape]
-  if (!path) return null
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="${color}">${path}</g></svg>`
-  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
-}
-
-// 加载图标到 map（矢量 SVG → dataURL；内置 PNG → 静态路径；自定义 → dataURL）
-function applyIcon() {
-  if (!map || !map.hasImage) return
-  const pref = iconPref.value
-  let url = null
-  if (pref.shape === 'pin') url = '/map-icons/pin.png'
-  else if (pref.shape === 'inverted') url = '/map-icons/inverted.png'
-  else if (pref.shape === 'custom' && pref.data_url) url = pref.data_url
-  else url = shapeSvgDataUrl(pref.shape, pref.color || '#ef4444')
-
-  if (!url) return
-  const img = new Image()
-  img.onload = () => {
-    if (!map) return
-    // 尺寸统一 24px；删除旧图标避免累积
-    if (map.hasImage('cluster-icon')) map.removeImage('cluster-icon')
-    map.addImage('cluster-icon', img, { sdf: false })
-  }
-  img.src = url
-}
-
-// ---- 图标偏好：账户级持久化（服务端失败降级 localStorage）----
-async function loadIconPref() {
-  try {
-    const p = await getMapIconPref()
-    if (p && p.shape) {
-      iconPref.value = { shape: p.shape, color: p.color || '#ef4444', data_url: p.data_url || '' }
-    }
-  } catch {
-    // 服务端不可达 → 读本地兜底
-    try {
-      const local = localStorage.getItem('map_icon_pref')
-      if (local) iconPref.value = JSON.parse(local)
-    } catch {}
-  }
-}
-
-async function onIconPrefUpdate(pref) {
-  iconPref.value = pref
-  applyIcon()
-  // 本地兜底 + 服务端持久化
-  try { localStorage.setItem('map_icon_pref', JSON.stringify(pref)) } catch {}
-  try {
-    await putMapIconPref(pref)
-  } catch {
-    err.value = '图标偏好已本地保存，服务端同步失败'
-  }
-}
-
 // ---- 界面偏好：账户级持久化 ----
 // 偏好接口失败绝不能拦住地图渲染，故整体吞掉异常、退回默认值
 async function loadUiPrefs() {
@@ -377,6 +340,8 @@ async function loadUiPrefs() {
     uiPrefs.value = {
       map_slider_pos: d.map_slider_pos || 'bottom',
       map_filter_side: d.map_filter_side || 'left',
+      map_filter_collapsed: d.map_filter_collapsed === true,
+      map_marker_mode: d.map_marker_mode === 'thumb' ? 'thumb' : 'icon',
       map_default_provider: d.map_default_provider || 'auto',
       map_default_zoom: typeof d.map_default_zoom === 'number' ? d.map_default_zoom : null
     }
@@ -423,15 +388,35 @@ function bboxOf() {
 }
 
 function toGeoJSON(list) {
+  const thumb = markerMode.value === 'thumb'
   return {
     type: 'FeatureCollection',
     features: list.map((c, i) => ({
       type: 'Feature',
       id: i,
       geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
-      properties: { count: c.count }
+      // 缩略图模式下把代表图 id 带给 symbol 层；无代表图/图标模式的簇走 coalesce 回退 cluster-icon
+      properties: { count: c.count, ...(thumb && c.cover_id ? { icon_img: c.cover_id } : {}) }
     }))
   }
+}
+
+// ---- 缩略图模式（Job000060）：簇代表图按需注册为 MapLibre 图片 ----
+const thumbImgState = new Map() // cover_id -> 已发起加载（去重，防重入）
+
+function ensureThumbImage(id) {
+  if (!map || !id || map.hasImage(id) || thumbImgState.has(id)) return
+  thumbImgState.set(id, 1)
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  img.onload = () => {
+    if (map) map.addImage(id, img) // addImage 触发重绘，晚到的图自动显形
+  }
+  img.onerror = () => {
+    // 加载失败/无缩略图 → 回退为图标显示（与当前标记图标同形，视觉上仍是一个标记）
+    if (map && !map.hasImage(id) && clusterIconEl.value) map.addImage(id, clusterIconEl.value)
+  }
+  img.src = loadThumbUrl({ id }, 'sm')
 }
 
 let reloadSeq = 0 // 主数据通道代次守卫（同 searchReqId/hoverRequestId 范式）：慢响应后到时丢弃
@@ -456,6 +441,8 @@ async function reload() {
     clusters.value = cs
     buckets.value = hs
     places.value = ps
+    // 缩略图模式：先为每个簇注册代表图（去重缓存），再下数据——晚到的图由 addImage 重绘带上
+    if (markerMode.value === 'thumb') for (const c of cs) ensureThumbImage(c.cover_id)
     map.getSource('clusters')?.setData(toGeoJSON(cs))
     err.value = ''
   } catch (e) {
@@ -622,39 +609,56 @@ onMounted(async () => {
       layout: {
         'icon-image': 'cluster-icon',
         'icon-size': 1,
-        'icon-allow-overlap': true
+        'icon-allow-overlap': true,
+        visibility: markerMode.value === 'icon' ? 'visible' : 'none'
+      }
+    })
+    // Job000060 缩略图模式：同一份簇数据按 icon_img 属性渲染代表图；
+    // 加载失败的簇在 ensureThumbImages 里被注册为回退图标，属性无需变更
+    map.addLayer({
+      id: 'cluster-thumbs',
+      type: 'symbol',
+      source: 'clusters',
+      layout: {
+        'icon-image': ['coalesce', ['get', 'icon_img'], 'cluster-icon'],
+        'icon-size': 0.2,
+        'icon-anchor': 'center',
+        'icon-allow-overlap': true,
+        visibility: markerMode.value === 'thumb' ? 'visible' : 'none'
       }
     })
 
     // 加载初始图标（默认红点）
     applyIcon()
 
-    // 点击下钻 / 展开
-    map.on('click', 'cluster-circles', (e) => {
-      const f = e.features?.[0]
-      if (!f) return
-      openCluster(f.properties, f.geometry.coordinates.slice())
-    })
+    // 点击下钻 / 展开（两种标记图层同逻辑）
+    for (const layerId of ['cluster-circles', 'cluster-thumbs']) {
+      map.on('click', layerId, (e) => {
+        const f = e.features?.[0]
+        if (!f) return
+        openCluster(f.properties, f.geometry.coordinates.slice())
+      })
 
-    // 悬停预览（桌面）
-    map.on('mouseenter', 'cluster-circles', (e) => {
-      const f = e.features?.[0]
-      if (!f) return
-      clearTimeout(hoverTimer)
-      clearTimeout(hoverCloseTimer)
-      hoverTimer = setTimeout(() => {
-        showHover(f, e.originalEvent.clientX, e.originalEvent.clientY)
-      }, 120)
-    })
-    map.on('mousemove', 'cluster-circles', () => {
-      map.getCanvas().style.cursor = 'pointer'
-    })
-    map.on('mouseleave', 'cluster-circles', () => {
-      clearTimeout(hoverTimer)
-      map.getCanvas().style.cursor = ''
-      // 不立即关闭：给用户移入卡片点选的时间
-      scheduleHoverClose()
-    })
+      // 悬停预览（桌面）
+      map.on('mouseenter', layerId, (e) => {
+        const f = e.features?.[0]
+        if (!f) return
+        clearTimeout(hoverTimer)
+        clearTimeout(hoverCloseTimer)
+        hoverTimer = setTimeout(() => {
+          showHover(f, e.originalEvent.clientX, e.originalEvent.clientY)
+        }, 120)
+      })
+      map.on('mousemove', layerId, () => {
+        map.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', layerId, () => {
+        clearTimeout(hoverTimer)
+        map.getCanvas().style.cursor = ''
+        // 不立即关闭：给用户移入卡片点选的时间
+        scheduleHoverClose()
+      })
+    }
 
     if (import.meta.env.DEV) window.__map = map
     reload()
@@ -668,7 +672,7 @@ onMounted(async () => {
     touchStartInfo = { x: t.clientX, y: t.clientY, t: Date.now() }
     clearTimeout(hoverTimer)
     hoverTimer = setTimeout(() => {
-      const fs = map.queryRenderedFeatures([t.clientX, t.clientY], { layers: ['cluster-circles'] })
+      const fs = map.queryRenderedFeatures([t.clientX, t.clientY], { layers: ['cluster-circles', 'cluster-thumbs'] })
       if (fs.length) showHover(fs[0], t.clientX, t.clientY)
       touchStartInfo = null
     }, 500)

@@ -7,11 +7,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Cluster 一个聚合簇（质心 + 计数）。
+// Cluster 一个聚合簇（质心 + 计数 + 代表图）。
+// CoverID 为簇内 taken_at 最新的媒体 id（Job000060 缩略图模式代表图；
+// 空 = 簇内媒体均无缩略图或查询未选取，前端回退图标显示）。
 type Cluster struct {
-	Lng   float64 `json:"lng"`
-	Lat   float64 `json:"lat"`
-	Count int     `json:"count"`
+	Lng     float64 `json:"lng"`
+	Lat     float64 `json:"lat"`
+	Count   int     `json:"count"`
+	CoverID string  `json:"cover_id,omitempty"`
 }
 
 // Store 空间数据访问。

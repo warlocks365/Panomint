@@ -192,7 +192,8 @@ func (s *MediaStore) Clusters(ctx context.Context, b BBox, userID string, zoom i
 	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
 		SELECT ST_X(ST_Centroid(ST_Collect(gps))),
 		       ST_Y(ST_Centroid(ST_Collect(gps))),
-		       count(*)::int
+		       count(*)::int,
+		       (ARRAY_AGG(id ORDER BY taken_at DESC NULLS LAST))[1]::text
 		FROM media
 		WHERE %s
 		GROUP BY ST_SnapToGrid(gps, %s)
@@ -205,7 +206,7 @@ func (s *MediaStore) Clusters(ctx context.Context, b BBox, userID string, zoom i
 	out := []Cluster{}
 	for rows.Next() {
 		var c Cluster
-		if err := rows.Scan(&c.Lng, &c.Lat, &c.Count); err != nil {
+		if err := rows.Scan(&c.Lng, &c.Lat, &c.Count, &c.CoverID); err != nil {
 			return nil, err
 		}
 		c.Lng, c.Lat = convert(c.Lng, c.Lat, provider)
