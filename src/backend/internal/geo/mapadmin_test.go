@@ -50,6 +50,7 @@ func TestNormalizeUIPrefsRejectsBadValues(t *testing.T) {
 		{"滑块位置非法", UIPrefs{MapSliderPos: "middle"}},
 		{"筛选栏侧非法", UIPrefs{MapFilterSide: "center"}},
 		{"provider 非法", UIPrefs{MapDefaultProvider: "baidu"}},
+		{"标记样式非法", UIPrefs{MapMarkerMode: "grid"}},
 		{"zoom 过小", UIPrefs{MapDefaultZoom: intPtr(0)}},
 		{"zoom 过大", UIPrefs{MapDefaultZoom: intPtr(21)}},
 		{"zoom 为负", UIPrefs{MapDefaultZoom: intPtr(-3)}},
@@ -60,6 +61,18 @@ func TestNormalizeUIPrefsRejectsBadValues(t *testing.T) {
 				t.Fatalf("应被拒绝：%+v", c.in)
 			}
 		})
+	}
+}
+
+func TestNormalizeUIPrefsMarkerMode(t *testing.T) {
+	// 默认 icon；thumb 合法；collapsed 原样带回
+	got, err := NormalizeUIPrefs(UIPrefs{})
+	if err != nil || got.MapMarkerMode != "icon" || got.MapFilterCollapsed {
+		t.Fatalf("默认值应为 icon+未收起: %+v err=%v", got, err)
+	}
+	got, err = NormalizeUIPrefs(UIPrefs{MapMarkerMode: "thumb", MapFilterCollapsed: true})
+	if err != nil || got.MapMarkerMode != "thumb" || !got.MapFilterCollapsed {
+		t.Fatalf("thumb+收起应原样保留: %+v err=%v", got, err)
 	}
 }
 

@@ -41,6 +41,9 @@ const (
 	providerAmap = "amap"
 	providerOSM  = "osm"
 
+	markerIcon  = "icon"
+	markerThumb = "thumb"
+
 	minMapZoom = 1
 	maxMapZoom = 20
 )
@@ -53,6 +56,9 @@ type UIPrefs struct {
 	// MapDefaultZoom NULL 表示"不指定"。故用指针而非 int —— 0 是合法缩放级别吗？不是，
 	// 但更重要的是要能区分"没设置"与"设置成 0"（后者应被拒）。
 	MapDefaultZoom *int `json:"map_default_zoom"`
+	// Job000059/060：筛选悬浮层收起状态 + 标记样式（icon|thumb，非法值 400 同其他枚举）。
+	MapFilterCollapsed bool   `json:"map_filter_collapsed"`
+	MapMarkerMode      string `json:"map_marker_mode"`
 }
 
 // DefaultUIPrefs 未设置时返回的默认值（与 DDL 默认值一致）。
@@ -61,6 +67,7 @@ func DefaultUIPrefs() UIPrefs {
 		MapSliderPos:       sliderBottom,
 		MapFilterSide:      filterLeft,
 		MapDefaultProvider: providerAuto,
+		MapMarkerMode:      markerIcon,
 	}
 }
 
@@ -83,6 +90,14 @@ func NormalizeUIPrefs(in UIPrefs) (UIPrefs, error) {
 		}
 		out.MapFilterSide = v
 	}
+	if v := strings.ToLower(strings.TrimSpace(in.MapMarkerMode)); v != "" {
+		if v != markerIcon && v != markerThumb {
+			return out, fmt.Errorf("map_marker_mode 仅支持 %s|%s", markerIcon, markerThumb)
+		}
+		out.MapMarkerMode = v
+	}
+	out.MapFilterCollapsed = in.MapFilterCollapsed
+
 	if v := strings.ToLower(strings.TrimSpace(in.MapDefaultProvider)); v != "" {
 		if v != providerAuto && v != providerAmap && v != providerOSM {
 			return out, fmt.Errorf("map_default_provider 仅支持 %s|%s|%s", providerAuto, providerAmap, providerOSM)
@@ -98,11 +113,13 @@ func NormalizeUIPrefs(in UIPrefs) (UIPrefs, error) {
 // GetUIPrefs 读取当前用户 UI 偏好；无记录返回默认值（不返回错误，见文件头说明）。
 func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, error) {
 	out := DefaultUIPrefs()
-	var slider, side, provider string
+	var slider, side, provider, marker string
 	var zoom *int
+	var collapsed bool
 	err := s.Pool.QueryRow(ctx, `
-		SELECT map_slider_pos, map_filter_side, map_default_provider, map_default_zoom
-		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom)
+		SELECT map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
+		       map_filter_collapsed, map_marker_mode
+		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom, &collapsed, &marker)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
@@ -114,6 +131,7 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 	got, nerr := NormalizeUIPrefs(UIPrefs{
 		MapSliderPos: slider, MapFilterSide: side,
 		MapDefaultProvider: provider, MapDefaultZoom: zoom,
+		MapFilterCollapsed: collapsed, MapMarkerMode: marker,
 	})
 	if nerr != nil {
 		return DefaultUIPrefs(), nil
@@ -124,14 +142,18 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 // PutUIPrefs 覆盖写入（upsert）当前用户 UI 偏好。入参应已 Normalize。
 func (s *MediaStore) PutUIPrefs(ctx context.Context, userID string, p UIPrefs) error {
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO user_ui_prefs (user_id, map_slider_pos, map_filter_side, map_default_provider, map_default_zoom, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now())
+		INSERT INTO user_ui_prefs (user_id, map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
+		                           map_filter_collapsed, map_marker_mode, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			map_slider_pos       = EXCLUDED.map_slider_pos,
 			map_filter_side      = EXCLUDED.map_filter_side,
 			map_default_provider = EXCLUDED.map_default_provider,
 			map_default_zoom     = EXCLUDED.map_default_zoom,
+			map_filter_collapsed = EXCLUDED.map_filter_collapsed,
+			map_marker_mode      = EXCLUDED.map_marker_mode,
 			updated_at           = now()`,
-		userID, p.MapSliderPos, p.MapFilterSide, p.MapDefaultProvider, p.MapDefaultZoom)
+		userID, p.MapSliderPos, p.MapFilterSide, p.MapDefaultProvider, p.MapDefaultZoom,
+		p.MapFilterCollapsed, p.MapMarkerMode)
 	return err
 }
