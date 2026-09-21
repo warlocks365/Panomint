@@ -72,3 +72,24 @@ export function getMapConfig() {
 export function putMapConfig(patch) {
   return http.put('/admin/map-config', patch).then((r) => r.data)
 }
+
+// ---- 权限体系增强（Job000067 / F1）----
+// GET /admin/perms → {perms:[{perm,label,category,description,orphan}]}
+export function listPermMeta() {
+  return http.get('/admin/perms').then((r) => r.data)
+}
+
+// PUT /admin/perms/:perm ← {label, category, description}（自定义中文名/分类）
+export function putPermMeta(perm, payload) {
+  return http.put('/admin/perms/' + encodeURIComponent(perm), payload).then((r) => r.data)
+}
+
+// GET /admin/users/:id/perms → {user_id, perms[]}
+export function listUserPerms(userID) {
+  return http.get('/admin/users/' + userID + '/perms').then((r) => r.data)
+}
+
+// PUT /admin/users/:id/perms ← {perm, granted}（增量授予/收回，服务端 PermCovered 守卫）
+export function putUserPerm(userID, perm, granted) {
+  return http.put('/admin/users/' + userID + '/perms', { perm, granted }).then((r) => r.data)
+}

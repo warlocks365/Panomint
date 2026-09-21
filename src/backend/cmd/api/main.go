@@ -395,6 +395,13 @@ func main() {
 	// （因为 POST /admin/users 允许按名字指定任意角色）。见 auth.PermCovered。
 	admin.POST("/roles", authH.CreateRole)
 
+	// Job000067（F1 权限体系增强）：权限元数据（中文化/自定义分类）+ 用户级增量授权。
+	// 全挂 admin:users（与角色管理同级）；enforcement 不变（knownPerms 白名单把关写入）。
+	admin.GET("/perms", authH.ListPermMeta)
+	admin.PUT("/perms/:perm", authH.PutPermMeta)
+	admin.GET("/users/:id/perms", authH.ListUserPerms)
+	admin.PUT("/users/:id/perms", authH.PutUserPerm)
+
 	// ===== Phase 5 精选第一项：审计日志 + 管理端只读端点 =====
 	// 契约 §2 `GET /admin/audit`（分页）、§14 `GET /admin/stats`、§12 `GET /admin/jobs`。
 	// 权限点一律取自库中**实际存在**的种子权限（实测只有 admin:system / admin:users 两个 admin 前缀），不新造权限名：

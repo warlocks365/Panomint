@@ -18,7 +18,7 @@
         </div>
         <p v-if="r.description" class="role-desc">{{ r.description }}</p>
         <div class="perm-chips">
-          <span v-for="p in r.permissions" :key="p" class="chip">{{ p }}</span>
+          <span v-for="p in r.permissions" :key="p" class="chip" :title="p">{{ labelOf(p) }}</span>
           <span v-if="!r.permissions.length" class="role-desc">无权限</span>
         </div>
       </article>
@@ -43,7 +43,7 @@
         <div class="perm-options">
           <label v-for="p in grantable" :key="p" class="perm-option">
             <input v-model="form.permissions" type="checkbox" :value="p" :data-testid="`rc-perm-${p}`" />
-            <span>{{ p }}</span>
+            <span>{{ labelOf(p) }}</span>
           </label>
         </div>
       </div>
@@ -59,9 +59,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { errMessage } from '../../stores/auth'
-import { createRole, listRoles } from '../../api/admin'
+import { createRole, listPermMeta, listRoles } from '../../api/admin'
 
 const auth = useAuthStore()
+const permMeta = ref([])
+function labelOf(perm) {
+  const m = permMeta.value.find((x) => x.perm === perm)
+  return m ? m.label : perm
+}
 const roles = ref([])
 const loading = ref(false)
 const busy = ref(false)
@@ -88,8 +93,9 @@ async function load() {
   loading.value = true
   err.value = ''
   try {
-    const r = await listRoles()
+    const [r, m] = await Promise.all([listRoles(), listPermMeta()])
     roles.value = r.roles || []
+    permMeta.value = m.perms || []
   } catch (e) {
     err.value = errMessage(e, '加载角色列表失败')
   } finally {

@@ -32,6 +32,7 @@
       <OverviewTab v-show="activeTab === 'overview'" data-testid="panel-overview" />
       <UsersTab v-show="activeTab === 'users'" data-testid="panel-users" />
       <RolesTab v-show="activeTab === 'roles'" data-testid="panel-roles" />
+      <PermTab v-show="activeTab === 'perms'" data-testid="panel-perms" />
       <JobsTab v-show="activeTab === 'jobs'" data-testid="panel-jobs" />
       <AuditTab v-show="activeTab === 'audit'" data-testid="panel-audit" />
       <MapConfigTab v-show="activeTab === 'map'" data-testid="panel-map" />
@@ -46,6 +47,7 @@ import { getStats, listUsers } from '../api/admin'
 import OverviewTab from './admin/OverviewTab.vue'
 import UsersTab from './admin/UsersTab.vue'
 import RolesTab from './admin/RolesTab.vue'
+import PermTab from './admin/PermTab.vue'
 import JobsTab from './admin/JobsTab.vue'
 import AuditTab from './admin/AuditTab.vue'
 import MapConfigTab from './admin/MapConfigTab.vue'
@@ -58,6 +60,7 @@ const tabs = [
   { key: 'overview', label: '概览' },
   { key: 'users', label: '用户' },
   { key: 'roles', label: '角色' },
+  { key: 'perms', label: '权限' },
   { key: 'jobs', label: '任务' },
   { key: 'audit', label: '审计' },
   { key: 'map', label: '地图配置' }

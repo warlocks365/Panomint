@@ -29,10 +29,15 @@ func AuthRequired(secret []byte) gin.HandlerFunc {
 	}
 }
 
-// RequirePerm RBAC 权限判定（role_permissions 精确匹配）。
+// RequirePerm RBAC 权限判定（role_permissions 精确匹配 OR 用户级增量授权）。
+// Job000067：用户授权是增量授予（user_permissions），角色未命中时再查用户层——
+// 只增不减，写后直查立即生效（低频管理路径，不进 role 缓存）。
 func RequirePerm(store *Store, perm string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ok, err := store.HasPerm(c.Request.Context(), c.GetString("role"), perm)
+		if err == nil && !ok {
+			ok, err = store.HasPermUser(c.Request.Context(), c.GetString("user_id"), perm)
+		}
 		if err != nil || !ok {
 			httperr.Abort(c, http.StatusForbidden, "FORBIDDEN", "缺少权限: "+perm)
 			return
