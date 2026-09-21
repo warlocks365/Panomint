@@ -112,7 +112,8 @@ def scan():
         if norm_rel not in COLOR_EXEMPT_FILES:
             for i, line in enumerate(lines, 1):
                 code_part = line.split("//", 1)[0]
-                if any(marker in code_part for marker in COLOR_DATA_MARKERS):
+                # 标记豁免看整行（标记允许写在行尾注释里，故不能用去注释后的 code_part）
+                if any(marker in line for marker in COLOR_DATA_MARKERS):
                     continue
                 for m in HEX_RE.finditer(code_part):
                     if m.group(0).lower() not in COLOR_WHITELIST:

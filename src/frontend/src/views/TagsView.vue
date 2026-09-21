@@ -44,41 +44,23 @@
         </button>
       </div>
 
-      <section v-if="selected" class="detail">
-        <header class="detail-head">
-          <h3 class="detail-title">
-            {{ selected.name }}
-            <span class="detail-count">{{ mediaTotal }} 项</span>
-          </h3>
-          <div class="detail-actions">
-            <button class="btn sm" @click="onRename(selected)">改名</button>
-            <button class="btn sm" @click="onRecolor(selected)">改色</button>
-            <button class="btn sm" @click="onMerge(selected)">合并…</button>
-            <button class="btn sm danger" @click="onDelete(selected)">删除</button>
-          </div>
-        </header>
-
-        <p v-if="mediaLoading" class="page-tip">媒体加载中…</p>
-        <p v-else-if="mediaError" class="page-tip error">{{ mediaError }}</p>
-        <p v-else-if="!items.length" class="page-tip">该标签下暂无已确认的媒体</p>
-        <div v-else class="media-grid">
-          <MediaThumb v-for="m in items" :key="m.id" :item="m" @click="openMedia(m)" />
-        </div>
-        <div v-if="nextCursor" class="more-row">
-          <button class="btn" :disabled="mediaLoading" @click="loadMore">加载更多</button>
-        </div>
-      </section>
+      <TagDetailPanel
+        v-if="selected"
+        :key="selected.id"
+        :tag="selected"
+        :tags="tags"
+        @changed="loadTags"
+        @cleared="onSelectionCleared"
+      />
     </template>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import http from '../api/http'
-import MediaThumb from '../components/albums/MediaThumb.vue'
+import TagDetailPanel from './tags/TagDetailPanel.vue'
 
-const router = useRouter()
 
 const tags = ref([])
 const loading = ref(false)
@@ -86,68 +68,6 @@ const loadError = ref('')
 const filter = ref('')
 
 const selected = ref(null)
-const items = ref([])
-const mediaTotal = ref(0)
-const nextCursor = ref('')
-const mediaLoading = ref(false)
-const mediaError = ref('')
-const aiBusy = ref(false)
-
-function errMsg(e, fallback) {
-  return e.response?.data?.error?.message || e?.message || fallback
-}
-
-async function loadTags() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    const { data } = await http.get('/tags', { params: filter.value ? { q: filter.value } : {} })
-    tags.value = Array.isArray(data) ? data : Array.isArray(data?.tags) ? data.tags : []
-    if (selected.value) {
-      const cur = tags.value.find((t) => t.id === selected.value.id)
-      if (cur) selected.value = cur
-    }
-  } catch (e) {
-    loadError.value = errMsg(e, '标签加载失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-async function selectTag(t) {
-  selected.value = t
-  items.value = []
-  nextCursor.value = ''
-  mediaTotal.value = 0
-  await loadMedia(true)
-}
-
-async function loadMedia(reset) {
-  if (!selected.value) return
-  mediaLoading.value = true
-  mediaError.value = ''
-  try {
-    const params = { limit: 60 }
-    if (!reset && nextCursor.value) params.cursor = nextCursor.value
-    const { data } = await http.get(`/tags/${selected.value.id}/media`, { params })
-    const list = Array.isArray(data?.items) ? data.items : []
-    items.value = reset ? list : items.value.concat(list)
-    nextCursor.value = data?.next_cursor || ''
-    mediaTotal.value = data?.total ?? items.value.length
-  } catch (e) {
-    mediaError.value = errMsg(e, '媒体加载失败')
-  } finally {
-    mediaLoading.value = false
-  }
-}
-
-function loadMore() {
-  loadMedia(false)
-}
-
-function openMedia(m) {
-  router.push({ name: 'player', params: { id: m.id } })
-}
 
 function chipStyle(t) {
   if (t.color) {
@@ -167,58 +87,9 @@ async function onCreate() {
   }
 }
 
-async function onRename(t) {
-  const name = window.prompt('重命名标签', t.name)
-  if (!name || !name.trim() || name.trim() === t.name) return
-  try {
-    await http.patch(`/tags/${t.id}`, { name: name.trim() })
-    await loadTags()
-  } catch (e) {
-    window.alert(errMsg(e, '改名失败'))
-  }
-}
 
-async function onRecolor(t) {
-  const color = window.prompt('标签颜色（#RRGGBB，留空清除）', t.color || '#3b82f6')
-  if (color === null) return
-  try {
-    await http.patch(`/tags/${t.id}`, { color: color.trim() })
-    await loadTags()
-  } catch (e) {
-    window.alert(errMsg(e, '改色失败（需为 #RRGGBB）'))
-  }
-}
 
-async function onMerge(t) {
-  const target = window.prompt('合并到哪个标签（输入标签名）', '')
-  if (!target || !target.trim()) return
-  const dst = tags.value.find((x) => x.name === target.trim() && x.id !== t.id)
-  if (!dst) {
-    window.alert('未找到同名标签')
-    return
-  }
-  if (!window.confirm(`将「${t.name}」的全部关联合并到「${dst.name}」并删除「${t.name}」？`)) return
-  try {
-    await http.delete(`/tags/${t.id}`, { params: { into: dst.id } })
-    selected.value = null
-    items.value = []
-    await loadTags()
-  } catch (e) {
-    window.alert(errMsg(e, '合并失败'))
-  }
-}
 
-async function onDelete(t) {
-  if (!window.confirm(`删除标签「${t.name}」？其媒体关联会一并移除，媒体本身不受影响。`)) return
-  try {
-    await http.delete(`/tags/${t.id}`)
-    selected.value = null
-    items.value = []
-    await loadTags()
-  } catch (e) {
-    window.alert(errMsg(e, '删除失败'))
-  }
-}
 
 async function triggerAI() {
   if (aiBusy.value) return
@@ -232,6 +103,10 @@ async function triggerAI() {
   } finally {
     aiBusy.value = false
   }
+}
+
+function onSelectionCleared() {
+  selected.value = null
 }
 
 onMounted(loadTags)
@@ -390,40 +265,4 @@ onMounted(loadTags)
   color: var(--color-warning-bg);
 }
 
-.detail-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.detail-title {
-  font-size: var(--font-size-lg);
-  color: var(--color-text-primary);
-}
-
-.detail-count {
-  margin-left: 8px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  font-weight: 400;
-}
-
-.detail-actions {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-}
-
-.media-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px;
-}
-
-.more-row {
-  display: flex;
-  justify-content: center;
-  padding: 16px 0;
-}
 </style>
