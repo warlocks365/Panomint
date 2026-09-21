@@ -32,6 +32,11 @@ const routes = [
         name: 'map',
         component: () => import('../views/MapView.vue')
       },
+      {
+        path: 'places',
+        name: 'places',
+        component: () => import('../views/PlacesView.vue')
+      },
       // Wave 2 路由（G2/G3/G4 视图，由各组实现对应文件）
       {
         path: 'spaces',

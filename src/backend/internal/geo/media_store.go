@@ -294,6 +294,41 @@ type Place struct {
 	Lat   float64 `json:"lat"`
 }
 
+// PlaceOverview 地点页聚合（Job000062）：全局（无 bbox）按地名列出计数与代表图。
+// 封面 = 该地点 taken_at 最新的媒体（与簇 cover_id 同口径）；可见性收敛同 baseCond。
+type PlaceOverview struct {
+	Name    string `json:"name"`
+	Count   int    `json:"count"`
+	CoverID string `json:"cover_id,omitempty"`
+}
+
+// PlaceOverviews 返回调用者可见媒体的地名聚合，按计数降序、名次升序，封顶 200 个地名。
+func (s *MediaStore) PlaceOverviews(ctx context.Context, userID string) ([]PlaceOverview, error) {
+	conds, args := baseCond(BBox{MinLng: -180, MinLat: -85, MaxLng: 180, MaxLat: 85}, userID)
+	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
+		SELECT place, count(*)::int,
+		       (ARRAY_AGG(id ORDER BY taken_at DESC NULLS LAST))[1]::text
+		FROM media
+		WHERE %s AND COALESCE(place, '') <> ''
+		GROUP BY 1
+		ORDER BY count(*) DESC, place ASC
+		LIMIT 200`, strings.Join(conds, " AND ")), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []PlaceOverview{}
+	for rows.Next() {
+		var p PlaceOverview
+		if err := rows.Scan(&p.Name, &p.Count, &p.CoverID); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // Places 列出 bbox 内出现的地名（place 非空、去重、按计数降序）。
 // taken_at 时间过滤可选；用于地图底部"地理位置罗列"（横向滑动 + 点击定位）。
 // userID 为调用者身份，用于把地名集合收敛到"调用者可见的媒体"（空串 = 恒假，返回空集）。

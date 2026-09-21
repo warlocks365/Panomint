@@ -41,10 +41,10 @@ const navItems = computed(() => {
     { label: '地图', to: '/map', ready: true, icon: icons.map },
     { label: '相册', to: '/albums', ready: true, icon: icons.album },
     { label: '人物', to: '/people', ready: true, icon: icons.person },
-    { label: '地点', ready: false, icon: icons.place },
+    { label: '地点', to: '/places', ready: true, icon: icons.place },
     { label: '标签', to: '/tags', ready: true, icon: icons.tag },
     { label: '空间', to: '/spaces', ready: true, icon: icons.spaces },
-    { label: '文件夹', ready: false, icon: icons.folder },
+    { label: '文件夹', to: '/folders', ready: true, icon: icons.folder },
     { label: '工具箱', to: '/toolbox', ready: true, icon: icons.toolbox },
     { label: '设置', to: '/settings', ready: true, icon: icons.settings }
   ]

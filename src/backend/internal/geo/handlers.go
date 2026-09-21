@@ -295,6 +295,17 @@ func (h *Handler) Places(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"places": places})
 }
 
+// PlacesOverview GET /geo/places-overview（Job000062 地点页）：全局地名聚合（计数+封面）。
+// 无 bbox——地点页是"全库按地名浏览"，与地图视口用的 /geo/places 互补；可见性由 store 收敛。
+func (h *Handler) PlacesOverview(c *gin.Context) {
+	places, err := h.Media.PlaceOverviews(c.Request.Context(), c.GetString("user_id"))
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"places": places})
+}
+
 // GetMapIconPref GET /preferences/map 读取当前用户地图图标偏好。
 // 无记录返回 200 + 默认值（前端据此用默认红点，无需额外处理 404）。
 func (h *Handler) GetMapIconPref(c *gin.Context) {

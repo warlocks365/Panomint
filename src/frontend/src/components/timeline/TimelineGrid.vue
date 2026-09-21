@@ -65,7 +65,8 @@ import DateSlider from './DateSlider.vue'
 
 const props = defineProps({
   type: { type: String, default: '' }, // photo | video | 360 | ''
-  favorites: { type: Boolean, default: false }
+  favorites: { type: Boolean, default: false },
+  place: { type: String, default: '' } // Job000062：地点过滤（地点页点入）
 })
 const emit = defineEmits(['open'])
 
@@ -208,6 +209,7 @@ async function loadMore() {
     const params = { view: 'all', limit: PAGE_SIZE }
     if (props.type) params.type = props.type
     if (props.favorites) params.favorites = 'true'
+    if (props.place) params.place = props.place
     if (nextCursor) params.cursor = nextCursor
     const { data } = await http.get('/media', { params })
     if (seq !== loadSeq) return // reset() 已递增代次：旧筛选的响应丢弃
@@ -307,13 +309,11 @@ async function seekTo(monthKey) {
   if (seeking.value) return
   seeking.value = true
   try {
-    // 目标月未加载时持续翻页，直到覆盖该月或全部加载完
     let guard = 0
     while (!finished.value && guard < 300) {
       const last = lastLoadedMonth()
-      // 媒体按时间倒序：last <= monthKey 说明目标月已在加载范围内
-      if (last && last !== 'unknown' && last <= monthKey) break
-      if (last === 'unknown') break
+      // 媒体按时间倒序：last <= monthKey 说明目标月已在加载范围内；unknown = 无媒体可定位
+      if (last === 'unknown' || (last && last <= monthKey)) break
       await loadMore()
       guard++
     }
@@ -392,7 +392,7 @@ onBeforeUnmount(() => {
   if (rafId) cancelAnimationFrame(rafId)
 })
 
-watch(() => [props.type, props.favorites], reset)
+watch(() => [props.type, props.favorites, props.place], reset)
 
 defineExpose({ items, removeById, reload: reset })
 </script>

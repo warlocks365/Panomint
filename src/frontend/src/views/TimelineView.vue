@@ -25,6 +25,20 @@
         收藏
       </button>
 
+      <button
+        v-if="placeFilter"
+        class="tool-btn active"
+        data-testid="place-filter-chip"
+        :title="`仅显示地点：${placeFilter}`"
+        @click="clearPlace"
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none">
+          <path d="M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+          <circle cx="12" cy="10.2" r="2.3" stroke="currentColor" stroke-width="1.6" />
+        </svg>
+        {{ placeFilter }} ×
+      </button>
+
       <div class="spacer"></div>
 
       <button class="tool-btn" title="回收站" @click="trashOpen = true">
@@ -40,6 +54,7 @@
       ref="gridRef"
       :type="typeFilter"
       :favorites="favOnly"
+      :place="placeFilter"
       @open="openViewer"
     />
 
@@ -66,11 +81,17 @@ const router = useRouter()
 
 const typeFilter = ref('')
 const favOnly = ref(false)
-
+// Job000062：地点页带 ?place= 进入时按地点过滤（'/media?place=' 后端已支持）
+const placeFilter = ref(typeof route.query.place === 'string' ? route.query.place : '')
 const gridRef = ref(null)
 const viewerOpen = ref(false)
 const viewerIndex = ref(0)
 const trashOpen = ref(false)
+
+function clearPlace() {
+  placeFilter.value = ''
+  if (route.query.place) router.replace({ query: { ...route.query, place: undefined } })
+}
 
 const gridItems = computed(() => gridRef.value?.items ?? [])
 
