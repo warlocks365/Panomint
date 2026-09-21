@@ -52,13 +52,7 @@
       <div v-if="mediaLoading" class="muted grid-tip">加载中…</div>
       <div v-else-if="mediaItems.length === 0" class="muted grid-tip">该空间暂无媒体</div>
 
-      <div v-else class="media-grid">
-        <div v-for="m in mediaItems" :key="m.id" class="media-tile" :title="m.filename">
-          <span class="tile-icon" v-html="typeIcon(m)"></span>
-          <span class="tile-name">{{ m.filename }}</span>
-          <span class="tile-meta">{{ formatDate(m.taken_at) }}</span>
-        </div>
-      </div>
+      <MediaTileGrid :items="mediaItems" @open="openItem" />
 
       <div v-if="nextCursor" class="load-more">
         <button class="btn" :disabled="loadingMore" @click="loadMore">
@@ -71,19 +65,22 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import http from '../api/http'
+import MediaTileGrid from '../components/media/MediaTileGrid.vue'
+
+const router = useRouter()
+
+function openItem(m) {
+  router.push({ name: 'player', params: { id: m.id }
+ })
+}
 
 const icons = {
   personal:
     '<svg viewBox="0 0 24 24" width="22" height="22" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M4.5 20c1.2-3.9 4.1-6 7.5-6s6.3 2.1 7.5 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
   shared:
-    '<svg viewBox="0 0 24 24" width="22" height="22" fill="none"><circle cx="8.5" cy="9" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M2.8 19c1-3.2 3.2-4.8 5.7-4.8s4.7 1.6 5.7 4.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="16.5" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M15.4 14.4c2.4.2 4.3 1.7 5.2 4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
-  photo:
-    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.5"/><circle cx="9" cy="10" r="2" stroke="currentColor" stroke-width="1.5"/><path d="M4 18l5-5 3.5 3.5L16 13l4 4" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>',
-  video:
-    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none"><rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M10.5 9.5l5 2.5-5 2.5v-5z" fill="currentColor"/></svg>',
-  pano:
-    '<svg viewBox="0 0 24 24" width="26" height="26" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/><ellipse cx="12" cy="12" rx="3.5" ry="8.5" stroke="currentColor" stroke-width="1.5"/><path d="M3.5 12h17" stroke="currentColor" stroke-width="1.5"/></svg>'
+    '<svg viewBox="0 0 24 24" width="22" height="22" fill="none"><circle cx="8.5" cy="9" r="3.2" stroke="currentColor" stroke-width="1.6"/><path d="M2.8 19c1-3.2 3.2-4.8 5.7-4.8s4.7 1.6 5.7 4.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="16.5" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M15.4 14.4c2.4.2 4.3 1.7 5.2 4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
 }
 
 const personal = ref(null)
@@ -110,15 +107,12 @@ function formatBytes(n) {
   return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i]
 }
 
+watch(mediaItems, (list) => ensureThumbs(list), { immediate: true })
+
 function formatDate(iso) {
   if (!iso) return ''
   const d = new Date(iso)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function typeIcon(m) {
-  if (m.is_360) return icons.pano
-  return m.type === 'video' ? icons.video : icons.photo
 }
 
 async function fetchMedia(cursor) {
@@ -313,47 +307,7 @@ onMounted(async () => {
   text-align: center;
 }
 
-.media-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
-}
 
-.media-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 16px 10px 12px;
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.media-tile:hover {
-  background-color: var(--color-surface-hover);
-}
-
-.tile-icon {
-  color: var(--color-text-disabled);
-  display: inline-flex;
-}
-
-.tile-name {
-  width: 100%;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tile-meta {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
 
 .load-more {
   display: flex;
