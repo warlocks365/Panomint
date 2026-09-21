@@ -44,7 +44,7 @@
 <script setup>
 // 地点页（Job000062）：按地名的全库聚合卡片；点击进入该地点的时间轴过滤视图。
 // 封面加载失败静默隐藏（回退到地点图标），与缩略图模式回退同思路。
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http from '../api/http'
 import { navIcons } from '../layout/navIcons'
@@ -56,7 +56,7 @@ const icons = navIcons
 const places = ref([])
 const loading = ref(true)
 const error = ref('')
-const brokenThumbs = new Set() // 加载失败的封面 id 集合（不重复请求）
+const brokenThumbs = reactive(new Set()) // 加载失败的封面 id（响应式：失败后卡片回退地点图标）
 
 function thumbOf(id) {
   return brokenThumbs.has(id) ? '' : loadThumbUrl({ id }, 'sm')
