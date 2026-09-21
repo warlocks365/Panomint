@@ -60,7 +60,7 @@
 import { onMounted, ref } from 'vue'
 import DupConfirmDialog from './DupConfirmDialog.vue'
 import DupGroupCard from './DupGroupCard.vue'
-import { deleteMedia, getDuplicates } from '../api/media'
+import { deleteMedia, getDuplicates } from '../../api/media'
 
 const groups = ref([])
 const loading = ref(false)

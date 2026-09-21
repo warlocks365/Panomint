@@ -40,7 +40,7 @@
 // 「已恢复」面板（恢复历史，懒加载）——从 ToolboxView 抽出（Job000058-4）。
 // 后端只按 actor 过滤，故这里天然只有本人执行的记录（见 api/media.js 注释）。
 import { ref, watch } from 'vue'
-import { getRestoreHistory } from '../api/media'
+import { getRestoreHistory } from '../../api/media'
 
 const active = defineModel({ type: Boolean, default: false }) // 父级标签激活时才首载
 
