@@ -100,25 +100,22 @@
       />
     </div>
 
-    <!-- 桌面端：筛选栏常驻侧栏。左右切换只换 CSS order，DOM 结构不变以免 Vue 重建组件 -->
-    <div
+    <!-- 桌面端：筛选悬浮层（展开=浮层卡片 / 收起=角部药丸），不压缩地图宽度 -->
+    <MapFilterSlot
       v-if="!isMobile"
-      class="map-dock"
-      :class="{ 'map-dock--right': uiPrefs.map_filter_side === 'right' }"
-    >
-      <MapFilterBar
-        :kind="kind"
-        :side="uiPrefs.map_filter_side"
-        :slider-pos="uiPrefs.map_slider_pos"
-        :provider="uiPrefs.map_default_provider"
-        :default-zoom="uiPrefs.map_default_zoom"
-        @update:kind="kind = $event"
-        @update:side="patchPrefs({ map_filter_side: $event })"
-        @update:slider-pos="patchPrefs({ map_slider_pos: $event })"
-        @update:provider="patchPrefs({ map_default_provider: $event })"
-        @update:default-zoom="patchPrefs({ map_default_zoom: $event })"
-      />
-    </div>
+      :kind="kind"
+      :side="uiPrefs.map_filter_side"
+      :slider-pos="uiPrefs.map_slider_pos"
+      :provider="uiPrefs.map_default_provider"
+      :default-zoom="uiPrefs.map_default_zoom"
+      :collapsed="uiPrefs.map_filter_collapsed"
+      @update:kind="kind = $event"
+      @update:side="patchPrefs({ map_filter_side: $event })"
+      @update:slider-pos="patchPrefs({ map_slider_pos: $event })"
+      @update:provider="patchPrefs({ map_default_provider: $event })"
+      @update:default-zoom="patchPrefs({ map_default_zoom: $event })"
+      @update:collapsed="setFilterCollapsed($event)"
+    />
 
     <!-- 移动端：筛选栏以浮层形式展开（顶栏「筛选」按钮开关） -->
     <div
@@ -167,7 +164,8 @@ import MapTimeline from '../components/map/MapTimeline.vue'
 import MapItemList from '../components/map/MapItemList.vue'
 import MapIconPicker from '../components/map/MapIconPicker.vue'
 import MapHoverCard from '../components/map/MapHoverCard.vue'
-import MapFilterBar from '../components/map/MapFilterBar.vue'
+import MapFilterSlot from '../components/map/MapFilterSlot.vue'
+import MapFilterBar from '../components/map/MapFilterBar.vue' // 移动端浮层仍直接用
 
 // 地图模式（Job000009 优化）：全屏地图 + 时间轴缩放滑块 + 图标可配置 + 悬停预览
 const router = useRouter()
@@ -194,11 +192,16 @@ const iconPref = ref({ shape: 'circle', color: '#ef4444' })
 const uiPrefs = ref({
   map_slider_pos: 'bottom',
   map_filter_side: 'left',
+  map_filter_collapsed: false, // Job000059：桌面筛选悬浮化收起状态
   map_default_provider: 'auto',
   map_default_zoom: null
 })
 const kind = ref('all') // 媒体类型过滤 all|photo|video|pano
-const filterOpen = ref(false) // 移动端筛选浮层开关（桌面端常驻，不用此项）
+const filterOpen = ref(false) // 移动端筛选浮层开关
+
+function setFilterCollapsed(v) {
+  patchPrefs({ map_filter_collapsed: !!v })
+}
 
 const hoverOpen = ref(false)
 const hoverItems = ref([])
@@ -729,22 +732,6 @@ onBeforeUnmount(() => {
 }
 
 /* 桌面端筛选栏侧栏：左侧 order:0，右侧 order:2 */
-.map-dock {
-  order: 0;
-  flex: 0 0 auto;
-  padding: 12px 0 12px 12px;
-  background: var(--color-bg);
-}
-
-.map-dock--right {
-  order: 2;
-  padding: 12px 12px 12px 0;
-}
-
-/* 移动端筛选浮层：覆盖在地图上方，按偏好靠左/靠右
-   ⚠️ top 必须让开顶栏与搜索框所在的浮层行，否则浮层会压住顶栏里的「筛选」按钮 ——
-   按钮是本浮层的开关，被自己盖住就意味着再点一次关不掉（实测 elementFromPoint 命中 mf-head）。
-   390×844 实测（相对 .map-view 顶边）：顶栏行底边 51px、搜索框 59~93px，故取 100px 同时让开两者。 */
 .map-filter-overlay {
   position: absolute;
   top: 100px;

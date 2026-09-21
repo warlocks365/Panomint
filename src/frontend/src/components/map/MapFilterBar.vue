@@ -3,7 +3,6 @@
     <div class="mf-head">
       <span class="mf-title">筛选</span>
       <button
-        v-show="mobile"
         class="mf-close"
         type="button"
         title="收起筛选"
