@@ -218,7 +218,8 @@ function applyMarkerMode() {
 }
 watch(markerMode, () => {
   applyMarkerMode()
-  // 模式切换后重下数据（icon_img 属性只在缩略图模式下注入）
+  // 切到缩略图模式必须补注册代表图（reload 才走 ensureThumbImage；仅 setData 不会触发图片请求）
+  if (markerMode.value === 'thumb') for (const c of clusters.value) ensureThumbImage(c.cover_id)
   if (map) map.getSource('clusters')?.setData(toGeoJSON(clusters.value))
 })
 
