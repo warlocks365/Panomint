@@ -165,7 +165,7 @@ import {
 } from '../api/map'
 import { useResponsive } from '../composables/useResponsive'
 import { loadThumbUrl } from '../components/timeline/mediaLoader'
-import { useMapIcon } from '../composables/useMapIcon'
+import { useMapIcon, makeDefaultIconImageData } from '../composables/useMapIcon'
 import MapTimeline from '../components/map/MapTimeline.vue'
 import MapItemList from '../components/map/MapItemList.vue'
 import MapIconPicker from '../components/map/MapIconPicker.vue'
@@ -418,7 +418,8 @@ function ensureThumbImage(id) {
       img.src = url
     })
     .catch(() => {
-      if (map && !map.hasImage(id) && clusterIconEl.value) map.addImage(id, clusterIconEl.value)
+      // 加载失败（429/网络/缩略图缺失）→ 注册同步默认红点，视觉上仍是标记、绝不"消失"
+      if (map && !map.hasImage(id)) map.addImage(id, makeDefaultIconImageData())
     })
 }
 
@@ -604,6 +605,8 @@ onMounted(async () => {
   map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
 
   map.on('load', () => {
+    // 同步默认红点：图层挂载前注册，cluster-thumbs 的 coalesce 回退即刻有形（不依赖异步图标）
+    map.addImage('cluster-icon', makeDefaultIconImageData())
     map.addSource('clusters', { type: 'geojson', data: toGeoJSON([]) })
     map.addLayer({
       id: 'cluster-circles',
@@ -624,7 +627,7 @@ onMounted(async () => {
       source: 'clusters',
       layout: {
         'icon-image': ['coalesce', ['get', 'icon_img'], 'cluster-icon'],
-        'icon-size': 0.2,
+        'icon-size': 0.3,
         'icon-anchor': 'center',
         'icon-allow-overlap': true,
         visibility: markerMode.value === 'thumb' ? 'visible' : 'none'
@@ -664,6 +667,8 @@ onMounted(async () => {
     }
 
     if (import.meta.env.DEV) window.__map = map
+    // 验收探针钩子（生产可用，无副作用）：验证缩略图注册与图层可见性
+    window.__mapProbe = { has: (id) => !!(map && map.hasImage(id)), vis: (l) => (map?.getLayer(l) ? map.getLayoutProperty(l, 'visibility') : null) }
     reload()
   })
 

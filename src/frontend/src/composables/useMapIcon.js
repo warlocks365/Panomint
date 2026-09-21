@@ -1,7 +1,25 @@
 // 地图标记图标偏好——MapView 的 composable 抽取（Job000060，行数棘轮倒逼，语义原样迁移）。
 // 含：形状 path 表、SVG dataURL 生成、注册到 MapLibre、账户级偏好加载/保存（服务端失败降级 localStorage）。
+// makeDefaultIconImageData 同步生成默认红点 ImageData——图层挂载前即可注册 cluster-icon，
+// 保证缩略图层的 coalesce 回退在图标异步加载完成前也有形可见（修"切换不及时/标记消失"）。
 import { ref } from 'vue'
 import { getMapIconPref, putMapIconPref } from '../api/map'
+
+export function makeDefaultIconImageData() {
+  const size = 24
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  ctx.beginPath()
+  ctx.arc(size / 2, size / 2, 8, 0, Math.PI * 2)
+  ctx.fillStyle = '#ef4444' // PIN_COLOR_PALETTE 同族豁免：与 DEFAULT_PIN_COLOR 同步默认红点
+  ctx.fill()
+  ctx.lineWidth = 2.5
+  ctx.strokeStyle = '#ffffff'
+  ctx.stroke()
+  return ctx.getImageData(0, 0, size, size)
+}
 
 export function useMapIcon(getMap) {
   // PIN_COLOR_PALETTE 同族豁免：图钉调色板默认色（颜色即数据，非样式债）

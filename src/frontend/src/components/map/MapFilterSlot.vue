@@ -69,13 +69,14 @@ const kindLabel = computed(() => KIND_LABELS[props.kind] || '全部')
 </script>
 
 <style scoped>
-/* 悬浮卡片：叠加在地图之上，不压缩地图宽度 */
+/* 悬浮卡片：叠加在地图之上，不压缩地图宽度。
+   top 让位于顶部"状态栏+地名搜索"浮层堆（约 100px），不挡搜索框 */
 .map-filter-float {
   position: absolute;
-  top: 12px;
+  top: 100px;
   left: 12px;
   z-index: 9;
-  max-height: calc(100% - 120px);
+  max-height: calc(100% - 210px);
   overflow-y: auto;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
@@ -93,7 +94,7 @@ const kindLabel = computed(() => KIND_LABELS[props.kind] || '全部')
 /* 收起态：角部小药丸，带当前筛选摘要 */
 .map-filter-pill {
   position: absolute;
-  top: 12px;
+  top: 100px;
   left: 12px;
   z-index: 9;
   display: inline-flex;
