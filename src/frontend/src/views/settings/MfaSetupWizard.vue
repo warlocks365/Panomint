@@ -188,7 +188,7 @@ input[type='text']:focus {
 
 .btn--ghost {
   background-color: transparent;
-  color: var(--color-text-primary, inherit);
+  color: var(--color-text-primary);
   border-color: var(--color-border);
 }
 

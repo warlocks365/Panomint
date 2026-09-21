@@ -174,13 +174,13 @@ async function onDisable() {
 }
 
 .state--on {
-  color: var(--color-success, #2e7d32);
-  border-color: var(--color-success, #2e7d32);
+  color: var(--color-success);
+  border-color: var(--color-success);
 }
 
 .state--warn {
-  color: var(--color-warning, #b26a00);
-  border-color: var(--color-warning, #b26a00);
+  color: var(--color-warning);
+  border-color: var(--color-warning);
 }
 
 .state--off {
@@ -241,7 +241,7 @@ input[type='text']:focus {
 
 .btn--ghost {
   background-color: transparent;
-  color: var(--color-text-primary, inherit);
+  color: var(--color-text-primary);
   border-color: var(--color-border);
 }
 
@@ -257,7 +257,7 @@ input[type='text']:focus {
 }
 
 .hint--warn {
-  color: var(--color-warning, #b26a00);
+  color: var(--color-warning);
 }
 
 .msg {
@@ -270,6 +270,6 @@ input[type='text']:focus {
 }
 
 .msg--ok {
-  color: var(--color-success, #2e7d32);
+  color: var(--color-success);
 }
 </style>
