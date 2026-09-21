@@ -91,6 +91,14 @@ const icons = {
 
 const tree = ref(null)
 const treeLoading = ref(true)
+const selectedPath = ref('')
+const loadError = ref('')
+
+const mediaItems = ref([])
+const mediaLoading = ref(true)
+
+const totalCount = computed(() => tree.value?.count ?? mediaItems.value.length)
+
 // 当前目录媒体：folder_path 等于选中路径，或位于其子目录下
 const filteredItems = computed(() => {
   if (!selectedPath.value) return mediaItems.value
