@@ -1,5 +1,13 @@
 <template>
-  <div ref="rootEl" class="thumb" @click="$emit('open', item)">
+  <div ref="rootEl" class="thumb" :class="{ 'thumb--selected': selected }" @click="$emit('open', item)">
+    <label v-if="selectable" class="thumb-check" @click.stop>
+      <input
+        type="checkbox"
+        :checked="selected"
+        data-testid="thumb-check"
+        @change="emit('toggle', item)"
+      />
+    </label>
     <img v-if="url" :src="url" :alt="item.filename" class="thumb-img" loading="lazy" />
     <div v-else class="thumb-placeholder">
       <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
@@ -47,9 +55,11 @@ import { loadThumbUrl } from './mediaLoader'
 import MediaTooltip from './MediaTooltip.vue'
 
 const props = defineProps({
-  item: { type: Object, required: true }
+  item: { type: Object, required: true },
+  selectable: { type: Boolean, default: false }, // Job000079 时间轴批量操作
+  selected: { type: Boolean, default: false }
 })
-defineEmits(['open'])
+const emit = defineEmits(['open', 'toggle'])
 
 const rootEl = ref(null)
 
@@ -93,6 +103,30 @@ function formatDuration(sec) {
   border-radius: var(--radius-sm);
   overflow: hidden;
   background-color: var(--color-surface-hover);
+  cursor: pointer;
+}
+
+.thumb--selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.thumb-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  padding: 2px;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.thumb-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--color-primary);
   cursor: pointer;
 }
 

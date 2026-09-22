@@ -49,13 +49,15 @@
       </button>
     </header>
 
-    <!-- 单一连续时间流（最新在前，内联月/日标题 + 右侧日期滑块） -->
+    <!-- 单一连续时间流（最新在前，内联月/日标题 + 右侧日期滑块）；Job000079 批量操作 -->
     <TimelineGrid
       ref="gridRef"
       :type="typeFilter"
       :favorites="favOnly"
       :place="placeFilter"
+      selectable
       @open="openViewer"
+      @changed="onBatchChanged"
     />
 
     <MediaViewer
@@ -120,6 +122,11 @@ function onDeleted(id) {
 }
 
 function onRestored() {
+  gridRef.value?.reload()
+}
+
+function onBatchChanged() {
+  // 批量操作（/media/batch）已清空选中集并生效：整流重载
   gridRef.value?.reload()
 }
 

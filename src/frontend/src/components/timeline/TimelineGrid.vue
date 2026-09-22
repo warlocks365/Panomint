@@ -23,7 +23,15 @@
                 class="row"
                 :style="{ gridTemplateColumns: `repeat(${cols}, 1fr)`, height: cellSize + 'px' }"
               >
-                <ThumbItem v-for="m in item.cells" :key="m.id" :item="m" @open="$emit('open', $event)" />
+                <ThumbItem
+                  v-for="m in item.cells"
+                  :key="m.id"
+                  :item="m"
+                  :selectable="selectable"
+                  :selected="batch.selected.has(m.id)"
+                  @toggle="batch.toggle($event.id)"
+                  @open="$emit('open', $event)"
+                />
               </div>
             </DynamicScrollerItem>
           </template>
@@ -51,6 +59,22 @@
           @seek="seekTo"
         />
       </div>
+
+      <BatchBar
+        v-if="selectable && batch.count.value > 0"
+        :count="batch.count.value"
+        @meta="batch.onMeta"
+        @tags="batch.onTags"
+        @move="batch.onMove"
+        @copy="batch.onCopy"
+        @share="batch.onShare"
+        @space="batch.onShareSpace"
+        @delete="batch.onDelete"
+        @clear="batch.clear"
+      />
+      <p v-if="selectable && batch.lastResult.value" class="batch-result" data-testid="batch-result">
+        {{ batch.lastResult.value }}
+      </p>
     </template>
   </div>
 </template>
@@ -62,13 +86,19 @@ import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import http from '../../api/http'
 import ThumbItem from './ThumbItem.vue'
 import DateSlider from './DateSlider.vue'
+import BatchBar from '../media/BatchBar.vue'
+import { useBatchOps } from '../media/useBatchOps'
 
 const props = defineProps({
   type: { type: String, default: '' }, // photo | video | 360 | ''
   favorites: { type: Boolean, default: false },
-  place: { type: String, default: '' } // Job000062：地点过滤（地点页点入）
+  place: { type: String, default: '' }, // Job000062：地点过滤（地点页点入）
+  selectable: { type: Boolean, default: false } // Job000079 时间轴批量操作（勾选 + 吸底操作栏）
 })
-const emit = defineEmits(['open'])
+const emit = defineEmits(['open', 'changed'])
+
+// 选中集按媒体 id 存于本组件（虚拟滚动只复用 DOM，选中态不丢）；操作完成后 emit changed 让宿主 reload
+const batch = useBatchOps(() => emit('changed'))
 
 const PAGE_SIZE = 60
 const GAP = 8
@@ -491,5 +521,11 @@ defineExpose({ items, removeById, reload: reset })
 
 .muted {
   color: var(--color-text-disabled);
+}
+
+.batch-result {
+  margin: 8px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 </style>
