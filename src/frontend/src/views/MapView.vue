@@ -84,8 +84,10 @@
         v-if="listOpen"
         :items="items"
         :loading="listLoading"
+        selectable
         @close="closeList"
         @open="openItem"
+        @changed="onListChanged"
       />
 
       <MapHoverCard
@@ -498,10 +500,18 @@ async function openCluster(props, lngLat) {
     maxLng: lngLat[0] + half,
     maxLat: lngLat[1] + half
   }
-  listLoading.value = true
   listOpen.value = true
-  items.value = []
   closeHover()
+  await loadList(bbox)
+}
+
+// 记忆当前列表的 bbox：批量操作完成后按同一范围重取（列表项已因操作变化）
+let lastListBBox = null
+
+async function loadList(bbox) {
+  lastListBBox = bbox
+  listLoading.value = true
+  items.value = []
   try {
     items.value = await fetchItems(bbox, range.value?.from || '', range.value?.to || '', 60, kind.value)
   } catch (e) {
@@ -511,9 +521,16 @@ async function openCluster(props, lngLat) {
   }
 }
 
+// Job000080 批量操作完成 → 重取列表（同 bbox）+ 刷新簇/计数
+function onListChanged() {
+  reload()
+  if (listOpen.value && lastListBBox) loadList(lastListBBox)
+}
+
 function closeList() {
   listOpen.value = false
   items.value = []
+  lastListBBox = null
 }
 
 function openItem(it) {
@@ -668,8 +685,17 @@ onMounted(async () => {
     }
 
     if (import.meta.env.DEV) window.__map = map
-    // 验收探针钩子（生产可用，无副作用）：验证缩略图注册与图层可见性
-    window.__mapProbe = { has: (id) => !!(map && map.hasImage(id)), vis: (l) => (map?.getLayer(l) ? map.getLayoutProperty(l, 'visibility') : null) }
+    // 验收探针钩子（生产可用，无副作用）：验证缩略图注册与图层可见性；openList 走真实 openCluster 生产路径打开「此处 N 项」面板
+    window.__mapProbe = {
+      has: (id) => !!(map && map.hasImage(id)),
+      vis: (l) => (map?.getLayer(l) ? map.getLayoutProperty(l, 'visibility') : null),
+      openList: () => {
+        const c = clusters.value[0]
+        if (!c || !map) return false
+        openCluster({ count: 1 }, [c.lng, c.lat])
+        return true
+      }
+    }
     reload()
   })
 
