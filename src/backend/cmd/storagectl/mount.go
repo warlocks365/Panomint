@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"strings"
 
@@ -83,7 +84,12 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 		return fmt.Errorf("写 rclone 配置: %w", err)
 	}
 	defer os.Remove(cfgPath)
+	// ⚠️ 绝不能用 CombinedOutput/Output 捕获 rclone mount 的输出：
+	// --daemon 模式主进程 fork 后退出，但 **daemon 子进程继承 stdout/stderr pipe**，
+	// CombinedOutput 等 pipe EOF 会永久阻塞（实测卡死 reconcile 循环，进程假活零日志）。
+	// 输出一律走 --log-file；这里只判 daemon 启动退出码。
 	logPath := path.Join("/tmp", "rclone-"+mountKey(m.id)+".log")
+	_ = os.Remove(logPath)
 	args := []string{
 		"mount", "dst:", mp,
 		"--config", cfgPath,
@@ -94,8 +100,9 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 		"--log-level", "ERROR",
 		"--log-file", logPath,
 	}
-	if out, err := execCommand("rclone", args...); err != nil {
-		return fmt.Errorf("rclone mount: %v (%s)", err, truncate(string(out), 200))
+	if err := exec.Command("rclone", args...).Run(); err != nil {
+		tail := readLogTail(logPath, 200)
+		return fmt.Errorf("rclone mount: %w (%s)", err, tail)
 	}
 	// --daemon 立即返回；等 FUSE 就绪后轮询验证。
 	for i := 0; i < 10; i++ {
@@ -105,6 +112,18 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 		timeSleep(300 * timeMillisecond)
 	}
 	return fmt.Errorf("挂载未就绪（见 %s）", logPath)
+}
+
+// readLogTail 读日志文件末尾 n 字节（错误上下文补充；文件不存在返回空串）。
+func readLogTail(p string, n int) string {
+	b, err := os.ReadFile(p)
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	if len(b) > n {
+		b = b[len(b)-n:]
+	}
+	return truncate(string(b), n)
 }
 
 // nfsMount 内核 NFS 只读挂载。
