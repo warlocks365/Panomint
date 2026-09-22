@@ -128,17 +128,22 @@ func reconcileWith(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, 
 		wantIDs[mountKey(m.id)] = true
 	}
 
-	// 孤儿卸载：盘上挂着但表里没有。
 	active, err := listActiveMounts()
 	if err != nil {
 		log.Printf("列挂载点失败: %v", err)
-	} else {
-		for key, mp := range active {
-			if !wantIDs[key] {
-				log.Printf("孤儿卸载 %s（表内无此挂载）", mp)
-				if err := umount(mp); err != nil {
-					log.Printf("孤儿卸载失败 %s: %v", mp, err)
-				}
+		active = map[string]string{}
+	}
+	// 孤儿清理：目录存在但未挂载的残影一并删除（半挂载残留——目录在、/proc/mounts 无记录、
+	// 访问即挂起；rm -rf 对空壳目录安全，对已挂载目录因 busy 失败无害）。
+	for key := range active {
+		if !wantIDs[key] {
+			mp := path.Join(mountRoot, key)
+			log.Printf("孤儿卸载 %s（表内无此挂载）", mp)
+			if err := umount(mp); err != nil {
+				log.Printf("孤儿卸载失败 %s: %v", mp, err)
+			}
+			if err := os.Remove(mp); err != nil {
+				log.Printf("孤儿目录清理失败 %s: %v", mp, err)
 			}
 		}
 	}
@@ -242,6 +247,8 @@ func setStatus(ctx context.Context, pool *pgxpool.Pool, id, status, lastErr stri
 }
 
 // listActiveMounts 读 /proc/mounts 找 /mnt/storage/* 的挂载。
+// ⚠️ 只信 /proc/mounts（真挂载记录）；不用目录存在性——半挂载状态（daemon 卡死残留）
+// 下目录存在但访问即挂起，stat 它会卡死整个循环。
 func listActiveMounts() (map[string]string, error) {
 	b, err := os.ReadFile("/proc/mounts")
 	if err != nil {
