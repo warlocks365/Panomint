@@ -80,7 +80,7 @@
           :selectable="album.kind !== 'smart'"
           :removable="album.kind !== 'smart'"
           @open="openMedia"
-          @remove="removeTarget = $event"
+          @remove="onRemove"
           @changed="load"
         />
       </section>
@@ -132,19 +132,6 @@
       </div>
     </div>
 
-    <div v-if="removeTarget" class="dlg-mask" @click.self="removeTarget = null">
-      <div class="confirm-dlg" role="alertdialog">
-        <h3 class="confirm-title">移除媒体</h3>
-        <p class="confirm-text">确定将「{{ removeTarget.filename || '该媒体' }}」从相册中移除吗？媒体本身不会被删除。</p>
-        <p v-if="removeError" class="confirm-error">{{ removeError }}</p>
-        <div class="dlg-actions">
-          <button class="btn" @click="removeTarget = null">取消</button>
-          <button class="btn danger" :disabled="removing" @click="confirmRemove">
-            {{ removing ? '移除中…' : '移除' }}
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -161,6 +148,7 @@ import ShareManageList from '../components/shares/ShareManageList.vue'
 import { errMsg, getAlbum, removeAlbumItem, updateAlbum } from '../components/albums/albumApi'
 import { summarizeCriteria } from '../components/albums/criteriaSummary'
 import { loadThumbUrl } from '../components/timeline/mediaLoader'
+import { dialogs } from '../components/dialogs/dialogs'
 
 const route = useRoute()
 const router = useRouter()
@@ -182,10 +170,6 @@ const editing = ref(false)
 const editForm = ref({ name: '', description: '' })
 const saving = ref(false)
 const saveError = ref('')
-
-const removeTarget = ref(null)
-const removing = ref(false)
-const removeError = ref('')
 
 let alive = true
 
@@ -270,18 +254,19 @@ function onCriteriaSaved() {
   load()
 }
 
-async function confirmRemove() {
-  if (!removeTarget.value || removing.value) return
-  removing.value = true
-  removeError.value = ''
+async function onRemove(m) {
+  const ok = await dialogs.confirm({
+    title: '移除媒体',
+    text: `确定将「${m.filename || '该媒体'}」从相册中移除吗？媒体本身不会被删除。`,
+    danger: true,
+    confirmText: '移除'
+  })
+  if (!ok) return
   try {
-    await removeAlbumItem(album.value.id, removeTarget.value.id)
-    items.value = items.value.filter((m) => m.id !== removeTarget.value.id)
-    removeTarget.value = null
+    await removeAlbumItem(album.value.id, m.id)
+    items.value = items.value.filter((x) => x.id !== m.id)
   } catch (e) {
-    removeError.value = errMsg(e, '移除失败')
-  } finally {
-    removing.value = false
+    await dialogs.alert(errMsg(e, '移除失败'))
   }
 }
 
