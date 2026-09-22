@@ -113,6 +113,9 @@ services:
       # AMAP_KEY 必须是「Web 服务」类型的 Key；AMAP_SECRET 为数字签名密钥（留空则不签名）。
       AMAP_KEY: ${AMAP_KEY:-}
       AMAP_SECRET: ${AMAP_SECRET:-}
+      # Job000070 F4 挂载凭据加密密钥（32 字节 hex）：api 加密/校验，worker 解密执行挂载。
+      # 只经 .env 注入，绝不入库；未配置时带凭据的挂载写操作 400 CIPHER_KEY_MISSING。
+      STORAGE_CIPHER_KEY: ${STORAGE_CIPHER_KEY:-}
     volumes:
       - mediadata:/data
       - tilecache:/tile-cache
