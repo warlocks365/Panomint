@@ -191,7 +191,7 @@ func syncAndIndex(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, m
 	if err != nil {
 		return err
 	}
-	st, err := idx.ScanAs(ctx, local, m.ownerID)
+	st, err := idx.ScanAsPrefixed(ctx, local, m.ownerID, "_imports/"+mountKey(m.id))
 	if err != nil {
 		return err
 	}

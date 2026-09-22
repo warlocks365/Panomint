@@ -155,6 +155,14 @@ func (x *Indexer) Scan(ctx context.Context, root string) (*ScanStats, error) {
 // ScanAs 与 Scan 同，但入库媒体归属调用方指定的 userID（Job000070 挂载导入：
 // 远程挂载点的媒体归挂载属主，保证 mediascope 可见性谓词语义一致）。
 func (x *Indexer) ScanAs(ctx context.Context, root, ownerID string) (*ScanStats, error) {
+	return x.ScanAsPrefixed(ctx, root, ownerID, "")
+}
+
+// ScanAsPrefixed 与 ScanAs 同，但 media.path/folder_path 加前缀（相对 MEDIA_ROOT）。
+// 挂载导入用：扫描根是落地子目录（/data/media/_imports/<id8>），而库里 path 必须相对
+// MEDIA_ROOT，否则按 folder_path 浏览/拼路径时全链错位（文件在 _imports/<id8>/x，
+// 库里记成 x——浏览按 /data/media/x 找文件找不到）。prefix 形态如 "_imports/<id8>"。
+func (x *Indexer) ScanAsPrefixed(ctx context.Context, root, ownerID, prefix string) (*ScanStats, error) {
 	// 建任务行（先 running，拿到总数后更新 total）
 	var jobID string
 	if err := x.db.QueryRow(ctx,
@@ -173,6 +181,17 @@ func (x *Indexer) ScanAs(ctx context.Context, root, ownerID string) (*ScanStats,
 	entries, err := ScanDir(ctx, root)
 	if err != nil {
 		return fail(fmt.Errorf("扫描目录: %w", err))
+	}
+	// 前缀修正：Rel/Folder 相对扫描根，加前缀后相对 MEDIA_ROOT（挂载导入语义）。
+	if prefix != "" {
+		for i := range entries {
+			entries[i].Rel = prefix + "/" + entries[i].Rel
+			if entries[i].Folder != "" {
+				entries[i].Folder = prefix + "/" + entries[i].Folder
+			} else {
+				entries[i].Folder = prefix
+			}
+		}
 	}
 	st.Total = len(entries)
 	if _, err := x.db.Exec(ctx,
