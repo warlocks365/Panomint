@@ -21,6 +21,14 @@
         <label v-for="f in cur.fields" :key="f.key" class="field">
           <span class="field-label">{{ f.label }}</span>
           <input
+            v-if="f.type === 'check'"
+            v-model="cur.values[f.key]"
+            class="input input--check"
+            type="checkbox"
+            :data-testid="'dlg-field-' + f.key"
+          />
+          <input
+            v-else
             v-model="cur.values[f.key]"
             class="input"
             type="text"
@@ -121,6 +129,13 @@ function onMask() {
 .input:focus {
   outline: none;
   border-color: var(--color-primary);
+}
+
+.input--check {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
 }
 
 .dlg-error {

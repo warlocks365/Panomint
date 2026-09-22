@@ -21,9 +21,23 @@
       <p v-if="scanNotice" class="notice">{{ scanNotice }}</p>
 
       <section v-if="named.length" class="section">
-        <h3 class="section-title">已命名</h3>
+        <h3 class="section-title">
+          已命名
+          <span v-if="namedSelected.length" class="batch-bar-entity" data-testid="people-batch-bar">
+            <span class="pb-count">已选 {{ namedSelected.length }} 项</span>
+            <button class="mini" data-testid="pb-hide" @click="batchHide(true)">隐藏</button>
+            <button class="mini" data-testid="pb-unhide" @click="batchHide(false)">取消隐藏</button>
+            <button class="mini" data-testid="pb-clear" @click="namedSelected = []">清除</button>
+          </span>
+        </h3>
         <div class="grid">
           <div v-for="p in named" :key="p.id" class="card" :class="{ dimmed: p.hidden }">
+            <span
+              class="pick"
+              :class="{ on: namedSelected.includes(p.id) }"
+              data-testid="people-pick"
+              @click.stop="toggleNamedPick(p.id)"
+            ></span>
             <div class="cover" @click="openPerson(p)">
               <img v-if="covers[p.id]" :src="covers[p.id]" alt="" />
               <div v-else class="cover-empty">{{ initial(p.name) }}</div>
@@ -49,7 +63,7 @@
         <h3 class="section-title">
           未命名聚类
           <span class="hint">勾选多个可合并为同一人</span>
-          <button v-if="selected.length" class="mini primary" @click="openMerge">
+          <button v-if="selected.length" class="mini primary" data-testid="people-merge-open" @click="openMerge">
             合并命名（已选 {{ selected.length }}）
           </button>
         </h3>
@@ -76,51 +90,7 @@
       </section>
     </template>
 
-    <!-- 合并 / 命名 -->
-    <div v-if="mergeOpen" class="dlg-mask" @click.self="closeMerge">
-      <div class="dlg" role="dialog">
-        <h3 class="dlg-title">命名并合并</h3>
-        <p class="dlg-text">将选中的 {{ selected.length }} 个聚类合并为同一个人物。</p>
-        <label class="field">
-          <span class="field-label">姓名</span>
-          <input v-model.trim="mergeName" class="input" placeholder="如：张三" @keyup.enter="submitMerge" />
-        </label>
-        <label class="check">
-          <input type="checkbox" v-model="mergePet" />
-          <span>这是宠物</span>
-        </label>
-        <p v-if="dlgError" class="dlg-error">{{ dlgError }}</p>
-        <div class="dlg-actions">
-          <button class="btn" @click="closeMerge">取消</button>
-          <button class="btn primary" :disabled="saving || !mergeName" @click="submitMerge">
-            {{ saving ? '保存中…' : '保存' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 改名 -->
-    <div v-if="renameTarget" class="dlg-mask" @click.self="renameTarget = null">
-      <div class="dlg" role="dialog">
-        <h3 class="dlg-title">修改姓名</h3>
-        <label class="field">
-          <span class="field-label">姓名</span>
-          <input
-            v-model.trim="renameName"
-            class="input"
-            :placeholder="renameTarget.name || '未命名'"
-            @keyup.enter="submitRename"
-          />
-        </label>
-        <p v-if="dlgError" class="dlg-error">{{ dlgError }}</p>
-        <div class="dlg-actions">
-          <button class="btn" @click="renameTarget = null">取消</button>
-          <button class="btn primary" :disabled="saving || !renameName" @click="submitRename">
-            {{ saving ? '保存中…' : '保存' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- 合并 / 改名自 Job000081 起走统一对话框宿主（dialogs.form / dialogs.prompt），内联对话框已清 -->
   </div>
 </template>
 
@@ -129,15 +99,20 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http from '../api/http'
 import { loadThumbUrl } from '../components/timeline/mediaLoader'
+import { dialogs } from '../components/dialogs/dialogs'
 
 // 人物页（API 契约 v1.1 §6 人物）：
 //   GET   /people            → { named:[...], unnamed:[{cluster_id,count,cover}] }
-//   POST  /people            → 命名并合并：{ cluster_ids:[...], name, is_pet }
-//   PATCH /people/:id        → { name } | { hidden }
-//   POST  /ai/faces          → 主动重算：{ scope:"all" }
+//   POST   /people           → 命名并合并：{ cluster_ids:[...], name, is_pet }
+//   PATCH  /people/:id       → { name } | { hidden }
+//   POST   /ai/faces         → 主动重算：{ scope:"all" }
 //
 // 说明：人脸缩略图目前复用媒体缩略图端点 GET /media/:id/thumb?size=sm
 // （尚无「人脸裁剪图」端点，故聚类封面是包含该脸的那张媒体图的缩略图）。
+//
+// Job000081 实体级批量：已命名人物多选 → 批量隐藏/取消隐藏（PATCH 循环，逐人独立成败不互阻断）；
+// 合并/改名对话框迁入统一宿主（dialogs.form 支持 check 型字段）。named 合并需后端支持（named 不返
+// cluster_ids），本轮不做——登记簿已挂未来项。
 
 const router = useRouter()
 
@@ -146,15 +121,8 @@ const unnamed = ref([])
 const covers = reactive({}) // key(personId|clusterId) -> objectURL
 const loading = ref(false)
 const loadError = ref('')
-const selected = ref([])
-
-const mergeOpen = ref(false)
-const mergeName = ref('')
-const mergePet = ref(false)
-const renameTarget = ref(null)
-const renameName = ref('')
-const saving = ref(false)
-const dlgError = ref('')
+const selected = ref([]) // 未命名聚类勾选（合并用）
+const namedSelected = ref([]) // Job000081 已命名人物勾选（批量隐藏用）
 
 const scanning = ref(false)
 const scanNotice = ref('')
@@ -193,6 +161,7 @@ async function load() {
     named.value = Array.isArray(data?.named) ? data.named : []
     unnamed.value = Array.isArray(data?.unnamed) ? data.unnamed : []
     selected.value = []
+    namedSelected.value = []
     for (const p of named.value) loadCover(p.id, coverId(p))
     for (const c of unnamed.value) loadCover(c.cluster_id, coverId(c))
   } catch (e) {
@@ -213,56 +182,74 @@ function togglePick(clusterId) {
   else selected.value.push(clusterId)
 }
 
-function openMerge() {
-  dlgError.value = ''
-  mergeName.value = ''
-  mergePet.value = false
-  mergeOpen.value = true
+// ---- Job000081 已命名人物：多选 + 批量隐藏 ----
+function toggleNamedPick(id) {
+  const i = namedSelected.value.indexOf(id)
+  if (i >= 0) namedSelected.value.splice(i, 1)
+  else namedSelected.value.push(id)
 }
 
-function closeMerge() {
-  if (saving.value) return
-  mergeOpen.value = false
+async function batchHide(hidden) {
+  const targets = named.value.filter((p) => namedSelected.value.includes(p.id))
+  if (!targets.length) return
+  const ok = await dialogs.confirm({
+    title: hidden ? '隐藏人物' : '取消隐藏人物',
+    text: `将${hidden ? '隐藏' : '取消隐藏'}选中的 ${targets.length} 位人物。`,
+    confirmText: hidden ? '隐藏' : '取消隐藏'
+  })
+  if (!ok) return
+  let fail = 0
+  for (const p of targets) {
+    try {
+      await http.patch(`/people/${p.id}`, { hidden })
+      p.hidden = hidden
+    } catch (e) {
+      fail++
+    }
+  }
+  namedSelected.value = []
+  if (fail) scanNotice.value = `批量操作完成，${fail} 项失败`
 }
 
-async function submitMerge() {
-  if (saving.value || !mergeName.value || !selected.value.length) return
-  saving.value = true
-  dlgError.value = ''
+async function openMerge() {
+  const vals = await dialogs.form({
+    title: '命名并合并',
+    fields: [
+      {
+        key: 'name',
+        label: `将选中的 ${selected.value.length} 个聚类合并为同一个人物，姓名`,
+        placeholder: '如：张三',
+        validate: (v) => (v && v.trim() ? '' : '姓名不能为空')
+      },
+      { key: 'pet', label: '这是宠物', type: 'check', initial: false }
+    ]
+  })
+  if (!vals) return
   try {
     await http.post('/people', {
       cluster_ids: [...selected.value],
-      name: mergeName.value,
-      is_pet: mergePet.value
+      name: vals.name.trim(),
+      is_pet: !!vals.pet
     })
-    mergeOpen.value = false
     await load()
   } catch (e) {
-    dlgError.value = errMsg(e, '合并失败')
-  } finally {
-    saving.value = false
+    await dialogs.alert(errMsg(e, '合并失败'))
   }
 }
 
-function startRename(p) {
-  dlgError.value = ''
-  renameTarget.value = p
-  renameName.value = p.name || ''
-}
-
-async function submitRename() {
-  const p = renameTarget.value
-  if (saving.value || !p || !renameName.value) return
-  saving.value = true
-  dlgError.value = ''
+async function startRename(p) {
+  const name = await dialogs.prompt({
+    title: '修改姓名',
+    label: '姓名',
+    initial: p.name || '',
+    validate: (v) => (v && v.trim() ? '' : '姓名不能为空')
+  })
+  if (name === null) return
   try {
-    await http.patch(`/people/${p.id}`, { name: renameName.value })
-    renameTarget.value = null
+    await http.patch(`/people/${p.id}`, { name: name.trim() })
     await load()
   } catch (e) {
-    dlgError.value = errMsg(e, '改名失败')
-  } finally {
-    saving.value = false
+    await dialogs.alert(errMsg(e, '改名失败'))
   }
 }
 
@@ -407,10 +394,23 @@ onMounted(load)
 }
 
 .card {
+  position: relative; /* Job000081：named 卡片的 .pick 勾选圆点绝对定位 */
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background-color: var(--color-surface);
   overflow: hidden;
+}
+
+.batch-bar-entity {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+}
+
+.pb-count {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 
 .card.dimmed {
@@ -509,79 +509,5 @@ onMounted(load)
   border-color: var(--color-primary);
   color: #fff;
   background-color: var(--color-primary);
-}
-
-.dlg-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(0, 0, 0, 0.4);
-}
-
-.dlg {
-  width: 360px;
-  max-width: calc(100vw - 32px);
-  background-color: var(--color-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  padding: 20px;
-}
-
-.dlg-title {
-  font-size: var(--font-size-lg);
-  color: var(--color-text-primary);
-  margin-bottom: 10px;
-}
-
-.dlg-text {
-  font-size: var(--font-size-md);
-  color: var(--color-text-secondary);
-  margin-bottom: 14px;
-}
-
-.field {
-  display: block;
-  margin-bottom: 12px;
-}
-
-.field-label {
-  display: block;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-  margin-bottom: 4px;
-}
-
-.input {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-md);
-}
-
-.check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
-  margin-bottom: 12px;
-}
-
-.dlg-error {
-  margin-bottom: 12px;
-  font-size: var(--font-size-sm);
-  color: var(--color-danger);
-}
-
-.dlg-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 </style>

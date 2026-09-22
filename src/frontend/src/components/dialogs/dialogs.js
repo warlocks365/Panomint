@@ -17,7 +17,7 @@ function enqueue(kind, opts) {
       kind, // confirm | prompt | form | alert
       title: opts.title || '',
       text: opts.text || '',
-      // form: [{ key, label, placeholder, initial, validate?(value, values) -> '' | 错误文案 }]
+      // form: [{ key, label, placeholder, initial, type?: 'check'(布尔勾选，默认文本), validate?(value, values) -> '' | 错误文案 }]
       fields: opts.fields || null,
       initial: opts.initial ?? '',
       confirmText: opts.confirmText || '确定',
