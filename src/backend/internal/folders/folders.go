@@ -123,8 +123,9 @@ func (h *Handler) Tree(c *gin.Context) {
 	defer regRows.Close()
 	registered := map[string]regMeta{}
 	for regRows.Next() {
-		var p, ownMark, ownerID, gtext string
-		if err := regRows.Scan(&p, &ownMark, &ownerID, &gtext); err != nil {
+		var p, ownerID, gtext string
+		var own bool
+		if err := regRows.Scan(&p, &own, &ownerID, &gtext); err != nil {
 			httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 			return
 		}
@@ -135,7 +136,7 @@ func (h *Handler) Tree(c *gin.Context) {
 		if gtext != "[]" && gtext != "" {
 			_ = json.Unmarshal([]byte(gtext), &gs)
 		}
-		registered[p] = regMeta{owner: ownMark == "true", grants: gs}
+		registered[p] = regMeta{owner: own, grants: gs}
 	}
 
 	tree := BuildTree(counts)

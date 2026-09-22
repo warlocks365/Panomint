@@ -166,7 +166,12 @@ func CondsFor(s Scope, alias string) ([]string, []any) {
 		if s.OwnerID == "" {
 			return []string{FailClosed}, nil
 		}
-		return []string{qual(alias, "space") + " = 'personal'", qual(alias, "owner_id") + " = $1"}, []any{s.OwnerID}
+		// 目录级授权臂（Job000069）：personal 列表 = 本人 owner 的 ∪ 被授 read 的
+		// 注册目录下的（媒体 space 仍 personal、owner 是目录属主，靠 folderGrantArm 命中）。
+		return []string{
+			qual(alias, "space") + " = 'personal'",
+			"(" + qual(alias, "owner_id") + " = $1 OR " + folderGrantArm(1, alias) + ")",
+		}, []any{s.OwnerID}
 	case "shared":
 		if s.MemberID == "" {
 			return []string{FailClosed}, nil

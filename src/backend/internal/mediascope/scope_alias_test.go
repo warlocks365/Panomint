@@ -26,7 +26,7 @@ func TestAliasParamKeepsLegacyTextByteIdentical(t *testing.T) {
 	if conds[0] != "m.space = 'personal'" {
 		t.Errorf("personal conds[0] 漂移：%q", conds[0])
 	}
-	if conds[1] != "m.owner_id = $1" {
+	if conds[1] != "(m.owner_id = $1 OR "+wantFolderGrant(1, "m")+")" {
 		t.Errorf("personal conds[1] 漂移：%q", conds[1])
 	}
 
@@ -65,8 +65,8 @@ func TestAliasEmptyProducesBareColumns(t *testing.T) {
 	if conds[0] != "space = 'personal'" {
 		t.Errorf("裸列名 conds[0] = %q，期望不带前缀", conds[0])
 	}
-	if conds[1] != "owner_id = $1" {
-		t.Errorf("裸列名 conds[1] = %q，期望不带前缀", conds[1])
+	if conds[1] != "(owner_id = $1 OR "+wantFolderGrant(1, "")+")" {
+		t.Errorf("裸列名 conds[1] = %q，期望 owner+目录臂", conds[1])
 	}
 	if strings.Contains(conds[1], "m.owner_id") {
 		t.Errorf("alias=\"\" 时不应出现 m. 前缀：%q", conds[1])
