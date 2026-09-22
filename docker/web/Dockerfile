@@ -81,7 +81,7 @@ server {
     # tags / map / admin 不在此列——它们同时是前端路由，已移入上面的导航判别组
     # dav：Job000055 WebDAV（PROPFIND/MKCOL/MOVE/LOCK 等扩展方法整体透传；Basic 认证不经 JWT，
     #   由后端自认证；漏配则 nginx 405 或落 SPA 回退）
-    location ~ ^/(auth|media|transcode|shares|public|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes|dav)(/|$) {
+    location ~ ^/(auth|media|transcode|shares|public|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes|dav|storage)(/|$) {
         proxy_pass http://api:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
