@@ -116,7 +116,7 @@ func sharedVerdict(n int) string {
 // 进本谓词（写权限在端点层校验）；read=false 的元素在此自然不命中。
 func folderGrantArm(n int, alias string) string {
 	fp := qual(alias, "folder_path")
-	return fmt.Sprintf("EXISTS(SELECT 1 FROM folders gf, jsonb_array_elements(gf.grants) gfge"+
+	return fmt.Sprintf("EXISTS(SELECT 1 FROM folder_dirs gf, jsonb_array_elements(gf.grants) gfge"+
 		" WHERE (%[1]s = gf.path OR %[1]s LIKE gf.path || '/%%')"+
 		" AND gfge->>'user_id' = $%[2]d AND (gfge->>'read')::boolean)", fp, n)
 }

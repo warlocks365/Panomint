@@ -115,7 +115,7 @@ func (h *Handler) Tree(c *gin.Context) {
 	}
 	regRows, err := h.Pool.Query(c.Request.Context(),
 		`SELECT f.path, f.owner_id::text = $1, f.owner_id, f.grants::text
-		 FROM folders f WHERE `+regWhere, append(regArgs, userID)...)
+		 FROM folder_dirs f WHERE `+regWhere, append(regArgs, userID)...)
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return

@@ -10,7 +10,7 @@ import (
 
 func TestFolderGrantArm_Present(t *testing.T) {
 	where, args := VisibleCondFor(3, "u1", "m")
-	if !strings.Contains(where, "FROM folders gf, jsonb_array_elements(gf.grants) gfge") {
+	if !strings.Contains(where, "FROM folder_dirs gf, jsonb_array_elements(gf.grants) gfge") {
 		t.Errorf("VisibleCondFor 缺目录授予臂: %s", where)
 	}
 	if !strings.Contains(where, "m.folder_path = gf.path OR m.folder_path LIKE gf.path || '/%'") {
@@ -29,7 +29,7 @@ func TestFolderGrantArm_Present(t *testing.T) {
 
 func TestFolderGrantArm_ReadCond(t *testing.T) {
 	where, args := ReadCond(2, "u1", "member", "m")
-	if !strings.Contains(where, "FROM folders gf") {
+	if !strings.Contains(where, "FROM folder_dirs gf") {
 		t.Errorf("ReadCond 缺目录授予臂: %s", where)
 	}
 	if !strings.Contains(where, "gfge->>'user_id' = $2") {

@@ -79,7 +79,7 @@ func (h *Handler) Create(c *gin.Context) {
 	uid := c.GetString("user_id")
 	// 同路径已注册（任何人）→ 同形失败，不泄露存在性。
 	tag, err := h.Pool.Exec(c.Request.Context(),
-		`INSERT INTO folders (path, owner_id) VALUES ($1, $2) ON CONFLICT (path) DO NOTHING`, p, uid)
+		`INSERT INTO folder_dirs (path, owner_id) VALUES ($1, $2) ON CONFLICT (path) DO NOTHING`, p, uid)
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "CREATE_FAILED", "创建目录失败", err)
 		return
@@ -139,7 +139,7 @@ func (h *Handler) Rename(c *gin.Context) {
 	}
 	// 目标已注册（任何人）→ 冲突。
 	var exists bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM folders WHERE path = $1)`, to).Scan(&exists); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM folder_dirs WHERE path = $1)`, to).Scan(&exists); err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "RENAME_FAILED", "重命名失败", err)
 		return
 	}
@@ -165,7 +165,7 @@ func (h *Handler) Rename(c *gin.Context) {
 	}
 	// 注册表前缀跟随（子目录也改名）。
 	ftag, err := tx.Exec(ctx,
-		fmt.Sprintf(`UPDATE folders SET path = $1 || substring(path from %[1]d)
+		fmt.Sprintf(`UPDATE folder_dirs SET path = $1 || substring(path from %[1]d)
 		 WHERE owner_id = $2 AND (path = $3 OR path LIKE $4 ESCAPE '\')`,
 			len(from)+1),
 		to, uid, from, likeFrom+"/%")
@@ -219,7 +219,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	ftag, err := tx.Exec(ctx,
-		`DELETE FROM folders WHERE owner_id = $1 AND (path = $2 OR path LIKE $3 ESCAPE '\')`,
+		`DELETE FROM folder_dirs WHERE owner_id = $1 AND (path = $2 OR path LIKE $3 ESCAPE '\')`,
 		uid, p, likeP+"/%")
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "DELETE_FAILED", "删除失败", err)
@@ -283,7 +283,7 @@ func (h *Handler) SetGrants(c *gin.Context) {
 	}
 	uid := c.GetString("user_id")
 	tag, err := h.Pool.Exec(c.Request.Context(),
-		`UPDATE folders SET grants = $1 WHERE path = $2 AND owner_id = $3`, string(b), p, uid)
+		`UPDATE folder_dirs SET grants = $1 WHERE path = $2 AND owner_id = $3`, string(b), p, uid)
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
@@ -300,7 +300,7 @@ func (h *Handler) SetGrants(c *gin.Context) {
 // 无任何痕迹（无注册行且无媒体）→ false（不存在，同形 404）。
 func (h *Handler) ownFolder(ctx context.Context, tx pgx.Tx, path, uid string) (bool, error) {
 	var ownerID string
-	err := tx.QueryRow(ctx, `SELECT owner_id::text FROM folders WHERE path = $1`, path).Scan(&ownerID)
+	err := tx.QueryRow(ctx, `SELECT owner_id::text FROM folder_dirs WHERE path = $1`, path).Scan(&ownerID)
 	if err == nil {
 		return ownerID == uid, nil
 	}
@@ -339,7 +339,7 @@ func CanWrite(ctx context.Context, q Querier, path, uid string) (bool, error) {
 	}
 	var ownerID string
 	var gtext string
-	err := q.QueryRow(ctx, `SELECT owner_id::text, grants::text FROM folders WHERE path = $1`, path).Scan(&ownerID, &gtext)
+	err := q.QueryRow(ctx, `SELECT owner_id::text, grants::text FROM folder_dirs WHERE path = $1`, path).Scan(&ownerID, &gtext)
 	if err == pgx.ErrNoRows {
 		return true, nil
 	}
