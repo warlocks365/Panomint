@@ -113,10 +113,10 @@ jobs:
       - name: 确认产物
         run: ls -lh dist | head -20
 
-  # Job000057：质量门——三道仓库级守卫（纯 stdlib Python，无额外依赖）。
-  # 这是"规则进机器"的落点：P0 视觉规则/前端组织/反代两组前缀，任何一路漂移即红。
+  # Job000057/000078：质量门——四道仓库级守卫（纯 stdlib Python，无额外依赖）。
+  # 这是"规则进机器"的落点：P0 视觉规则/前端组织/反代两组前缀/未定义标识符，任何一路漂移即红。
   quality-gates:
-    name: quality gates（三道守卫）
+    name: quality gates（四道守卫）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -133,6 +133,11 @@ jobs:
 
       - name: 反代两组前缀核验（后端路由/前端 SPA/nginx 三方真源比对）
         run: python scripts/verify_reverse_proxy.py
+
+      # Job000078：vite 把未定义标识符当全局量（构建/守卫全失明，运行期 setup 才炸——
+      # TagsView 自 Job000058-3 潜伏两 Job 的事故）。高信号静态兜底：模板裸标识符绑定必须有定义。
+      - name: 前端未定义标识符扫描（模板事件绑定裸引用/调用）
+        run: python scripts/scan_undef.py src/frontend/src
 
   # Job000057：算力节点 agent 三平台编译 smoke（T6.2「Win/Linux/macOS 三平台」
   # 的交付证据——Go 交叉编译即三平台，矩阵钉死不许悄悄破窗）。
