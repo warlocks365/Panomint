@@ -69,6 +69,32 @@ const loadError = ref('')
 const filter = ref('')
 
 const selected = ref(null)
+const aiBusy = ref(false)
+
+function errMsg(e, fallback) {
+  return e.response?.data?.error?.message || e?.message || fallback
+}
+
+async function loadTags() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const { data } = await http.get('/tags', { params: filter.value ? { q: filter.value } : {} })
+    tags.value = Array.isArray(data) ? data : Array.isArray(data?.tags) ? data.tags : []
+    if (selected.value) {
+      const cur = tags.value.find((t) => t.id === selected.value.id)
+      selected.value = cur || null
+    }
+  } catch (e) {
+    loadError.value = errMsg(e, '标签加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+function selectTag(t) {
+  selected.value = t
+}
 
 function chipStyle(t) {
   if (t.color) {

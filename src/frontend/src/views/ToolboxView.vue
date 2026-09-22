@@ -45,30 +45,6 @@
     </section>
 
     <ToolboxRestoredPanel v-else :active="tab === 'restored'" />
-
-    <div v-if="confirmGroup" class="dlg-mask" @click.self="cancelDelete">
-      <div class="confirm-dlg" role="alertdialog">
-        <h3 class="confirm-title">删除重复项</h3>
-        <p class="confirm-text">
-          将删除本组 {{ confirmGroup.items.length - 1 }} 项，保留「{{ keepOf(confirmGroup).filename }}」。
-          删除为软删，会进入回收站，之后仍可恢复。
-        </p>
-        <p v-if="deleteError" class="confirm-error">{{ deleteError }}</p>
-        <div class="dlg-actions">
-          <button class="btn" data-testid="toolbox-confirm-cancel" :disabled="deleting" @click="cancelDelete">
-            取消
-          </button>
-          <button
-            class="btn danger"
-            data-testid="toolbox-confirm-ok"
-            :disabled="deleting"
-            @click="confirmDelete"
-          >
-            {{ deleting ? '删除中…' : '确认删除' }}
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
