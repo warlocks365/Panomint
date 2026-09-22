@@ -12,12 +12,16 @@ import (
 )
 
 // Criteria 智能相册条件（存 albums.query JSONB）。
+// 五维可组合：类型/日期区间/地点/收藏 + Job000068 新增三维：目录多选/标签/人物。
 type Criteria struct {
-	Type      string `json:"type,omitempty"`      // photo|video|360
-	DateFrom  string `json:"date_from,omitempty"` // YYYY-MM-DD 或 RFC3339
-	DateTo    string `json:"date_to,omitempty"`   // 日期按当天闭区间处理
-	Place     string `json:"place,omitempty"`     // 地名模糊匹配
-	Favorites bool   `json:"favorites,omitempty"` // 仅收藏
+	Type        string   `json:"type,omitempty"`         // photo|video|360
+	DateFrom    string   `json:"date_from,omitempty"`    // YYYY-MM-DD 或 RFC3339
+	DateTo      string   `json:"date_to,omitempty"`      // 日期按当天闭区间处理
+	Place       string   `json:"place,omitempty"`        // 地名模糊匹配
+	Favorites   bool     `json:"favorites,omitempty"`    // 仅收藏
+	FolderPaths []string `json:"folder_paths,omitempty"` // 目录多选：精确目录及其全部子目录
+	TagIDs      []string `json:"tag_ids,omitempty"`      // 标签多选：任一命中
+	PersonIDs   []string `json:"person_ids,omitempty"`   // 人物多选：任一命中（按人脸归属）
 }
 
 // kindToType API kind → 数据库 album_type。
@@ -84,6 +88,19 @@ func buildCriteriaWhere(c *Criteria, albumOwnerID string) (string, []any) {
 			conds = append(conds, `EXISTS(SELECT 1 FROM album_items ai JOIN albums a ON a.id = ai.album_id
 				WHERE ai.media_id = m.id AND a.type = 'favorites')`)
 		}
+		// 目录多选：unnest 展开，精确匹配或前缀含子目录。path 中的 LIKE 通配符（%/_）
+		// 先转义再拼 '/%'，防止目录名含 % 时越界匹配。非法/空值静默忽略（与日期解析
+		// 失败同口径——历史 JSONB 可能由旧客户端写入，不该 500）。
+		if paths := cleanPaths(c.FolderPaths); len(paths) > 0 {
+			add(`EXISTS (SELECT 1 FROM unnest($%d::text[]) p(path)
+				WHERE m.folder_path = p.path OR m.folder_path LIKE replace(replace(p.path, '%%', '\%%'), '_', '\_') || '/%%' ESCAPE '\')`, paths)
+		}
+		if ids := validUUIDs(c.TagIDs); len(ids) > 0 {
+			add(`EXISTS (SELECT 1 FROM media_tags mt WHERE mt.media_id = m.id AND mt.tag_id = ANY($%d::uuid[]))`, ids)
+		}
+		if ids := validUUIDs(c.PersonIDs); len(ids) > 0 {
+			add(`EXISTS (SELECT 1 FROM faces f WHERE f.media_id = m.id AND f.person_id = ANY($%d::uuid[]))`, ids)
+		}
 	}
 	// c == nil（无条件的智能相册）也必须带属主约束 —— 否则它就是"全站媒体"。
 	add("m.owner_id = $%d", albumOwnerID)
@@ -106,6 +123,84 @@ func parseDateTo(s string) (time.Time, bool) {
 		return t.AddDate(0, 0, 1), true
 	}
 	return parseFlexibleDate(s)
+}
+
+// NormalizeCriteria 写入前规范化：目录去空白/去重/限 50，标签/人物剔除非法 UUID/
+// 去重/限 100。返回 nil 表示无条件。写入侧先把明显非法的拦掉，避免脏数据持久化；
+// 读侧 buildCriteriaWhere 仍自带同口径防御（历史 JSONB 不一定过此函数）。
+func NormalizeCriteria(c *Criteria) *Criteria {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	out.FolderPaths = cleanPaths(c.FolderPaths)
+	out.TagIDs = validUUIDs(c.TagIDs)
+	out.PersonIDs = validUUIDs(c.PersonIDs)
+	return &out
+}
+
+// cleanPaths 目录多选规范化：去空白、去空串、去重，上限 50 个。
+func cleanPaths(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) >= 50 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// validUUIDs 剔除非 UUID 值（静默忽略，与日期解析失败同口径）；去重，上限 100 个。
+func validUUIDs(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if !isUUID(s) || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+		if len(out) >= 100 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// isUUID 标准 36 位 UUID 形态校验（8-4-4-4-12 十六进制）。
+func isUUID(s string) bool {
+	if len(s) != 36 || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+		return false
+	}
+	for i, ch := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			continue
+		}
+		if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f' || ch >= 'A' && ch <= 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // effectiveCover 首图回填：cover 为空时取相册首项媒体。

@@ -159,6 +159,7 @@ import AlbumComments from '../components/albums/AlbumComments.vue'
 import ShareCreateDialog from '../components/shares/ShareCreateDialog.vue'
 import ShareManageList from '../components/shares/ShareManageList.vue'
 import { errMsg, getAlbum, removeAlbumItem, updateAlbum } from '../components/albums/albumApi'
+import { summarizeCriteria } from '../components/albums/criteriaSummary'
 import { loadThumbUrl } from '../components/timeline/mediaLoader'
 
 const route = useRoute()
@@ -191,18 +192,7 @@ const albumId = computed(() => route.params.id)
 
 const coverId = computed(() => album.value?.cover_media_id || items.value[0]?.id || '')
 
-const criteriaSummary = computed(() => {
-  const c = album.value?.criteria || {}
-  const parts = []
-  const typeMap = { photo: '照片', video: '视频', '360': '360' }
-  parts.push(c.type ? `类型：${typeMap[c.type] || c.type}` : '全部类型')
-  if (c.date_from || c.date_to) {
-    parts.push(`日期：${c.date_from || '最早'} ~ ${c.date_to || '至今'}`)
-  }
-  if (c.place) parts.push(`地点：${c.place}`)
-  if (c.favorites) parts.push('仅收藏')
-  return parts.join(' · ')
-})
+const criteriaSummary = computed(() => summarizeCriteria(album.value?.criteria))
 
 watch(coverId, async (id) => {
   coverUrl.value = ''

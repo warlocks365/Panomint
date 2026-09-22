@@ -57,6 +57,8 @@ func (h *Handler) Create(c *gin.Context) {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "kind 仅支持 normal|smart")
 		return
 	}
+	// 三维多选规范化：剔除非法 UUID/空串（写侧先拦，读侧 buildCriteriaWhere 再兜一层）。
+	req.Criteria = NormalizeCriteria(req.Criteria)
 	id, err := h.Store.Create(c.Request.Context(), c.GetString("user_id"),
 		req.Name, req.Description, req.Kind, req.CoverMediaID, req.Criteria)
 	if err != nil {
@@ -159,6 +161,8 @@ func (h *Handler) Patch(c *gin.Context) {
 		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "name 不能为空")
 		return
 	}
+	// 与 Create 同口径：条件非 nil 即覆盖 query，先规范化再入库。
+	req.Criteria = NormalizeCriteria(req.Criteria)
 	if err := h.Store.Patch(c.Request.Context(), id, req.Name, req.Description, req.CoverMediaID, req.Criteria); err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return

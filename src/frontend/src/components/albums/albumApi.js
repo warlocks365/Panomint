@@ -59,6 +59,9 @@ export function buildCriteria(c) {
   if (c.date_to) out.date_to = c.date_to
   if (c.place && c.place.trim()) out.place = c.place.trim()
   if (c.favorites) out.favorites = true
+  if (c.folder_paths?.length) out.folder_paths = [...c.folder_paths]
+  if (c.tag_ids?.length) out.tag_ids = [...c.tag_ids]
+  if (c.person_ids?.length) out.person_ids = [...c.person_ids]
   return out
 }
 

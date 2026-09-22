@@ -17,20 +17,17 @@
         <span class="field-label">类型</span>
         <div class="kind-row">
           <button
+            v-for="k in [
+              { v: 'normal', t: '普通相册' },
+              { v: 'smart', t: '智能相册' }
+            ]"
+            :key="k.v"
             type="button"
             class="kind-btn"
-            :class="{ active: form.kind === 'normal' }"
-            @click="form.kind = 'normal'"
+            :class="{ active: form.kind === k.v }"
+            @click="form.kind = k.v"
           >
-            普通相册
-          </button>
-          <button
-            type="button"
-            class="kind-btn"
-            :class="{ active: form.kind === 'smart' }"
-            @click="form.kind = 'smart'"
-          >
-            智能相册
+            {{ k.t }}
           </button>
         </div>
         <p class="field-hint">智能相册按条件自动收录媒体，内容不可手动增删</p>
@@ -67,6 +64,12 @@
           <input v-model="form.criteria.favorites" type="checkbox" />
           <span>仅收录收藏的媒体</span>
         </label>
+
+        <CriteriaDimensions
+          v-model:folderPaths="form.criteria.folder_paths"
+          v-model:tagIds="form.criteria.tag_ids"
+          v-model:personIds="form.criteria.person_ids"
+        />
       </template>
 
       <p v-if="error" class="dlg-error">{{ error }}</p>
@@ -84,6 +87,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { buildCriteria, createAlbum, errMsg, updateAlbum } from './albumApi'
+import CriteriaDimensions from './CriteriaDimensions.vue'
 
 const props = defineProps({
   // 传入则为编辑模式；criteriaEditable 控制是否可改条件（智能相册详情页用）
@@ -103,7 +107,10 @@ const form = reactive({
     date_from: props.album?.criteria?.date_from || '',
     date_to: props.album?.criteria?.date_to || '',
     place: props.album?.criteria?.place || '',
-    favorites: !!props.album?.criteria?.favorites
+    favorites: !!props.album?.criteria?.favorites,
+    folder_paths: [...(props.album?.criteria?.folder_paths || [])],
+    tag_ids: [...(props.album?.criteria?.tag_ids || [])],
+    person_ids: [...(props.album?.criteria?.person_ids || [])]
   }
 })
 
