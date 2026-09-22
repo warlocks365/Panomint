@@ -24,6 +24,7 @@ type connConf struct {
 
 // mountOne 按类型执行挂载：webdav/smb=rclone（只读），nfs=内核 mount（只读）。
 func mountOne(m mountRec, mp string) error {
+	
 	if err := os.MkdirAll(mp, 0o755); err != nil {
 		return fmt.Errorf("建挂载点: %w", err)
 	}
@@ -31,6 +32,7 @@ func mountOne(m mountRec, mp string) error {
 	if err := jsonUnmarshal([]byte(m.connJSON), &cc); err != nil {
 		return fmt.Errorf("连接配置解析: %w", err)
 	}
+	
 	creds, err := storage.DecryptCreds(m.credsEnc)
 	if err != nil {
 		return fmt.Errorf("凭据解密: %w", err)
@@ -71,6 +73,7 @@ func rcloneConfig(typ string, cc connConf, creds *storage.Creds, obscuredPass st
 
 // rcloneMount rclone 挂载（--read-only 单向导入；--daemon 后台化）。
 func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error {
+	
 	obp := ""
 	if creds != nil && creds.Pass != "" {
 		var err error
@@ -79,6 +82,7 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 			return err
 		}
 	}
+	
 	cfgPath := path.Join("/tmp", "rclone-"+mountKey(m.id)+".conf")
 	if err := os.WriteFile(cfgPath, []byte(rcloneConfig(m.typ, cc, creds, obp)), 0o600); err != nil {
 		return fmt.Errorf("写 rclone 配置: %w", err)
@@ -101,6 +105,11 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 		"--vfs-cache-mode", "off",
 		"--dir-cache-time", "30s",
 		"--log-level", "ERROR",
+		// 后端不可达时快速失败而非挂起（默认无连接超时，FUSE 请求会无限等）。
+		"--contimeout", "15s",
+		"--timeout", "30s",
+		"--low-level-retries", "2",
+		"--retries", "1",
 	}
 	cmd := exec.Command("rclone", args...)
 	cmd.Stdout = lf
@@ -109,15 +118,16 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 		lf.Close()
 		return fmt.Errorf("rclone mount 启动: %w", err)
 	}
-	lf.Close() // 父进程 fd 释放；子进程持有自己的副本。
-	// --daemon 立即返回；等 FUSE 就绪后轮询验证。
-	for i := 0; i < 10; i++ {
-		if healthCheck(mp) == nil {
+	lf.Close()
+	// 就绪判定只看 /proc/mounts（mount(2) 完成即注册，读取永不阻塞）；
+	// 绝不对挂载点 readdir 判就绪——后端不可达时 FUSE 请求挂起且无 ctx 可救。
+	for i := 0; i < 20; i++ {
+		if mnt, err := listActiveMounts(); err == nil && mnt[mountKey(m.id)] != "" {
 			return nil
 		}
-		timeSleep(300 * timeMillisecond)
+		timeSleep(500 * timeMillisecond)
 	}
-	return fmt.Errorf("挂载未就绪（见 %s）", logPath)
+	return fmt.Errorf("挂载 10s 内未注册到 /proc/mounts（见 %s）", logPath)
 }
 
 // readLogTail 读日志文件末尾 n 字节（错误上下文补充；文件不存在返回空串）。
@@ -160,8 +170,11 @@ func syncMount(m mountRec, mp string) (string, error) {
 	switch m.typ {
 	case "webdav", "smb":
 		// 经挂载点读（FUSE 本地视图→本地拷贝，省去配置重生，天然只读）。
+		// 超时参数防后端不可达时 copy 无限挂起（CombinedOutput 等子进程退出）。
 		if out, err := execCommand("rclone", "copy", mp, local,
 			"--transfers", "2", "--checkers", "4",
+			"--contimeout", "15s", "--timeout", "60s",
+			"--low-level-retries", "2", "--retries", "2",
 			"--log-level", "ERROR"); err != nil {
 			return "", fmt.Errorf("rclone copy: %v (%s)", err, truncate(string(out), 200))
 		}

@@ -118,6 +118,7 @@ func reconcile(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, last
 		want = append(want, m)
 	}
 	rows.Close()
+	
 	return reconcileWith(ctx, pool, idx, lastHealth, lastSync, want)
 }
 
@@ -151,33 +152,25 @@ func reconcileWith(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, 
 	// 期望集：未挂的挂载，已挂的健康检查 + 到期同步。
 	for _, m := range want {
 		mp := mountPath(m.id)
-		if _, ok := active[mountKey(m.id)]; ok {
-			if time.Since(lastHealth[m.id]) >= healthEvery {
-				lastHealth[m.id] = time.Now()
-				if err := healthCheck(mp); err != nil {
-					log.Printf("健康检查失败 %s(%s): %v，重挂", m.name, mp, err)
-					setStatus(ctx, pool, m.id, "offline", "断连: "+truncate(err.Error(), errMaxLen-4))
-					_ = umount(mp)
-					if err := mountOne(m, mp); err != nil {
-						setStatus(ctx, pool, m.id, "error", truncate(err.Error(), errMaxLen))
-						continue
-					}
-					setStatus(ctx, pool, m.id, "online", "")
-					lastSync[m.id] = time.Time{} // 重挂后立即同步
-				}
-			}
+		_, mounted := active[mountKey(m.id)]
+		
+		if mounted {
+			// 已挂载：跳过主动健康检查（FUSE 挂载点在后端进程死亡时自动失效；
+			// 主动 readdir 对半挂载残影会 D 状态挂起卡死循环——实测）。
 			if err := syncAndIndex(ctx, pool, idx, m, mp, lastSync); err != nil {
 				log.Printf("同步/索引失败 %s: %v", m.name, err)
 				setStatus(ctx, pool, m.id, "error", truncate("同步: "+err.Error(), errMaxLen))
 			}
 			continue
 		}
+		
 		// 未挂：执行挂载 → 同步落地 → 索引导入。
 		if err := mountOne(m, mp); err != nil {
 			log.Printf("挂载失败 %s: %v", m.name, err)
 			setStatus(ctx, pool, m.id, "error", truncate(err.Error(), errMaxLen))
 			continue
 		}
+
 		setStatus(ctx, pool, m.id, "online", "")
 		log.Printf("已挂载 %s → %s", m.name, mp)
 		if err := syncAndIndex(ctx, pool, idx, m, mp, lastSync); err != nil {
@@ -283,10 +276,16 @@ func umount(mp string) error {
 	try := func(name string, args ...string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return exec.CommandContext(ctx, name, args...).Run()
+		out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%s: %v (%s)", name, err, strings.TrimSpace(string(out)))
+		}
+		return nil
 	}
 	if err := try("fusermount3", "-u", mp); err == nil {
 		return nil
+	} else {
+		
 	}
 	if err := try("fusermount", "-u", mp); err == nil {
 		return nil
