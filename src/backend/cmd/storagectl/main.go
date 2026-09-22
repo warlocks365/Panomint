@@ -270,14 +270,21 @@ func healthCheck(mp string) error {
 }
 
 // umount 卸载（fusermount3 优先——rclone v1.68+ 用 fuse3；内核 umount 兜底）。
+// ⚠️ 必须带超时：stale FUSE 挂载点的 fusermount/umount 可能无限阻塞
+//（实测：手动测试残留的半死挂载把 reconcile 循环卡死，无任何日志）。
 func umount(mp string) error {
-	if err := exec.Command("fusermount3", "-u", mp).Run(); err == nil {
+	try := func(name string, args ...string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return exec.CommandContext(ctx, name, args...).Run()
+	}
+	if err := try("fusermount3", "-u", mp); err == nil {
 		return nil
 	}
-	if err := exec.Command("fusermount", "-u", mp).Run(); err == nil {
+	if err := try("fusermount", "-u", mp); err == nil {
 		return nil
 	}
-	return exec.Command("umount", mp).Run()
+	return try("umount", mp)
 }
 
 // obscure 用 rclone 的混淆格式处理密码（rclone config 要求）。
