@@ -110,15 +110,19 @@ func sharedVerdict(n int) string {
 
 // folderGrantArm 目录级授权可见性臂（Job000069）：媒体 folder_path 命中一个授予
 // 调用者 read 的注册目录（精确或子目录前缀），即对该调用者可见。
-// 与 sharedVerdict 同族：单一真源，VisibleCondFor 与 ReadCond 两臂都调本函数，
+// 与 sharedVerdict 同族：单一真源，VisibleCondFor / ReadCond / CondsFor 三处都调本函数，
 // 绑同一个占位符 $n，只占一个参数位（目录授权按 user_id 判定，不需要 role）。
 // grants 元素形态：[{"user_id":"uuid","read":true,"write":true}] —— write 不
 // 进本谓词（写权限在端点层校验）；read=false 的元素在此自然不命中。
+//
+// ⚠️ user_id 比较必须显式 $n::text：该占位符在调用方 SQL 里同时与 uuid 列
+//（owner_id）比较，PG describe 会把参数推导成 uuid，text = uuid 无操作符
+//（实测 42883）；::text 显式 cast 后 uuid→text 恒可转，两上下文共存。
 func folderGrantArm(n int, alias string) string {
 	fp := qual(alias, "folder_path")
 	return fmt.Sprintf("EXISTS(SELECT 1 FROM folder_dirs gf, jsonb_array_elements(gf.grants) gfge"+
 		" WHERE (%[1]s = gf.path OR %[1]s LIKE gf.path || '/%%')"+
-		" AND gfge->>'user_id' = $%[2]d AND (gfge->>'read')::boolean)", fp, n)
+		" AND gfge->>'user_id' = $%[2]d::text AND (gfge->>'read')::boolean)", fp, n)
 }
 
 // qual 给 media 表的列名加上表别名前缀；alias 为空表示该查询未给 media 起别名。

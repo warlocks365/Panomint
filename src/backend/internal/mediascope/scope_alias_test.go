@@ -162,7 +162,7 @@ func wantFolderGrant(n int, alias string) string {
 	}
 	return "EXISTS(SELECT 1 FROM folder_dirs gf, jsonb_array_elements(gf.grants) gfge" +
 		" WHERE (" + fp + " = gf.path OR " + fp + " LIKE gf.path || '/%')" +
-		" AND gfge->>'user_id' = $" + itoa(n) + " AND (gfge->>'read')::boolean)"
+		" AND gfge->>'user_id' = $" + itoa(n) + "::text AND (gfge->>'read')::boolean)"
 }
 
 func itoa(n int) string {
