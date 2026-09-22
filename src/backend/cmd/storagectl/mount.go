@@ -84,26 +84,32 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 		return fmt.Errorf("写 rclone 配置: %w", err)
 	}
 	defer os.Remove(cfgPath)
-	// ⚠️ 绝不能用 CombinedOutput/Output 捕获 rclone mount 的输出：
-	// --daemon 模式主进程 fork 后退出，但 **daemon 子进程继承 stdout/stderr pipe**，
-	// CombinedOutput 等 pipe EOF 会永久阻塞（实测卡死 reconcile 循环，进程假活零日志）。
-	// 输出一律走 --log-file；这里只判 daemon 启动退出码。
+	// ⚠️ 不用 rclone --daemon：实测容器内 daemon 化后 FUSE 初始化卡死
+	//（挂载点半挂，任何访问挂起，docker exec 都进不去）。改为前台 rclone +
+	// Start 不 Wait（进程脱离由容器 init 接管）；挂载是否就绪由下方 healthCheck
+	// 轮询判定。另：绝不能用 CombinedOutput——子进程继承 pipe 会永久阻塞等待方。
 	logPath := path.Join("/tmp", "rclone-"+mountKey(m.id)+".log")
 	_ = os.Remove(logPath)
+	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("开日志: %w", err)
+	}
 	args := []string{
 		"mount", "dst:", mp,
 		"--config", cfgPath,
 		"--read-only",
 		"--vfs-cache-mode", "off",
 		"--dir-cache-time", "30s",
-		"--daemon",
 		"--log-level", "ERROR",
-		"--log-file", logPath,
 	}
-	if err := exec.Command("rclone", args...).Run(); err != nil {
-		tail := readLogTail(logPath, 200)
-		return fmt.Errorf("rclone mount: %w (%s)", err, tail)
+	cmd := exec.Command("rclone", args...)
+	cmd.Stdout = lf
+	cmd.Stderr = lf
+	if err := cmd.Start(); err != nil {
+		lf.Close()
+		return fmt.Errorf("rclone mount 启动: %w", err)
 	}
+	lf.Close() // 父进程 fd 释放；子进程持有自己的副本。
 	// --daemon 立即返回；等 FUSE 就绪后轮询验证。
 	for i := 0; i < 10; i++ {
 		if healthCheck(mp) == nil {
