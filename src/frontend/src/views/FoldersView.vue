@@ -15,7 +15,25 @@
 
       <section class="grid-panel">
         <div class="grid-header">
-          <h2 class="section-title">{{ selectedPath || '全部媒体' }}</h2>
+          <nav class="crumbs" aria-label="当前目录">
+            <button
+              type="button"
+              class="crumb"
+              :class="{ 'crumb--active': !selectedPath }"
+              data-testid="crumb-root"
+              @click="selectFolder('')"
+            >全部</button>
+            <template v-for="(seg, i) in pathSegments" :key="seg.path">
+              <span class="crumb-sep">/</span>
+              <button
+                type="button"
+                class="crumb"
+                :class="{ 'crumb--active': i === pathSegments.length - 1 }"
+                :data-testid="'crumb-' + i"
+                @click="selectFolder(seg.path)"
+              >{{ seg.name }}</button>
+            </template>
+          </nav>
           <div class="header-actions">
             <button class="btn-ghost" data-testid="folder-new" type="button" @click="openManage('create')">
               新建文件夹
@@ -61,13 +79,14 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import http from '../api/http'
 import FolderTree from './folders/FolderTree.vue'
 import FolderManageDialog from './folders/FolderManageDialog.vue'
 import MediaTileGrid from '../components/media/MediaTileGrid.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 // ---- 目录管理（Job000069）：选中节点 owner 时开放 改名/权限/删除 ----
 const manageMode = ref('')
@@ -105,13 +124,38 @@ function openItem(m) {
 
 const tree = ref(null)
 const treeLoading = ref(true)
-const selectedPath = ref('')
+// 刷新/分享链接可还原目录：?folder=<path>（Job000069 重构时 selectFolder 被误删、
+// 选中态永远停在空串，本轮补回并加上路由同步）
+const selectedPath = ref(typeof route.query.folder === 'string' ? route.query.folder : '')
 const loadError = ref('')
 
 const mediaItems = ref([])
 const mediaLoading = ref(true)
 
 const totalCount = computed(() => tree.value?.count ?? mediaItems.value.length)
+
+// 面包屑：把选中路径拆成逐级可点的祖先段（全部 / a / a/b …）
+const pathSegments = computed(() => {
+  if (!selectedPath.value) return []
+  const segs = []
+  let acc = ''
+  for (const part of selectedPath.value.split('/').filter(Boolean)) {
+    acc = acc ? acc + '/' + part : part
+    segs.push({ name: part, path: acc })
+  }
+  return segs
+})
+
+// 目录切换：全量媒体已在内存，client 侧过滤即时生效（任意层级切换立即重载）；
+// 同时写回路由 query 保持路径同步。挂载点在下方 selectFolder 之前的旧实现
+// 只有 selectedPath.value = path 一行，Job000069 补管理功能时被整块误删。
+function selectFolder(path) {
+  selectedPath.value = path
+  const q = { ...route.query }
+  if (path) q.folder = path
+  else delete q.folder
+  router.replace({ query: q })
+}
 
 // 当前目录媒体：folder_path 等于选中路径，或位于其子目录下
 const filteredItems = computed(() => {
@@ -161,6 +205,11 @@ async function loadTree() {
 onMounted(async () => {
   try {
     await loadTree()
+    // 路由带入的目录若既未注册也无媒体（树里不存在），回退到全部，
+    // 避免标题/面包屑显示一个不可达的空白路径
+    if (selectedPath.value && !findNode(tree.value, selectedPath.value)) {
+      selectFolder('')
+    }
   } catch (e) {
     loadError.value = '目录树加载失败：' + (e.response?.data?.error?.message || '网络错误')
   } finally {
@@ -244,11 +293,41 @@ onMounted(async () => {
   justify-content: space-between;
 }
 
-.section-title {
-  margin: 0;
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-width: 0;
+}
+
+.crumb {
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
   font-size: var(--font-size-lg);
   font-weight: 600;
-  word-break: break-all;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-family: var(--font-family);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumb:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-primary);
+}
+
+.crumb--active {
+  color: var(--color-primary);
+}
+
+.crumb-sep {
+  color: var(--color-text-disabled);
 }
 
 .muted {
