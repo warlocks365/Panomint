@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/indexctl ./cmd/indexctl \
 FROM alpine:3.21
 # 国内网络走阿里云镜像源，避免 dl-cdn 拉取过慢
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories \
- && apk add --no-cache ffmpeg ca-certificates tzdata rclone fuse nfs-utils
+ && apk add --no-cache ffmpeg ca-certificates tzdata rclone fuse3 nfs-utils
 COPY --from=build /out/indexctl /out/transcodectl /out/storagectl /usr/local/bin/
 
 # 入口分发：WORKER_KIND=index|transcode|storage 决定执行哪个 worker 子命令

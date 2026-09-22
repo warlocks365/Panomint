@@ -232,10 +232,10 @@ func setStatus(ctx context.Context, pool *pgxpool.Pool, id, status, lastErr stri
 		le = lastErr
 	}
 	_, err := pool.Exec(ctx,
-		`UPDATE storage_mounts SET status=$2, last_error=$3,
-		 mount_path=CASE WHEN $5='online' THEN $4 ELSE mount_path END, updated_at=now()
-		 WHERE id=$6`,
-		status, le, mountPath(id), status, id)
+		`UPDATE storage_mounts SET status=$1, last_error=$2,
+		 mount_path=CASE WHEN $3='online' THEN $4 ELSE mount_path END, updated_at=now()
+		 WHERE id=$5`,
+		status, le, status, mountPath(id), id)
 	if err != nil {
 		log.Printf("状态回写失败 %s: %v", id, err)
 	}
@@ -269,8 +269,11 @@ func healthCheck(mp string) error {
 	return err
 }
 
-// umount 卸载（fusermount 优先，内核 umount 兜底）。
+// umount 卸载（fusermount3 优先——rclone v1.68+ 用 fuse3；内核 umount 兜底）。
 func umount(mp string) error {
+	if err := exec.Command("fusermount3", "-u", mp).Run(); err == nil {
+		return nil
+	}
 	if err := exec.Command("fusermount", "-u", mp).Run(); err == nil {
 		return nil
 	}
