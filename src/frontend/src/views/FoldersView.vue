@@ -16,12 +16,28 @@
       <section class="grid-panel">
         <div class="grid-header">
           <h2 class="section-title">{{ selectedPath || '全部媒体' }}</h2>
-          <span v-if="!mediaLoading" class="muted">{{ filteredItems.length }} 项</span>
-          <router-link
-            class="btn-upload"
-            data-testid="folder-upload"
-            :to="'/upload?folder=' + (selectedPath || '')"
-          >上传到此处</router-link>
+          <div class="header-actions">
+            <button class="btn-ghost" data-testid="folder-new" type="button" @click="openManage('create')">
+              新建文件夹
+            </button>
+            <template v-if="selectedOwner">
+              <button class="btn-ghost" data-testid="folder-rename" type="button" @click="openManage('rename')">
+                改名/移动
+              </button>
+              <button class="btn-ghost" data-testid="folder-grants" type="button" @click="openManage('grants')">
+                权限
+              </button>
+              <button class="btn-ghost danger" data-testid="folder-delete" type="button" @click="openManage('delete')">
+                删除目录
+              </button>
+            </template>
+            <span v-if="!mediaLoading" class="muted">{{ filteredItems.length }} 项</span>
+            <router-link
+              class="btn-upload"
+              data-testid="folder-upload"
+              :to="'/upload?folder=' + (selectedPath || '')"
+            >上传到此处</router-link>
+          </div>
         </div>
 
         <div v-if="mediaLoading" class="muted grid-tip">加载中…</div>
@@ -30,6 +46,16 @@
         <MediaTileGrid :items="filteredItems" selectable @open="openItem" @changed="reloadMedia" />
       </section>
     </div>
+
+    <FolderManageDialog
+      v-if="manageMode"
+      :mode="manageMode"
+      :target-path="selectedPath"
+      :initial-grants="selectedGrants"
+      :users="users"
+      @close="manageMode = ''"
+      @done="onManaged"
+    />
   </div>
 </template>
 
@@ -38,9 +64,37 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import http from '../api/http'
 import FolderTree from './folders/FolderTree.vue'
+import FolderManageDialog from './folders/FolderManageDialog.vue'
 import MediaTileGrid from '../components/media/MediaTileGrid.vue'
 
 const router = useRouter()
+
+// ---- 目录管理（Job000069）：选中节点 owner 时开放 改名/权限/删除 ----
+const manageMode = ref('')
+const users = ref([])
+
+const selectedNode = computed(() => findNode(tree.value, selectedPath.value))
+const selectedOwner = computed(() => !!selectedNode.value?.owner)
+const selectedGrants = computed(() => selectedNode.value?.grants || [])
+
+function findNode(node, path) {
+  if (!node) return null
+  if (node.path === path) return node
+  for (const ch of node.children || []) {
+    const hit = findNode(ch, path)
+    if (hit) return hit
+  }
+  return null
+}
+
+function openManage(mode) {
+  manageMode.value = mode
+}
+
+async function onManaged() {
+  manageMode.value = ''
+  await Promise.all([loadTree(), reloadMedia()])
+}
 
 function openItem(m) {
   router.push({ name: 'player', params: { id: m.id }
@@ -99,14 +153,26 @@ function reloadMedia() {
   })
 }
 
+async function loadTree() {
+  const res = await http.get('/folders/tree')
+  tree.value = res.data
+}
+
 onMounted(async () => {
   try {
-    const res = await http.get('/folders/tree')
-    tree.value = res.data
+    await loadTree()
   } catch (e) {
     loadError.value = '目录树加载失败：' + (e.response?.data?.error?.message || '网络错误')
   } finally {
     treeLoading.value = false
+  }
+
+  // 授权对话框的用户候选（管理端点 owner/admin 可用；失败不阻塞主流程）。
+  try {
+    const res = await http.get('/admin/users')
+    users.value = res.data.users || []
+  } catch {
+    users.value = []
   }
 
   try {

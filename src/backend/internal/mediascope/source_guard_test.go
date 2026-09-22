@@ -333,6 +333,37 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 			"P1-02：DELETE 前同事务显式 UPDATE 解除 albums/people 封面与 duplicate_of/live_photo_pair_id 引用（计数入审计）。",
 		Evidence: "media/write.go Purge（事务内解引用 + DELETE ... RETURNING path）；write_handlers.go Purge。",
 	},
+	// Job000069 补登记（2026-09-22 中央终验逮到 Job000056/066 漏登 4 组）：
+	regKey("internal/index/index.go", "UPDATE media"): {
+		UserFacing: false,
+		Reason:     "Job000056 @eaDir 复用回写：insertMedia 挂点同一条 UPDATE 落三档缩略图（成功即不入队），与 worker.go 缩略图回写同语义，行不回给终端用户。",
+		Evidence:   "index/index.go:300-315。",
+	},
+	regKey("internal/media/batch_store.go", "FROM media"): {
+		UserFacing: true,
+		Reason:     "batchOwnedIDs 归属收敛查询：WHERE id=ANY($1) AND owner_id=$2 AND deleted_at IS NULL——批量操作入口收敛（Job000066），无权与不存在同形入 failed；返回只是 id 白名单。",
+		Evidence:   "media/batch_store.go:16-19。",
+	},
+	regKey("internal/media/batch_store.go", "UPDATE media"): {
+		UserFacing: false,
+		Reason:     "批量软删/移动/设元：ids 全部先经 batchOwnedIDs 归属收敛（端点层一次收敛），此处只执行白名单化写；copySourceRow 的 FROM 同理（源 id 已过收敛）。",
+		Evidence:   "media/batch_store.go:40-51、92-99、117-135、144-151。",
+	},
+	regKey("internal/media/batch_store.go", "INSERT INTO media"): {
+		UserFacing: false,
+		Reason:     "insertCopiedRow 批量复制写路径：owner_id 显式=调用者（$2），INSERT-SELECT 源行 id 已过 batchOwnedIDs 收敛。",
+		Evidence:   "media/batch_store.go:125-140。",
+	},
+	regKey("internal/folders/manage.go", "FROM media"): {
+		UserFacing: false,
+		Reason:     "ownFolder 归属校验：只取 count(*) 与 count(*) FILTER (owner_id<>uid)，不返回媒体行/内容；谓词自带 owner 收敛语义（Job000069）。",
+		Evidence:   "folders/manage.go:316-320。",
+	},
+	regKey("internal/folders/manage.go", "UPDATE media"): {
+		UserFacing: false,
+		Reason:     "目录改名/删除的批量组织变更：WHERE owner_id=uid 收敛前缀（Rename 改 folder_path、Delete 软删入回收站），与 WebDAV MOVE/RemoveAll 同语义（Job000069）。",
+		Evidence:   "folders/manage.go:157-165、213-219。",
+	},
 	regKey("internal/media/upload.go", "INSERT INTO media"): {
 		UserFacing: false,
 		Reason:     "上传入库写路径，owner_id/space 由登录会话决定，不返回 media 行（只返回本次结果）。",
@@ -572,6 +603,12 @@ var visibilityWiring = map[string][]wiringRef{
 	},
 	"internal/folders/folders.go": {
 		{File: "internal/folders/folders.go", Func: "Tree", Symbol: "owner_id = $1"},
+	},
+	"internal/media/dav.go": {
+		{File: "internal/media/dav.go", Symbol: "ReadCond("},
+	},
+	"internal/media/batch_store.go": {
+		{File: "internal/media/batch_store.go", Symbol: "owner_id = $2"},
 	},
 	"internal/geo/media_store.go": {
 		{File: "internal/geo/media_store.go", Symbol: "mediascope.VisibleCondFor("},

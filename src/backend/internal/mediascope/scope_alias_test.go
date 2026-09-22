@@ -46,7 +46,8 @@ func TestAliasParamKeepsLegacyTextByteIdentical(t *testing.T) {
 	// --- VisibleCond（并集版）---
 	got, args := VisibleCond(1, uid)
 	want := "((m.space = 'personal' AND m.owner_id = $1)\n" +
-		"\t\tOR (m.space = 'shared' AND " + wantShared + "))"
+		"\t\tOR (m.space = 'shared' AND " + wantShared + ")\n" +
+		"\t\tOR (" + wantFolderGrant(1, "m") + "))"
 	if got != want {
 		t.Errorf("VisibleCond 文本漂移：\n got=%q\nwant=%q", got, want)
 	}
@@ -114,8 +115,8 @@ func TestAliasParamPlaceholderNumbering(t *testing.T) {
 			}
 			wantN := "$" + itoa(start)
 			// 并集谓词里应恰好出现 3 次该占位符：personal owner_id、成员 EXISTS、属主 EXISTS。
-			if n := strings.Count(got, wantN); n != 3 {
-				t.Errorf("alias=%q start=%d: %s 出现 %d 次，期望 3 次\n%s", alias, start, wantN, n, got)
+			if n := strings.Count(got, wantN); n != 4 {
+				t.Errorf("alias=%q start=%d: %s 出现 %d 次，期望 4 次\n%s", alias, start, wantN, n, got)
 			}
 			// 不该出现任何别的 $n（否则占位符编号不一致）。
 			for _, other := range []string{"$1", "$2", "$3", "$7", "$99"} {
@@ -151,6 +152,17 @@ func TestAliasParamFailClosed(t *testing.T) {
 			t.Errorf("alias=%q: personal 无主体必须恒假，实际 %v / %v", alias, conds, args)
 		}
 	}
+}
+
+// wantFolderGrant 与生产 folderGrantArm 逐字节一致的期望值（双写钉死形态）。
+func wantFolderGrant(n int, alias string) string {
+	fp := alias + ".folder_path"
+	if alias == "" {
+		fp = "folder_path"
+	}
+	return "EXISTS(SELECT 1 FROM folders gf, jsonb_array_elements(gf.grants) gfge" +
+		" WHERE (" + fp + " = gf.path OR " + fp + " LIKE gf.path || '/%')" +
+		" AND gfge->>'user_id' = $" + itoa(n) + " AND (gfge->>'read')::boolean)"
 }
 
 func itoa(n int) string {

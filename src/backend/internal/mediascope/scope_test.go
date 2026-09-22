@@ -52,9 +52,9 @@ func TestVisibleCondPlaceholderNumberingAndArgCount(t *testing.T) {
 			t.Fatalf("占位符 %s 应为 $5（编号必须从 start 起）: %q", m[0], cond)
 		}
 	}
-	// personal 臂 1 处 + shared 的两个 EXISTS 各自 1 处，且**复用同一个 $5**。
-	if len(nums) != 3 {
-		t.Fatalf("应恰好 3 处 $5（personal 1 + 成员 EXISTS 1 + 属主 EXISTS 1），实际 %d 处: %q",
+	// personal 臂 1 处 + shared 的两个 EXISTS 各 1 处 + 目录授予 EXISTS 1 处，复用同一个 $5。
+	if len(nums) != 4 {
+		t.Fatalf("应恰好 4 处 $5（personal 1 + 成员 EXISTS 1 + 属主 EXISTS 1 + 目录授予 EXISTS 1），实际 %d 处: %q",
 			len(nums), cond)
 	}
 	if strings.Contains(cond, "$1") {

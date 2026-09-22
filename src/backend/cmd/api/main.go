@@ -207,6 +207,10 @@ func main() {
 	authed.GET("/spaces", spacesH.Get)
 	foldersH := &folders.Handler{Pool: pool}
 	authed.GET("/folders/tree", permRead, foldersH.Tree)
+	authed.POST("/folders", permWrite, foldersH.Create)
+	authed.PATCH("/folders/rename", permWrite, foldersH.Rename)
+	authed.DELETE("/folders", permWrite, foldersH.Delete)
+	authed.PUT("/folders/grants", permWrite, foldersH.SetGrants)
 	transH := &transcode.Handler{Pool: pool, Q: transQ, HLSDir: cfg.HLSDir}
 	authed.POST("/transcode/job", permWrite, transH.CreateJob)
 	authed.GET("/transcode/job/:id", permRead, transH.JobStatus)

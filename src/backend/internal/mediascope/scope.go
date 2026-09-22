@@ -108,6 +108,19 @@ func sharedVerdict(n int) string {
 		"\t\t\t\tOR EXISTS(SELECT 1 FROM shared_space ss WHERE ss.owner_id = $%[1]d))", n)
 }
 
+// folderGrantArm 目录级授权可见性臂（Job000069）：媒体 folder_path 命中一个授予
+// 调用者 read 的注册目录（精确或子目录前缀），即对该调用者可见。
+// 与 sharedVerdict 同族：单一真源，VisibleCondFor 与 ReadCond 两臂都调本函数，
+// 绑同一个占位符 $n，只占一个参数位（目录授权按 user_id 判定，不需要 role）。
+// grants 元素形态：[{"user_id":"uuid","read":true,"write":true}] —— write 不
+// 进本谓词（写权限在端点层校验）；read=false 的元素在此自然不命中。
+func folderGrantArm(n int, alias string) string {
+	fp := qual(alias, "folder_path")
+	return fmt.Sprintf("EXISTS(SELECT 1 FROM folders gf, jsonb_array_elements(gf.grants) gfge"+
+		" WHERE (%[1]s = gf.path OR %[1]s LIKE gf.path || '/%%')"+
+		" AND gfge->>'user_id' = $%[2]d AND (gfge->>'read')::boolean)", fp, n)
+}
+
 // qual 给 media 表的列名加上表别名前缀；alias 为空表示该查询未给 media 起别名。
 //
 // 为什么需要这一层：本包原先把 `m.` **硬编码**进谓词文本，于是只有"恰好把 media
@@ -195,8 +208,9 @@ func VisibleCondFor(start int, userID, alias string) (string, []any) {
 		return FailClosed, nil
 	}
 	return fmt.Sprintf("((%[3]s = 'personal' AND %[4]s = $%[1]d)\n"+
-		"\t\tOR (%[3]s = 'shared' AND %[2]s))",
-		start, sharedVerdict(start), qual(alias, "space"), qual(alias, "owner_id")), []any{userID}
+		"\t\tOR (%[3]s = 'shared' AND %[2]s)\n"+
+		"\t\tOR (%[5]s))",
+		start, sharedVerdict(start), qual(alias, "space"), qual(alias, "owner_id"), folderGrantArm(start, alias)), []any{userID}
 }
 
 // RolePrivileged 全局特权角色（owner/admin）：绕过一切归属判定、见全量，
@@ -229,6 +243,6 @@ func ReadCond(start int, userID, role, alias string) (string, []any) {
 	if userID == "" {
 		return FailClosed, nil
 	}
-	return fmt.Sprintf("(%[3]s = $%[1]d OR (%[4]s = 'shared' AND %[2]s))",
-		start, sharedVerdict(start), qual(alias, "owner_id"), qual(alias, "space")), []any{userID}
+	return fmt.Sprintf("(%[3]s = $%[1]d OR (%[4]s = 'shared' AND %[2]s) OR (%[5]s))",
+		start, sharedVerdict(start), qual(alias, "owner_id"), qual(alias, "space"), folderGrantArm(start, alias)), []any{userID}
 }
