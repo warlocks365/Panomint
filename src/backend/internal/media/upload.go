@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"panoalbum/internal/httperr"
+	"panoalbum/internal/folders"
 	"panoalbum/internal/index"
 	"panoalbum/internal/queue"
 )
@@ -494,6 +495,17 @@ func (h *Handler) ingest(ctx context.Context, r io.Reader, meta uploadMeta) (id 
 	folder := meta.FolderPath
 	if folder == "" {
 		folder = dateDir
+	}
+	// 目录写权限（Job000069）：注册目录非 owner 且无 write 授权 → 拒绝；
+	// 无注册行的自然目录不检查（自由空间语义）。
+	if folder != "" {
+		ok, cwErr := folders.CanWrite(ctx, h.Store.Pool, folder, meta.OwnerID)
+		if cwErr != nil {
+			return "", false, cwErr
+		}
+		if !ok {
+			return "", false, &uploadError{status: http.StatusForbidden, code: "FORBIDDEN", msg: "无该目录的写入权限"}
+		}
 	}
 	space := meta.Space
 	if space != "shared" {

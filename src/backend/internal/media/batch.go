@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"panoalbum/internal/audit"
+	"panoalbum/internal/folders"
 	"panoalbum/internal/httperr"
 	"panoalbum/internal/queue"
 )
@@ -80,6 +81,18 @@ func (h *Handler) Batch(c *gin.Context) {
 		succeeded = n
 	case "move":
 		folder := sanitizeFolder(req.FolderPath)
+		// 目录写权限（Job000069）：目标目录为注册目录时校验 write 授权。
+		if folder != "" {
+			ok, cwErr := folders.CanWrite(c.Request.Context(), h.Store.Pool, folder, c.GetString("user_id"))
+			if cwErr != nil {
+				httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "移动失败", cwErr)
+				return
+			}
+			if !ok {
+				errResp(c, http.StatusForbidden, "FORBIDDEN", "无目标目录的写入权限")
+				return
+			}
+		}
 		n, err := h.Store.BatchSetFolder(c.Request.Context(), allowed, folder)
 		if err != nil {
 			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "移动失败", err)

@@ -328,6 +328,44 @@ func escapeLike(s string) string {
 	return s
 }
 
+// CanWrite 目录写权限判定（write 授权的消费点，供 upload/batch move 挂钩）：
+// 无注册行 → true（自然派生目录 = 自由空间）；owner → true；
+// grants 含调用者 write=true → true；否则 false。
+// 根目录（path 空）恒 true。目录不存在（无注册行且无媒体痕迹）亦 true——
+// 与读侧"注册行存在才可见"语义互补：写检查只管"已声明权限的目录"。
+func CanWrite(ctx context.Context, q Querier, path, uid string) (bool, error) {
+	if path == "" {
+		return true, nil
+	}
+	var ownerID string
+	var gtext string
+	err := q.QueryRow(ctx, `SELECT owner_id::text, grants::text FROM folders WHERE path = $1`, path).Scan(&ownerID, &gtext)
+	if err == pgx.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if ownerID == uid {
+		return true, nil
+	}
+	var gs []grant
+	if gtext != "" && gtext != "[]" {
+		_ = json.Unmarshal([]byte(gtext), &gs)
+	}
+	for _, g := range gs {
+		if g.UserID == uid && g.Write {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Querier 最小查询接口（*pgxpool.Pool 与 pgx.Tx 均满足）。
+type Querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // isUUID 标准 36 位 UUID 形态（与 albums 包同实现，独立副本避免跨包依赖）。
 func isUUID(s string) bool {
 	if len(s) != 36 || s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
