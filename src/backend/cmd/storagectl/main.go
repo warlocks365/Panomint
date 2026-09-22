@@ -1,9 +1,10 @@
-// storagectl 网络挂载执行器（Job000070 F4）。
+// storagectl 网络挂载执行器（Job000070 F4；v2 断连探针 Job000072）。
 //
 // 常驻轮询 storage_mounts 表，对每条挂载：
-//   - 未挂 → 解密凭据 → rclone mount（webdav/smb，只读）或内核 mount（nfs，只读）
-//     → 验证挂载点可读 → 回写 status=online + mount_path → 触发索引导入（媒体归挂载属主）
-//   - 已挂 → 健康检查（读目录，EIO/超时=断连）→ 失败回写 offline 并重挂
+//   - 未挂 → 解密凭据 → rclone mount（webdav/smb，只读，带 --rc 控制口）或内核
+//     mount（nfs，ro,soft）→ /proc/mounts 注册即 online → 触发索引导入（归挂载属主）
+//   - 已挂 → v2 断连即时探针（rc operations/list 直打后端 / nfs stat，30s 节流到点）：
+//     失败 → offline + last_error；恢复 → 回 online。到期（5min）增量同步导入
 //   - 表里没有但盘上挂着的 → 孤儿卸载（防删除后残留）
 //
 // 与 indexctl 同容器运行（entrypoint 双进程），共享 mount 命名空间——
@@ -12,6 +13,7 @@
 // 安全红线：
 //   - 凭据解密后只写 0600 临时配置文件，进程内不留副本，用完即删；
 //   - 挂载只读（--read-only / -o ro）：导入单向，绝不往远程写；
+//   - 探针/同步全部带超时，绝不对 FUSE 挂载点做无超时读（D 状态挂死实测）；
 //   - last_error 截断 300 字符，不吞敏感串。
 package main
 
@@ -93,8 +95,9 @@ func main() {
 	}
 	lastHealth := map[string]time.Time{}
 	lastSync := map[string]time.Time{}
+	probeBad := map[string]bool{} // v2：上一探针周期是否失败（状态翻转才写库）
 	for {
-		if err := reconcile(context.Background(), pool, idx, lastHealth, lastSync); err != nil {
+		if err := reconcile(context.Background(), pool, idx, lastHealth, lastSync, probeBad); err != nil {
 			log.Printf("轮询失败: %v", err)
 		}
 		time.Sleep(*pollFlag)
@@ -102,7 +105,7 @@ func main() {
 }
 
 // reconcile 一轮对账。
-func reconcile(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, lastHealth, lastSync map[string]time.Time) error {
+func reconcile(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, lastHealth, lastSync map[string]time.Time, probeBad map[string]bool) error {
 	rows, err := pool.Query(ctx,
 		`SELECT id::text, name, type, conn::text, creds_enc, owner_id::text FROM storage_mounts`)
 	if err != nil {
@@ -118,12 +121,12 @@ func reconcile(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, last
 		want = append(want, m)
 	}
 	rows.Close()
-	
-	return reconcileWith(ctx, pool, idx, lastHealth, lastSync, want)
+
+	return reconcileWith(ctx, pool, idx, lastHealth, lastSync, probeBad, want)
 }
 
 // reconcileWith 纯对账逻辑（可测）：want=表内期望集。
-func reconcileWith(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, lastHealth, lastSync map[string]time.Time, want []mountRec) error {
+func reconcileWith(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, lastHealth, lastSync map[string]time.Time, probeBad map[string]bool, want []mountRec) error {
 	wantIDs := map[string]bool{}
 	for _, m := range want {
 		wantIDs[mountKey(m.id)] = true
@@ -153,17 +156,35 @@ func reconcileWith(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, 
 	for _, m := range want {
 		mp := mountPath(m.id)
 		_, mounted := active[mountKey(m.id)]
-		
+
 		if mounted {
-			// 已挂载：跳过主动健康检查（FUSE 挂载点在后端进程死亡时自动失效；
-			// 主动 readdir 对半挂载残影会 D 状态挂起卡死循环——实测）。
+			// v2 断连即时探针（30s 节流到点）：rclone 走 rc operations/list 直打后端
+			//（不经 FUSE——后端不可达时 FUSE 读挂起无 ctx 可救）；nfs 走 soft 挂载下的
+			// stat（有界返回）。失败即标 offline 并跳过本轮同步；恢复翻转回 online。
+			// 状态翻转才写库（probeBad 状态机），探针成功不会擦掉同步刚写的 error。
+			if time.Since(lastHealth[m.id]) >= healthEvery {
+				lastHealth[m.id] = time.Now()
+				if perr := probeMount(m.typ, mountKey(m.id), mp); perr != nil {
+					if !probeBad[m.id] {
+						setStatus(ctx, pool, m.id, "offline", truncate("源断连: "+perr.Error(), errMaxLen))
+						probeBad[m.id] = true
+						log.Printf("源断连 %s: %v", m.name, perr)
+					}
+					continue
+				}
+				if probeBad[m.id] {
+					setStatus(ctx, pool, m.id, "online", "")
+					probeBad[m.id] = false
+					log.Printf("源恢复 %s", m.name)
+				}
+			}
 			if err := syncAndIndex(ctx, pool, idx, m, mp, lastSync); err != nil {
 				log.Printf("同步/索引失败 %s: %v", m.name, err)
 				setStatus(ctx, pool, m.id, "error", truncate("同步: "+err.Error(), errMaxLen))
 			}
 			continue
 		}
-		
+
 		// 未挂：执行挂载 → 同步落地 → 索引导入。
 		if err := mountOne(m, mp); err != nil {
 			log.Printf("挂载失败 %s: %v", m.name, err)
@@ -271,7 +292,7 @@ func healthCheck(mp string) error {
 
 // umount 卸载（fusermount3 优先——rclone v1.68+ 用 fuse3；内核 umount 兜底）。
 // ⚠️ 必须带超时：stale FUSE 挂载点的 fusermount/umount 可能无限阻塞
-//（实测：手动测试残留的半死挂载把 reconcile 循环卡死，无任何日志）。
+// （实测：手动测试残留的半死挂载把 reconcile 循环卡死，无任何日志）。
 func umount(mp string) error {
 	try := func(name string, args ...string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -285,7 +306,7 @@ func umount(mp string) error {
 	if err := try("fusermount3", "-u", mp); err == nil {
 		return nil
 	} else {
-		
+
 	}
 	if err := try("fusermount", "-u", mp); err == nil {
 		return nil

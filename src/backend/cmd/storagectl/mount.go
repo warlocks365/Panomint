@@ -24,7 +24,7 @@ type connConf struct {
 
 // mountOne 按类型执行挂载：webdav/smb=rclone（只读），nfs=内核 mount（只读）。
 func mountOne(m mountRec, mp string) error {
-	
+
 	if err := os.MkdirAll(mp, 0o755); err != nil {
 		return fmt.Errorf("建挂载点: %w", err)
 	}
@@ -32,7 +32,7 @@ func mountOne(m mountRec, mp string) error {
 	if err := jsonUnmarshal([]byte(m.connJSON), &cc); err != nil {
 		return fmt.Errorf("连接配置解析: %w", err)
 	}
-	
+
 	creds, err := storage.DecryptCreds(m.credsEnc)
 	if err != nil {
 		return fmt.Errorf("凭据解密: %w", err)
@@ -73,7 +73,7 @@ func rcloneConfig(typ string, cc connConf, creds *storage.Creds, obscuredPass st
 
 // rcloneMount rclone 挂载（--read-only 单向导入；--daemon 后台化）。
 func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error {
-	
+
 	obp := ""
 	if creds != nil && creds.Pass != "" {
 		var err error
@@ -82,7 +82,7 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 			return err
 		}
 	}
-	
+
 	cfgPath := path.Join("/tmp", "rclone-"+mountKey(m.id)+".conf")
 	if err := os.WriteFile(cfgPath, []byte(rcloneConfig(m.typ, cc, creds, obp)), 0o600); err != nil {
 		return fmt.Errorf("写 rclone 配置: %w", err)
@@ -110,6 +110,11 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 		"--timeout", "30s",
 		"--low-level-retries", "2",
 		"--retries", "1",
+		// v2 断连探针：rc 控制口（仅本机、免认证、确定性端口=rcPort(mountKey)）。
+		// 探针走 rc operations/list 直打后端，不经 FUSE 读路径（挂起无 ctx 可救）。
+		"--rc",
+		"--rc-addr", fmt.Sprintf("127.0.0.1:%d", rcPort(mountKey(m.id))),
+		"--rc-no-auth",
 	}
 	cmd := exec.Command("rclone", args...)
 	cmd.Stdout = lf
@@ -143,9 +148,12 @@ func readLogTail(p string, n int) string {
 }
 
 // nfsMount 内核 NFS 只读挂载。
+// ⚠️ 必须 soft：默认 hard 挂载在服务端断连后 stat/读会无限重试（内核态，无 ctx 可救），
+// 对账循环会被一个死挂载永久卡死；soft,timeo=50(5s),retrans=2 → 最坏 ~15s 返回错误，
+// 供 statProbe 做断连探针。
 func nfsMount(cc connConf, mp string) error {
 	target := cc.Host + ":" + cc.Export
-	args := []string{"-t", "nfs", "-o", "ro,timeo=50,retrans=2,nolock", target, mp}
+	args := []string{"-t", "nfs", "-o", "ro,soft,timeo=50,retrans=2,nolock", target, mp}
 	if out, err := execCommand("mount", args...); err != nil {
 		return fmt.Errorf("mount nfs: %v (%s)", err, truncate(string(out), 200))
 	}
