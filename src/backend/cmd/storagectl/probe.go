@@ -44,8 +44,11 @@ var httpClient = &http.Client{Timeout: rcTimeout}
 
 // rcProbe 经 rclone rc 直打后端列根目录：证明「进程活着 + 后端可达」。
 // 不经 FUSE 读路径（后端不可达时 FUSE 请求挂起无 ctx 可救——v1 实测）。
-func rcProbe(port int) error {
-	body, _ := json.Marshal(map[string]string{"fs": "dst:", "remote": ""})
+// fs 形参：webdav="dst:"；smb="dst:/<share>"（rclone smb 后端 remote: 根=服务器本身，
+// 共享以目录列出——官方文档「Paths are specified as remote:sharename」； smb 无 share
+// 配置键，写进 conf 会被静默忽略，故共享内容必须显式走路径）。
+func rcProbe(port int, fs string) error {
+	body, _ := json.Marshal(map[string]string{"fs": fs, "remote": ""})
 	url := fmt.Sprintf("http://127.0.0.1:%d/operations/list", port)
 	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -74,10 +77,17 @@ func statProbe(mp string) error {
 	return nil
 }
 
-// probeMount 按类型分发探针。
-func probeMount(typ, key, mp string) error {
-	if typ == "nfs" {
+// probeMount 按类型分发探针。webdav/smb 走 rc；nfs 走 soft stat。
+func probeMount(m mountRec, mp string) error {
+	if m.typ == "nfs" {
 		return statProbe(mp)
 	}
-	return rcProbe(rcPort(key))
+	fs := "dst:"
+	if m.typ == "smb" {
+		var cc connConf
+		if err := jsonUnmarshal([]byte(m.connJSON), &cc); err == nil && cc.Share != "" {
+			fs = "dst:/" + cc.Share
+		}
+	}
+	return rcProbe(rcPort(mountKey(m.id)), fs)
 }

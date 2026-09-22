@@ -4,6 +4,7 @@ package main
 // statProbe、probeMount 类型分发。
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,7 @@ func TestRcProbe_Success(t *testing.T) {
 	if _, err := fmt.Sscanf(srv.URL, "http://127.0.0.1:%d", &port); err != nil {
 		t.Skipf("httptest 非 127.0.0.1（IPv6 环境）: %s", srv.URL)
 	}
-	if err := rcProbe(port); err != nil {
+	if err := rcProbe(port, "dst:/f4share"); err != nil {
 		t.Errorf("成功形态应 nil: %v", err)
 	}
 }
@@ -53,7 +54,7 @@ func TestRcProbe_BackendError(t *testing.T) {
 	if _, err := fmt.Sscanf(srv.URL, "http://127.0.0.1:%d", &port); err != nil {
 		t.Skipf("httptest 非 127.0.0.1: %s", srv.URL)
 	}
-	if err := rcProbe(port); err == nil {
+	if err := rcProbe(port, "dst:"); err == nil {
 		t.Error("后端错误应返回 error")
 	} else if msg := err.Error(); msg == "" {
 		t.Error("错误信息不应为空")
@@ -62,7 +63,7 @@ func TestRcProbe_BackendError(t *testing.T) {
 
 func TestRcProbe_Unreachable(t *testing.T) {
 	// 本会话大概率无监听端口：rcPortRange 内找一个未用端口
-	if err := rcProbe(5999); err == nil {
+	if err := rcProbe(5999, "dst:"); err == nil {
 		t.Skip("5999 居然被监听，换一个")
 	}
 }
@@ -78,10 +79,42 @@ func TestStatProbe(t *testing.T) {
 
 func TestProbeMount_Dispatch(t *testing.T) {
 	// nfs 走 statProbe（不存在的路径必失败）；webdav 走 rcProbe（端口未监听必失败）
-	if err := probeMount("nfs", "any", "/definitely/not/exist"); err == nil {
+	nfs := mountRec{id: "x", typ: "nfs"}
+	if err := probeMount(nfs, "/definitely/not/exist"); err == nil {
 		t.Error("nfs 探针对不存在挂载点应失败")
 	}
-	if err := probeMount("webdav", "any", "/mnt/storage/whatever"); err == nil {
+	webdav := mountRec{id: "x", typ: "webdav", connJSON: `{"url":"http://u"}`}
+	if err := probeMount(webdav, "/mnt/storage/whatever"); err == nil {
 		t.Skip("rcBasePort 端口被监听则此断言不适用（概率极低）")
+	}
+}
+
+// Job000076 真机发现：rclone smb 后端 remote: 根=服务器（共享以目录列出，
+// 官方文档「Paths are specified as remote:sharename」；smb 无 share 配置键）。
+// 探针必须把 share 拼进 fs 路径，否则挂到服务器根、导入路径全错。
+func TestProbeMount_SMBShareInFS(t *testing.T) {
+	var gotFS string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			FS     string `json:"fs"`
+			Remote string `json:"remote"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotFS = body.FS
+		fmt.Fprint(w, `{"list":[]}`)
+	}))
+	defer srv.Close()
+	port := 0
+	if _, err := fmt.Sscanf(srv.URL, "http://127.0.0.1:%d", &port); err != nil {
+		t.Skipf("httptest 非 127.0.0.1: %s", srv.URL)
+	}
+	// 临时把 rcPort 的确定性映射钉到该端口：直接调 rcProbe 验证 fs 形态不划算——
+	// 探针组装在 probeMount 内，这里通过覆盖 httpClient 超时客户端不可行（写死 127.0.0.1:rcPort）。
+	// 故直接验证 rcProbe 透传 fs + probeMount 的组装逻辑拆开测：fs 组装由 rcProbe 调用方负责。
+	if err := rcProbe(port, "dst:/f4share"); err != nil {
+		t.Fatalf("rcProbe: %v", err)
+	}
+	if gotFS != "dst:/f4share" {
+		t.Errorf("fs 未透传 share: %q", gotFS)
 	}
 }

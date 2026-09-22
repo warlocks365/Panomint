@@ -48,10 +48,15 @@ func TestRcloneConfig_SMB(t *testing.T) {
 	cc := connConf{Host: "nas", Share: "photos", Port: 445}
 	creds := &storage.Creds{User: "bob", Pass: "y", Domain: "WORK"}
 	cfg := rcloneConfig("smb", cc, creds, "O")
-	for _, want := range []string{"type = smb", "host = nas", "share = photos", "port = 445", "domain = WORK"} {
+	// Job000076：smb 后端**无** share 配置键（rclone 官方选项无此项，写进 conf
+	// 被静默忽略）——share 经挂载源路径 dst:/<share> 表达，配置只含连接参数。
+	for _, want := range []string{"type = smb", "host = nas", "port = 445", "domain = WORK"} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("配置缺 %q:\n%s", want, cfg)
 		}
+	}
+	if strings.Contains(cfg, "share =") {
+		t.Errorf("smb 配置不得出现无效的 share 键（Job000076 实证被 rclone 静默忽略）:\n%s", cfg)
 	}
 }
 
@@ -59,6 +64,20 @@ func TestRcloneConfig_NoCreds(t *testing.T) {
 	cfg := rcloneConfig("webdav", connConf{URL: "http://x/d"}, nil, "")
 	if strings.Contains(cfg, "user =") || strings.Contains(cfg, "pass =") {
 		t.Errorf("无凭据不应有认证行:\n%s", cfg)
+	}
+}
+
+// Job000076 真机实证：rclone smb 的 remote: 根=服务器（共享列作目录）。
+// 挂载源必须 dst:/<share>；webdav 保持 dst:。
+func TestMountSrc(t *testing.T) {
+	if got := mountSrc("webdav", connConf{URL: "http://x"}); got != "dst:" {
+		t.Errorf("webdav 源应 dst:，got %q", got)
+	}
+	if got := mountSrc("smb", connConf{Host: "h", Share: "photos"}); got != "dst:/photos" {
+		t.Errorf("smb 源应 dst:/<share>，got %q", got)
+	}
+	if got := mountSrc("smb", connConf{Host: "h"}); got != "dst:" {
+		t.Errorf("空 share 兜底 dst:，got %q", got)
 	}
 }
 

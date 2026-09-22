@@ -47,14 +47,18 @@ func mountOne(m mountRec, mp string) error {
 }
 
 // rcloneConfig 生成 rclone 配置文本。密码用 obscure 格式（rclone 约定，非加密仅混淆防窥）。
+// ⚠️ smb 后端**没有** share 配置键（官方选项只有 host/port/user/pass/domain 等），
+// 写 share 进 conf 会被 rclone 静默忽略；共享内容经 remote 路径访问（mount 源
+// 用 dst:/<share>，见 rcloneMount）——Job000076 真机实测：写 share 键+挂 dst:
+// 根=服务器（共享以目录列出），导入路径全错。
 func rcloneConfig(typ string, cc connConf, creds *storage.Creds, obscuredPass string) string {
 	var b strings.Builder
 	b.WriteString("[dst]\n")
 	b.WriteString("type = " + typ + "\n")
 	if typ == "webdav" {
 		fmt.Fprintf(&b, "url = %s\n", cc.URL)
-	} else { // smb
-		fmt.Fprintf(&b, "host = %s\nshare = %s\n", cc.Host, cc.Share)
+	} else { // smb：仅连接参数；share 进挂载源路径
+		fmt.Fprintf(&b, "host = %s\n", cc.Host)
 		if cc.Port > 0 {
 			fmt.Fprintf(&b, "port = %d\n", cc.Port)
 		}
@@ -69,6 +73,17 @@ func rcloneConfig(typ string, cc connConf, creds *storage.Creds, obscuredPass st
 		fmt.Fprintf(&b, "domain = %s\n", creds.Domain)
 	}
 	return b.String()
+}
+
+// mountSrc 挂载源路径：webdav="dst:"；smb="dst:/<share>"。
+// rclone smb 语义：remote: 根=服务器（共享以目录列出，官方文档
+// 「Paths are specified as remote:sharename」），共享内容必须显式走 dst:/<share>——
+// Job000076 真机实证：挂 dst: 根导致导入路径全错（落地目录只有 share 名一层目录）。
+func mountSrc(typ string, cc connConf) string {
+	if typ == "smb" && cc.Share != "" {
+		return "dst:/" + cc.Share
+	}
+	return "dst:"
 }
 
 // rcloneMount rclone 挂载（--read-only 单向导入；--daemon 后台化）。
@@ -98,8 +113,9 @@ func rcloneMount(m mountRec, cc connConf, creds *storage.Creds, mp string) error
 	if err != nil {
 		return fmt.Errorf("开日志: %w", err)
 	}
+	src := mountSrc(m.typ, cc)
 	args := []string{
-		"mount", "dst:", mp,
+		"mount", src, mp,
 		"--config", cfgPath,
 		"--read-only",
 		"--vfs-cache-mode", "off",

@@ -164,7 +164,7 @@ func reconcileWith(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, 
 			// 状态翻转才写库（probeBad 状态机），探针成功不会擦掉同步刚写的 error。
 			if time.Since(lastHealth[m.id]) >= healthEvery {
 				lastHealth[m.id] = time.Now()
-				if perr := probeMount(m.typ, mountKey(m.id), mp); perr != nil {
+				if perr := probeMount(m, mp); perr != nil {
 					if !probeBad[m.id] {
 						setStatus(ctx, pool, m.id, "offline", truncate("源断连: "+perr.Error(), errMaxLen))
 						probeBad[m.id] = true
