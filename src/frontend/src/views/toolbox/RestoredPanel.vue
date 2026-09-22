@@ -41,6 +41,7 @@
 // 后端只按 actor 过滤，故这里天然只有本人执行的记录（见 api/media.js 注释）。
 import { ref, watch } from 'vue'
 import { getRestoreHistory } from '../../api/media'
+import { dialogs } from '../../components/dialogs/dialogs'
 
 const active = defineModel({ type: Boolean, default: false }) // 父级标签激活时才首载
 
@@ -96,8 +97,8 @@ async function loadMoreRestored() {
     restoredTotal.value = data?.total ?? restoredTotal.value
     restoredCursor.value = data?.next_cursor || ''
   } catch (e) {
-    // 不把已加载的列表换成错误页，故用弹窗提示（标签页那边也这么做）
-    window.alert(errMsg(e, '加载更多失败'))
+    // 不把已加载的列表换成错误页，故用弹窗提示
+    await dialogs.alert(errMsg(e, '加载更多失败'))
   } finally {
     restoredLoadingMore.value = false
   }

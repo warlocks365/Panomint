@@ -1,8 +1,9 @@
 import { computed, reactive, ref } from 'vue'
 import http from '../../api/http'
+import { dialogs } from '../dialogs/dialogs'
 
 // Job000066 批量操作执行器：选中集 + 七类操作统一实现（后端 /media/batch 单点语义）。
-// 交互 v1 用 prompt/confirm（与 TagsView 原生弹窗同档），对话框化列入打磨项。
+// Job000077 交互对话框化：prompt/confirm 全部走统一对话框宿主（可机器断言、行为一致）。
 export function useBatchOps(onChanged) {
   const selected = reactive(new Set())
   const busy = ref(false)
@@ -38,28 +39,48 @@ export function useBatchOps(onChanged) {
   }
 
   async function onDelete() {
-    if (!window.confirm(`删除选中的 ${selected.size} 项？删除进入回收站，可恢复。`)) return
+    const ok = await dialogs.confirm({
+      title: '删除',
+      text: `删除选中的 ${selected.size} 项？删除进入回收站，可恢复。`,
+      confirmText: '删除',
+      danger: true
+    })
+    if (!ok) return
     await run('delete', {}, '已移入回收站')
   }
 
   async function onMove() {
-    const folder = window.prompt('移动到目录（如 2024/夏，留空 = 根目录）', '')
+    const folder = await dialogs.prompt({
+      title: '移动到目录',
+      label: '目录路径（如 2024/夏，留空 = 根目录）'
+    })
     if (folder === null) return
     await run('move', { folder_path: folder.trim() }, '已移动')
   }
 
   async function onCopy() {
-    if (!window.confirm(`复制选中的 ${selected.size} 项？副本将进入个人空间根目录的日期目录。`)) return
+    const ok = await dialogs.confirm({
+      title: '复制',
+      text: `复制选中的 ${selected.size} 项？副本将进入个人空间根目录的日期目录。`
+    })
+    if (!ok) return
     await run('copy', {}, '已复制')
   }
 
   async function onShareSpace() {
-    if (!window.confirm(`将选中的 ${selected.size} 项移入共享空间？`)) return
+    const ok = await dialogs.confirm({
+      title: '共享空间',
+      text: `将选中的 ${selected.size} 项移入共享空间？`
+    })
+    if (!ok) return
     await run('share_space', {}, '已共享')
   }
 
   async function onTags() {
-    const names = window.prompt('输入标签名（多个用逗号分隔）。前缀 + 添加 / - 移除，如 "+海边,家庭" 或 "-临时"')
+    const names = await dialogs.prompt({
+      title: '编辑标签',
+      label: '标签名（多个用逗号分隔）。前缀 + 添加 / - 移除，如 "+海边,家庭" 或 "-临时"'
+    })
     if (names === null) return
     const raw = names.trim()
     if (!raw) return
@@ -83,24 +104,30 @@ export function useBatchOps(onChanged) {
   }
 
   async function onMeta() {
-    const taken = window.prompt('拍摄时间（YYYY-MM-DD，留空 = 不修改；输 - 清除）')
-    if (taken === null) return
-    const place = window.prompt('地点（留空 = 不修改；输 - 清除）')
-    if (place === null) return
+    const vals = await dialogs.form({
+      title: '修改元数据',
+      fields: [
+        {
+          key: 'taken',
+          label: '拍摄时间（YYYY-MM-DD，留空 = 不修改；输 - 清除）',
+          validate: (v) => {
+            const s = v.trim()
+            if (!s || s === '-') return ''
+            return Number.isNaN(new Date(s).getTime()) ? '日期格式不合法' : ''
+          }
+        },
+        { key: 'place', label: '地点（留空 = 不修改；输 - 清除）' }
+      ]
+    })
+    if (!vals) return
     const params = {}
-    if (taken.trim()) {
-      if (taken.trim() === '-') params.taken_at = null
-      else {
-        const t = new Date(taken.trim())
-        if (Number.isNaN(t.getTime())) {
-          window.alert('日期格式不合法')
-          return
-        }
-        params.taken_at = t.toISOString()
-      }
+    const taken = vals.taken.trim()
+    const place = vals.place.trim()
+    if (taken) {
+      params.taken_at = taken === '-' ? null : new Date(taken).toISOString()
     }
-    if (place.trim()) {
-      params.place = place.trim() === '-' ? '' : place.trim()
+    if (place) {
+      params.place = place === '-' ? '' : place
     }
     if (!Object.keys(params).length) return
     await run('set_meta', params, '元数据已更新')

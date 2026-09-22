@@ -51,6 +51,7 @@
 import { ref, watch } from 'vue'
 import http from '../../api/http'
 import TrashThumb from './TrashThumb.vue'
+import { dialogs } from '../dialogs/dialogs'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false }
@@ -95,7 +96,7 @@ async function restore(item) {
     total.value = Math.max(0, total.value - 1)
     emit('restored', item)
   } catch (e) {
-    window.alert('恢复失败，请稍后重试')
+    await dialogs.alert('恢复失败，请稍后重试')
   } finally {
     restoringId.value = ''
   }

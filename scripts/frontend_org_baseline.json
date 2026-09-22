@@ -1,20 +1,16 @@
 {
- "components\\albums\\AlbumComments.vue": 406,
  "components\\map\\MapTimeline.vue": 528,
  "components\\player\\360Player.vue": 725,
- "components\\player\\MediaInfoPanel.vue": 905,
+ "components\\player\\MediaInfoPanel.vue": 902,
  "components\\shares\\ShareCreateDialog.vue": 313,
  "components\\timeline\\TimelineGrid.vue": 495,
  "components\\viewer\\MediaViewer.vue": 683,
- "layout\\AppShell.vue": 439,
- "views\\AlbumDetailView.vue": 578,
- "views\\FoldersView.vue": 377,
+ "views\\AlbumDetailView.vue": 567,
+ "views\\FoldersView.vue": 343,
  "views\\MapView.vue": 965,
  "views\\PeopleView.vue": 587,
  "views\\PlayerView.vue": 511,
- "views\\SettingsView.vue": 557,
  "views\\SharePublicView.vue": 735,
- "views\\SpacesView.vue": 382,
- "views\\TagsView.vue": 429,
- "views\\ToolboxView.vue": 701
+ "views\\SpacesView.vue": 328,
+ "views\\admin\\StorageTab.vue": 618
 }

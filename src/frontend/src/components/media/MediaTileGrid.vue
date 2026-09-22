@@ -18,6 +18,17 @@
             @change="batch.toggle(m.id)"
           />
         </label>
+        <button
+          v-if="removable"
+          class="tile-remove"
+          title="移除"
+          data-testid="tile-remove"
+          @click.stop="emit('remove', m)"
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </button>
         <img
           v-if="thumbOf(m.id)"
           class="tile-thumb"
@@ -60,9 +71,10 @@ import { useBatchOps } from './useBatchOps'
 const props = defineProps({
   items: { type: Array, default: () => [] },
   preload: { type: Number, default: 120 }, // 预载前 N 张缩略图，超出保留类型图标
-  selectable: { type: Boolean, default: false } // 批量操作模式（勾选 + 操作栏）
+  selectable: { type: Boolean, default: false }, // 批量操作模式（勾选 + 操作栏）
+  removable: { type: Boolean, default: false } // 逐项移除（如从相册移除；悬停显示 ×）
 })
-const emit = defineEmits(['open', 'changed'])
+const emit = defineEmits(['open', 'changed', 'remove'])
 
 const batch = useBatchOps(() => emit('changed'))
 
@@ -140,6 +152,32 @@ watch(() => props.items, (list) => ensureThumbs(list), { immediate: true })
   height: 15px;
   accent-color: var(--color-primary);
   cursor: pointer;
+}
+
+/* 逐项移除（相册场景）：悬停显示，样式对齐 MediaThumb.mthumb-remove */
+.tile-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+
+.media-tile:hover .tile-remove {
+  display: flex;
+}
+
+.tile-remove:hover {
+  background-color: var(--color-danger);
 }
 
 .batch-result {

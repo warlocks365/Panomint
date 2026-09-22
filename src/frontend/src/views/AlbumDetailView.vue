@@ -74,15 +74,15 @@
         <p v-if="!items.length" class="page-tip">
           {{ album.kind === 'smart' ? '当前条件未命中任何媒体，可点击「编辑条件」调整' : '相册还是空的，点击「添加媒体」放入第一张照片' }}
         </p>
-        <div v-else class="media-grid">
-          <MediaThumb
-            v-for="m in items"
-            :key="m.id"
-            :item="m"
-            :removable="album.kind !== 'smart'"
-            @remove="removeTarget = $event"
-          />
-        </div>
+        <MediaTileGrid
+          v-else
+          :items="items"
+          :selectable="album.kind !== 'smart'"
+          :removable="album.kind !== 'smart'"
+          @open="openMedia"
+          @remove="removeTarget = $event"
+          @changed="load"
+        />
       </section>
 
       <AlbumComments v-if="album" :album-id="album.id" />
@@ -150,8 +150,8 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import MediaThumb from '../components/albums/MediaThumb.vue'
+import { useRoute, useRouter } from 'vue-router'
+import MediaTileGrid from '../components/media/MediaTileGrid.vue'
 import MediaPickerDialog from '../components/albums/MediaPickerDialog.vue'
 import CoverPickerDialog from '../components/albums/CoverPickerDialog.vue'
 import AlbumFormDialog from '../components/albums/AlbumFormDialog.vue'
@@ -163,6 +163,7 @@ import { summarizeCriteria } from '../components/albums/criteriaSummary'
 import { loadThumbUrl } from '../components/timeline/mediaLoader'
 
 const route = useRoute()
+const router = useRouter()
 
 const album = ref(null)
 const items = ref([])
@@ -247,6 +248,10 @@ async function saveEdit() {
 function onAdded() {
   pickerOpen.value = false
   load()
+}
+
+function openMedia(m) {
+  router.push({ name: 'player', params: { id: m.id } })
 }
 
 function onShareCreated() {
@@ -449,12 +454,6 @@ load()
 
 .media-section {
   margin-bottom: 8px;
-}
-
-.media-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px;
 }
 
 .input {

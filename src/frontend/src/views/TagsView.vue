@@ -60,6 +60,7 @@
 import { onMounted, ref } from 'vue'
 import http from '../api/http'
 import TagDetailPanel from './tags/TagDetailPanel.vue'
+import { dialogs } from '../components/dialogs/dialogs'
 
 
 const tags = ref([])
@@ -77,13 +78,17 @@ function chipStyle(t) {
 }
 
 async function onCreate() {
-  const name = window.prompt('新标签名')
-  if (!name || !name.trim()) return
+  const name = await dialogs.prompt({
+    title: '新建标签',
+    label: '标签名',
+    validate: (v) => (v.trim() ? '' : '标签名不能为空')
+  })
+  if (name === null) return
   try {
     await http.post('/tags', { name: name.trim() })
     await loadTags()
   } catch (e) {
-    window.alert(errMsg(e, '创建失败'))
+    await dialogs.alert(errMsg(e, '创建失败'))
   }
 }
 
@@ -96,10 +101,10 @@ async function triggerAI() {
   aiBusy.value = true
   try {
     const { data } = await http.post('/ai/tags', { scope: 'all' })
-    window.alert(`AI 打标完成：处理 ${data?.processed ?? 0} 项，写入 ${data?.tagged ?? 0} 个标签（AI 标签需在媒体详情确认）`)
+    await dialogs.alert(`AI 打标完成：处理 ${data?.processed ?? 0} 项，写入 ${data?.tagged ?? 0} 个标签（AI 标签需在媒体详情确认）`)
     await loadTags()
   } catch (e) {
-    window.alert(errMsg(e, 'AI 打标失败（可能未启用 CLIP）'))
+    await dialogs.alert(errMsg(e, 'AI 打标失败（可能未启用 CLIP）'))
   } finally {
     aiBusy.value = false
   }

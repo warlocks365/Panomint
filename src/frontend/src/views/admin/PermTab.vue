@@ -61,6 +61,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAuthStore, errMessage } from '../../stores/auth'
 import { listPermMeta, listRoles, listUsers, listUserPerms, putUserPerm, putPermMeta } from '../../api/admin'
+import { dialogs } from '../../components/dialogs/dialogs'
 
 const auth = useAuthStore()
 const loading = ref(false)
@@ -119,17 +120,20 @@ async function loadAll() {
 }
 
 async function onEdit(m) {
-  const label = window.prompt('中文名', m.label)
-  if (label === null) return
-  const category = window.prompt('分类（可输入新分类名）', m.category)
-  if (category === null) return
-  const description = window.prompt('描述', m.description || '')
-  if (description === null) return
+  const vals = await dialogs.form({
+    title: `编辑展示信息：${m.perm}`,
+    fields: [
+      { key: 'label', label: '中文名', initial: m.label },
+      { key: 'category', label: '分类（可输入新分类名）', initial: m.category },
+      { key: 'description', label: '描述', initial: m.description || '' }
+    ]
+  })
+  if (!vals) return
   try {
     await putPermMeta(m.perm, {
-      label: label.trim() || m.label,
-      category: category.trim() || m.category,
-      description: description.trim()
+      label: vals.label.trim() || m.label,
+      category: vals.category.trim() || m.category,
+      description: vals.description.trim()
     })
     flash(`已更新 ${m.perm} 的展示信息`)
     await loadAll()

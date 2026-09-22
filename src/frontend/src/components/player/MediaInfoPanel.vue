@@ -248,6 +248,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import http from '../../api/http'
+import { dialogs } from '../dialogs/dialogs'
 
 const props = defineProps({
   mediaId: { type: String, required: true },
@@ -263,11 +264,7 @@ const deleting = ref(false)
 /* ---------- 展示计算 ---------- */
 const is360 = computed(() => !!(props.detail?.is_360 || props.detail?.type === '360'))
 
-const typeLabel = computed(() => {
-  if (is360.value) return '360 全景'
-  if (props.detail?.type === 'video') return '视频'
-  return '照片'
-})
+const typeLabel = computed(() => (is360.value ? '360 全景' : props.detail?.type === 'video' ? '视频' : '照片'))
 
 const hasExif = computed(() => {
   const ex = props.detail?.exif
@@ -508,13 +505,14 @@ async function toggleFavorite() {
 
 async function onDelete() {
   if (!props.detail || deleting.value) return
-  if (!window.confirm(`确定删除「${props.detail.filename}」吗？文件将移入回收站。`)) return
+  const ok = await dialogs.confirm({ title: '删除媒体', text: `确定删除「${props.detail.filename}」吗？文件将移入回收站。`, confirmText: '删除', danger: true })
+  if (!ok) return
   deleting.value = true
   try {
     await http.delete(`/media/${props.mediaId}`)
     emit('deleted', props.mediaId)
   } catch {
-    window.alert('删除失败，请稍后重试')
+    await dialogs.alert('删除失败，请稍后重试')
   } finally {
     deleting.value = false
   }
@@ -532,8 +530,7 @@ function formatTime(t) {
 function formatDuration(sec) {
   if (!sec && sec !== 0) return '—'
   const s = Math.round(sec)
-  const m = Math.floor(s / 60)
-  return `${m}:${String(s % 60).padStart(2, '0')}`
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
 function formatSize(bytes) {
