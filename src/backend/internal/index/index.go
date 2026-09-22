@@ -143,12 +143,18 @@ const (
 )
 
 // Scan 扫描 root 目录：建 index_jobs 任务行，逐文件提取元数据、hash 去重入库、派发缩略图任务。
+// 入库媒体归属 seed user（本地目录导入的历史语义）。
 func (x *Indexer) Scan(ctx context.Context, root string) (*ScanStats, error) {
 	ownerID, err := EnsureSeedUser(ctx, x.db)
 	if err != nil {
 		return nil, err
 	}
+	return x.ScanAs(ctx, root, ownerID)
+}
 
+// ScanAs 与 Scan 同，但入库媒体归属调用方指定的 userID（Job000070 挂载导入：
+// 远程挂载点的媒体归挂载属主，保证 mediascope 可见性谓词语义一致）。
+func (x *Indexer) ScanAs(ctx context.Context, root, ownerID string) (*ScanStats, error) {
 	// 建任务行（先 running，拿到总数后更新 total）
 	var jobID string
 	if err := x.db.QueryRow(ctx,

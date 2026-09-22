@@ -307,6 +307,12 @@ services:
       dockerfile: ../../docker/worker/Dockerfile
     container_name: pano-index-worker
     restart: unless-stopped
+    # Job000070 F4 挂载执行器（storagectl 与 indexctl 同容器共享 mount 命名空间）：
+    # rclone mount 的 FUSE 需要 /dev/fuse 与 SYS_ADMIN；只读挂载+不解密不出错的最小权限集。
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
     environment:
       WORKER_KIND: index
       PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
@@ -316,6 +322,8 @@ services:
       UPLOAD_DIR: /data/media
       HLS_DIR: /data/hls
       MEDIA_ROOT: /data/media
+      # 挂载凭据解密密钥（与 api 同值，.env 注入）
+      STORAGE_CIPHER_KEY: ${STORAGE_CIPHER_KEY:-}
       # 高德逆地理编码（空=入库不自动填 place；AMAP_SECRET 非空时请求带 sig 签名）
       AMAP_KEY: ${AMAP_KEY:-}
       AMAP_SECRET: ${AMAP_SECRET:-}
