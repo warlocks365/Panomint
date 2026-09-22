@@ -313,6 +313,11 @@ services:
       - SYS_ADMIN
     devices:
       - /dev/fuse:/dev/fuse
+    # Debian 宿主 docker-default AppArmor 的 mount 白名单不含 FUSE（实测
+    # fusermount3 mount failed: Permission denied，CapEff 已含 SYS_ADMIN）。
+    # 测试环境放开 apparmor；生产应换专用 profile（仅放行 fusermount3 的 fuse 挂载）。
+    security_opt:
+      - apparmor=unconfined
     environment:
       WORKER_KIND: index
       PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
