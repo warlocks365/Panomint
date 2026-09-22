@@ -224,6 +224,8 @@ func truncate(s string, n int) string {
 }
 
 // setStatus 回写状态（best-effort，失败仅记日志）。
+// ⚠️ status 传两次（$2 写列、$5 供 CASE 比较）：同一占位符混用 varchar/text 上下文会
+// 触发 42P08 inconsistent types（与 mediascope $n::text 同族教训），拆开各推各的。
 func setStatus(ctx context.Context, pool *pgxpool.Pool, id, status, lastErr string) {
 	var le any
 	if lastErr != "" {
@@ -231,9 +233,9 @@ func setStatus(ctx context.Context, pool *pgxpool.Pool, id, status, lastErr stri
 	}
 	_, err := pool.Exec(ctx,
 		`UPDATE storage_mounts SET status=$2, last_error=$3,
-		 mount_path=CASE WHEN $2='online' THEN $4 ELSE mount_path END, updated_at=now()
-		 WHERE id=$5`,
-		status, le, mountPath(id), id)
+		 mount_path=CASE WHEN $5='online' THEN $4 ELSE mount_path END, updated_at=now()
+		 WHERE id=$6`,
+		status, le, mountPath(id), status, id)
 	if err != nil {
 		log.Printf("状态回写失败 %s: %v", id, err)
 	}
