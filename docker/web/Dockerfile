@@ -146,11 +146,16 @@ server {
 
     # SPA 页面回退目标
     location @spa {
+        # Vary: Accept —— 防 Chrome 把 document 导航缓存的 index.html 复用给同 URL 的
+        # XHR（导航组路径 /albums/:id 等的 getAlbum 与页面同 URL；无 Vary 时缓存键
+        # 不含 Accept → 刷新详情页时 XHR 命中 HTML 缓存 → 相册详情页整页坏）。
+        add_header Vary Accept always;
         try_files /index.html =404;
     }
 
     # Vue SPA history 路由回退（/timeline /player/:id /share/:token /login 等）
     location / {
+        add_header Vary Accept always;
         try_files $uri $uri/ /index.html;
     }
 }

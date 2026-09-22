@@ -85,7 +85,7 @@
         </div>
       </section>
 
-      <AlbumComments :album-id="album.id" />
+      <AlbumComments v-if="album" :album-id="album.id" />
     </template>
 
     <MediaPickerDialog
