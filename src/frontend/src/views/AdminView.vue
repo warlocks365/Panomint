@@ -36,6 +36,7 @@
       <JobsTab v-show="activeTab === 'jobs'" data-testid="panel-jobs" />
       <AuditTab v-show="activeTab === 'audit'" data-testid="panel-audit" />
       <MapConfigTab v-show="activeTab === 'map'" data-testid="panel-map" />
+      <StorageTab v-show="activeTab === 'storage'" data-testid="panel-storage" />
     </template>
   </div>
 </template>
@@ -51,6 +52,7 @@ import PermTab from './admin/PermTab.vue'
 import JobsTab from './admin/JobsTab.vue'
 import AuditTab from './admin/AuditTab.vue'
 import MapConfigTab from './admin/MapConfigTab.vue'
+import StorageTab from './admin/StorageTab.vue'
 
 const auth = useAuthStore()
 const activeTab = ref('overview')
@@ -63,7 +65,8 @@ const tabs = [
   { key: 'perms', label: '权限' },
   { key: 'jobs', label: '任务' },
   { key: 'audit', label: '审计' },
-  { key: 'map', label: '地图配置' }
+  { key: 'map', label: '地图配置' },
+  { key: 'storage', label: '存储挂载' }
 ]
 
 // 权限预检：管理端点分两级（admin:users 管用户/角色/审计，admin:system 管概览/任务/地图配置）。
