@@ -1,7 +1,8 @@
 <template>
-  <!-- 全局对话框宿主（Job000077）：消费 dialogs.js 单例状态栈，替代原生 prompt/confirm/alert。 -->
+  <!-- 全局对话框宿主（Job000077）：消费 dialogs.js 单例状态栈，替代原生 prompt/confirm/alert。
+       Job000100 增 kind='target'：移动/复制目标选择器（TargetPicker 自持页脚与确定逻辑）。 -->
   <div v-if="cur" class="dlg-mask" data-testid="dialog-host" @click.self="onMask">
-    <div class="dlg" role="dialog" :aria-label="cur.title || '对话框'">
+    <div class="dlg" :class="{ 'dlg--wide': cur.kind === 'target' }" role="dialog" :aria-label="cur.title || '对话框'">
       <h3 v-if="cur.title" class="dlg-title" data-testid="dlg-title">{{ cur.title }}</h3>
       <p v-if="cur.text" class="dlg-text">{{ cur.text }}</p>
 
@@ -39,9 +40,15 @@
         </label>
       </template>
 
+      <TargetPicker
+        v-else-if="cur.kind === 'target'"
+        :mode="cur.targetMode"
+        :count="cur.targetCount"
+      />
+
       <p v-if="cur.error" class="dlg-error" data-testid="dlg-error">{{ cur.error }}</p>
 
-      <div class="dlg-actions">
+      <div v-if="cur.kind !== 'target'" class="dlg-actions">
         <button v-if="cur.kind !== 'alert'" class="btn" data-testid="dlg-cancel" @click="dialogCancel">
           {{ cur.cancelText }}
         </button>
@@ -61,6 +68,7 @@
 <script setup>
 import { computed } from 'vue'
 import { dialogState, dialogSubmit, dialogCancel } from './dialogs'
+import TargetPicker from './TargetPicker.vue'
 
 const cur = computed(() => dialogState.current)
 
@@ -90,6 +98,10 @@ function onMask() {
   background-color: var(--color-surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
+}
+
+.dlg--wide {
+  width: 520px;
 }
 
 .dlg-title {

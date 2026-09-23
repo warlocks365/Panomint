@@ -14,7 +14,7 @@ function enqueue(kind, opts) {
   return new Promise((resolve) => {
     dialogState.queue.push({
       id: ++seq,
-      kind, // confirm | prompt | form | alert
+      kind, // confirm | prompt | form | alert | target
       title: opts.title || '',
       text: opts.text || '',
       // form: [{ key, label, placeholder, initial, type?: 'check'(布尔勾选，默认文本), validate?(value, values) -> '' | 错误文案 }]
@@ -23,6 +23,9 @@ function enqueue(kind, opts) {
       confirmText: opts.confirmText || '确定',
       cancelText: opts.cancelText || '取消',
       danger: !!opts.danger,
+      // Job000100 target：移动/复制目标选择器参数（TargetPicker 自持渲染与确定逻辑）
+      targetMode: opts.mode || 'move',
+      targetCount: opts.count ?? 0,
       value: opts.initial ?? '',
       values: opts.fields ? Object.fromEntries(opts.fields.map((f) => [f.key, f.initial ?? ''])) : null,
       error: '',
@@ -54,13 +57,21 @@ export const dialogs = {
   // -> Promise<Record<key, string> | null>
   form: (opts) => enqueue('form', opts),
   // -> Promise<true>（仅确定）
-  alert: (opts) => enqueue('alert', typeof opts === 'string' ? { text: opts } : opts)
+  alert: (opts) => enqueue('alert', typeof opts === 'string' ? { text: opts } : opts),
+  // Job000100 -> Promise<{type:'folder',path:string}|{type:'album',id:string,name:string}|null>（取消 = null）
+  pickTarget: (opts) => enqueue('target', opts)
+}
+
+// TargetPicker「确定」提交：payload 由组件状态校验后传入（dialogs.pickTarget 的 resolve 值）
+export function dialogResolve(result) {
+  closeCurrent(result)
 }
 
 // DialogHost「确定」提交：先跑 validate，未过则错误行内显示、不关闭。
 export function dialogSubmit() {
   const cur = dialogState.current
   if (!cur) return
+  if (cur.kind === 'target') return // TargetPicker 自持确定逻辑（dialogResolve 关闭）
   if (cur.kind === 'confirm' || cur.kind === 'alert') {
     closeCurrent(true)
     return

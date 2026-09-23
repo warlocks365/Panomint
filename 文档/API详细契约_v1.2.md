@@ -1,9 +1,19 @@
-# API 详细契约 (v1.4)
+# API 详细契约 (v1.5)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.4 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.5 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.5 变更说明（2026-09-23，Job000100「移动/复制目标选择」）
+
+补录 `POST /media/batch`（Job000066 落地时漏登记的端点）并扩展目标选择语义。实现见 `internal/media/batch.go` / `batch_store.go`：
+
+1. 请求：`{ids[1..200], op, folder_path?, album_id?, tag_ids?, taken_at?, place?}`；`op ∈ delete|move|copy|add_tags|remove_tags|set_meta|share_space`；响应 `{succeeded, failed:[{id, reason}]}`（部分成功不回滚）
+2. `folder_path`（move/copy 目录目标）：move 缺省=根目录；copy 缺省(nil)=副本继承源目录，**显式给（含空串）=置为目标目录**。目标为注册目录时消费 `folders.CanWrite`（无 write 授权 → 403 FORBIDDEN「无目标目录的写入权限」）
+3. `album_id`（move/copy 相册目标，Job000100 新增）：move=加入相册成员（相册为虚拟集合，`folder_path` 不变）；copy=副本行全部生成后一次性入册 `album_items`（入册失败时副本保留在个人空间、按源 id 报失败）。守卫与 `POST /albums/:id/items` 逐字一致：404 同形「相册不存在」/ 400 `SMART_READONLY` / 403「仅相册所有者或管理员可添加媒体」，**先于归属过滤 fail-fast**；入册前做整笔可见性校验（谓词主体=相册属主，与 `internal/albums.addItemsQueries` 同形制），任何一项不在相册属主可见范围 → 整笔不写、403
+4. 前端：批量栏「移动/复制」走统一对话框宿主的 `pickTarget`（`TargetPicker.vue`，目录树/相册双 tab；智能相册行为禁用态）。约定：操作成功=清空选择集+通知宿主刷新，失败=保留
+5. 附带守卫：`PATCH /folders/rename` 新增「目录移入自身/子目录」拦截——`to` 落在 `from` 子树（段边界前缀）→ 400 `BAD_PATH`「不能将目录移入自身或其子目录」（防 a → a/b 自引用目录环）
 
 ## v1.4 变更说明（2026-09-23，Job000098「应用密码管理自助化」）
 

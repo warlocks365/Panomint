@@ -78,21 +78,30 @@ export function useBatchOps(onChanged) {
   }
 
   async function onMove() {
-    const folder = await dialogs.prompt({
-      title: '移动到目录',
-      label: '目录路径（如 2024/夏，留空 = 根目录）'
-    })
-    if (folder === null) return
-    await run('move', { folder_path: folder.trim() }, '已移动')
+    // Job000100 目标选择器：目录（改归属）或相册（加入成员，虚拟集合原目录保留）二选一
+    const target = await dialogs.pickTarget({ title: `移动 ${selected.size} 项到`, mode: 'move', count: selected.size })
+    if (!target) return
+    if (target.type === 'album') {
+      await run('move', { album_id: target.id }, '已加入相册')
+    } else {
+      await run('move', { folder_path: target.path }, '已移动')
+    }
   }
 
   async function onCopy() {
-    const ok = await dialogs.confirm({
-      title: '复制',
-      text: `复制选中的 ${selected.size} 项？副本将进入个人空间根目录的日期目录。`
-    })
-    if (!ok) return
-    await run('copy', {}, '已复制')
+    // Job000100 目标选择器：目录与相册可同时（副本落目标目录并加入相册）；
+    // 取消 = 不做。未选目标时后端保持旧行为（副本继承源目录）。
+    const target = await dialogs.pickTarget({ title: `复制 ${selected.size} 项到`, mode: 'copy', count: selected.size })
+    if (!target) return
+    const params = {}
+    let okText = '已复制'
+    if (target.type === 'album') {
+      params.album_id = target.id
+      okText = '已复制并加入相册'
+    } else {
+      params.folder_path = target.path
+    }
+    await run('copy', params, okText)
   }
 
   async function onShareSpace() {

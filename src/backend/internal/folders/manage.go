@@ -50,6 +50,15 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
+// renameDestErr 目录移动目标的合法性（Job000100）：to 不得落在 from 的子树内
+// （from==to 由调用点另行拦截；这里只挡 from/... 前缀——段边界比较，a/bc 不算 a/b 的子目录）。
+func renameDestErr(from, to string) error {
+	if strings.HasPrefix(to, from+"/") {
+		return errString("不能将目录移入自身或其子目录")
+	}
+	return nil
+}
+
 // prefixCond folder_path 前缀条件（精确或含全部子目录），参数化。
 // 占位符由调用方编号（本函数不绑参，返回的 cond 内占位符用 %d 由调用方填）。
 func prefixCond(alias, path string) string {
@@ -115,6 +124,12 @@ func (h *Handler) Rename(c *gin.Context) {
 	}
 	if from == to {
 		httperr.Abort(c, http.StatusBadRequest, "BAD_REQUEST", "新旧路径相同")
+		return
+	}
+	// Job000100：目录移入自身/子目录守卫——前缀改写会把目标解析到源内部，
+	// 产生 a → a/b 的自引用目录环（且注册表/media 双重改写后路径不可回退），必须明确拒绝。
+	if err := renameDestErr(from, to); err != nil {
+		httperr.Abort(c, http.StatusBadRequest, "BAD_PATH", err.Error())
 		return
 	}
 	uid := c.GetString("user_id")

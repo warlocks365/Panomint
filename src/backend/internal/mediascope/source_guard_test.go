@@ -352,7 +352,12 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 	regKey("internal/media/batch_store.go", "INSERT INTO media"): {
 		UserFacing: false,
 		Reason:     "insertCopiedRow 批量复制写路径：owner_id 显式=调用者（$2），INSERT-SELECT 源行 id 已过 batchOwnedIDs 收敛。",
-		Evidence:   "media/batch_store.go:125-140。",
+		Evidence:   "media/batch_store.go:130-146。",
+	},
+	regKey("internal/media/batch_store.go", "JOIN media"): {
+		UserFacing: false,
+		Reason:     "Job000100 batchAddToAlbumQueries 的写入前两段式语句（整笔可见性 count + INSERT INTO album_items）：ids 已过 batchOwnedIDs 归属收敛，JOIN 仅做写入前可见性整笔校验（跨属主 admin 场景防脏行），不回返媒体行/内容给终端用户。",
+		Evidence:   "media/batch_store.go:211-233（batchAddToAlbumQueries）。",
 	},
 	regKey("internal/folders/manage.go", "FROM media"): {
 		UserFacing: false,
