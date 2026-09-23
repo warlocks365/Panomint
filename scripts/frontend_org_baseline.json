@@ -1,7 +1,7 @@
 {
  "components\\map\\MapTimeline.vue": 528,
  "components\\player\\360Player.vue": 725,
- "components\\player\\MediaInfoPanel.vue": 902,
+ "components\\player\\MediaInfoPanel.vue": 368,
  "components\\shares\\ShareCreateDialog.vue": 313,
  "components\\timeline\\TimelineGrid.vue": 531,
  "components\\viewer\\MediaViewer.vue": 683,
