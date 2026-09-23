@@ -60,10 +60,11 @@ func (h *Handler) CreateLocation(c *gin.Context) {
 		httperr.Abort(c, http.StatusBadRequest, "BAD_REQUEST", "description ≤200 字符")
 		return
 	}
-	var id string
+	var loc Location
 	err := h.Pool.QueryRow(c.Request.Context(),
-		`INSERT INTO storage_locations (name, description) VALUES ($1,$2) RETURNING id::text`,
-		req.Name, req.Description).Scan(&id)
+		`INSERT INTO storage_locations (name, description) VALUES ($1,$2)
+		 RETURNING id::text, name, description, created_at::text, 0`,
+		req.Name, req.Description).Scan(&loc.ID, &loc.Name, &loc.Description, &loc.CreatedAt, &loc.MediaCount)
 	if err != nil {
 		if isUniqueViolation(err) {
 			httperr.Abort(c, http.StatusConflict, "DUPLICATE_NAME", "同名存储位置已存在")
@@ -72,7 +73,7 @@ func (h *Handler) CreateLocation(c *gin.Context) {
 		httperr.Fail(c, http.StatusInternalServerError, "CREATE_FAILED", "创建失败", err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"id": id})
+	c.JSON(http.StatusCreated, loc)
 }
 
 // ListLocations GET /storage/locations → {locations:[…]}（按 name 升序，含引用计数）。
