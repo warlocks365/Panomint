@@ -10,7 +10,7 @@
  "views\\MapView.vue": 991,
  "views\\PeopleView.vue": 513,
  "views\\PlayerView.vue": 511,
- "views\\SharePublicView.vue": 735,
+ "views\\SharePublicView.vue": 410,
  "views\\SpacesView.vue": 328,
  "views\\admin\\StorageTab.vue": 618
 }

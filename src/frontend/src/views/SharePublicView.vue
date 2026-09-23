@@ -57,94 +57,58 @@
         <p class="tip">分享内容为空</p>
       </div>
 
-      <div v-else class="media-grid">
-        <button
-          v-for="m in share.items"
-          :key="m.id"
-          class="media-cell"
-          type="button"
-          @click="openItem(m)"
-        >
-          <img v-if="thumbOf(m.id) && thumbOf(m.id) !== 'x-failed'" :src="thumbOf(m.id)" :alt="m.filename || ''" class="thumb" loading="lazy" />
-          <div v-else-if="thumbOf(m.id) === 'x-failed'" class="thumb-placeholder">
-            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" class="thumb-failed-icon">
-              <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.5" />
-              <path d="M3 15l5-5 4 4 3-3 6 6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-            </svg>
-          </div>
-          <div v-else class="thumb-placeholder">
-            <div class="spinner sm"></div>
-          </div>
-          <span v-if="isVideo(m)" class="badge video-badge">
-            <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor">
-              <path d="M8 5.5v13l11-6.5z" />
-            </svg>
-            {{ durationLabel(m) }}
-          </span>
-        <span v-if="is360(m)" class="badge pano-badge">360</span>
-        <ShareDownloadBtn :token="token" :id="m.id" :filename="m.filename" :password="password" :allowed="!!share.allow_download" />
-      </button>
-      </div>
+      <ShareMediaGrid
+        v-else
+        :items="share.items"
+        :thumb-url="thumbOf"
+        :token="token"
+        :password="password"
+        :allow-download="!!share.allow_download"
+        @open="openItem"
+      />
 
       <!-- 照片大图 -->
-      <div v-if="viewerItem" class="viewer-mask" @click.self="closeViewer">
-        <button class="viewer-close" type="button" aria-label="关闭" @click="closeViewer">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-        </button>
-        <img v-if="viewerUrl" :src="viewerUrl" :alt="viewerItem.filename || ''" class="viewer-img" />
-        <div v-else class="spinner"></div>
-      </div>
+      <SharePhotoViewer
+        v-if="viewerItem"
+        :item="viewerItem"
+        :token="token"
+        :password="password"
+        :fallback-thumb-url="thumbOf(viewerItem.id)"
+        @close="viewerItem = null"
+      />
 
       <!-- 视频 / 360 播放 -->
-      <div v-if="playingItem" class="viewer-mask" @click.self="closePlayer">
-        <button class="viewer-close" type="button" aria-label="关闭" @click="closePlayer">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-        </button>
-        <div class="player-box">
-          <video ref="videoEl" class="player-video" controls autoplay playsinline webkit-playsinline></video>
-          <p v-if="playerError" class="player-error">{{ playerError }}</p>
-        </div>
-      </div>
+      <ShareVideoPlayer
+        v-if="playingItem"
+        :item="playingItem"
+        :token="token"
+        :password="password"
+        @close="playingItem = null"
+      />
 
       <!-- 360 全景（照片/视频统一球面渲染） -->
-      <div v-if="panoItem" class="viewer-mask" @click.self="closePano">
-        <button class="viewer-close" type="button" aria-label="关闭" @click="closePano">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-          </svg>
-        </button>
-        <div class="pano-box">
-          <Player360
-            v-if="panoReady"
-            :key="panoItem.id"
-            :media-id="String(panoItem.id)"
-            :mode="panoItem.type === 'photo' ? 'photo' : 'video'"
-            :src="panoSrc"
-            :title="panoItem.filename || ''"
-            auth="none"
-            :append-query="panoAppendQuery"
-            :bandwidth-kbps="panoBandwidthKbps"
-          />
-          <div v-else class="pano-loading">
-            <div class="spinner"></div>
-          </div>
-        </div>
-      </div>
+      <SharePanoViewer
+        v-if="panoItem"
+        :item="panoItem"
+        :token="token"
+        :password="password"
+        @close="panoItem = null"
+      />
     </template>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+// Job000084 拆解：网格/照片查看器/HLS 播放器/360 全景四个部分拆为独立组件，
+// 各自自持挂载即工作、卸载即销毁的完整生命周期（objectURL/hls.js/带宽自测不外泄）。
+// 本组件保留：phase 状态机、密码提交、错误映射、缩略图有限并发加载与回收、openItem 分派。
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import Hls from 'hls.js'
-import { fetchPublicShare, loadPublicThumb, loadPublicViewerUrl, measureShareBandwidth, publicHlsUrl, publicThumbUrl } from '../components/shares/publicApi'
-import ShareDownloadBtn from '../components/shares/ShareDownloadBtn.vue'
-import Player360 from '../components/player/360Player.vue'
+import { fetchPublicShare, loadPublicThumb } from '../components/shares/publicApi'
+import ShareMediaGrid from '../components/shares/ShareMediaGrid.vue'
+import SharePhotoViewer from '../components/shares/SharePhotoViewer.vue'
+import ShareVideoPlayer from '../components/shares/ShareVideoPlayer.vue'
+import SharePanoViewer from '../components/shares/SharePanoViewer.vue'
 
 const route = useRoute()
 const token = route.params.token
@@ -161,65 +125,11 @@ const errorInfo = reactive({ title: '', desc: '' })
 
 const thumbs = reactive(new Map())
 
+/* 三个查看器各自 v-if 挂载即工作；宿主只持有「当前打开哪类」的分派状态 */
 const viewerItem = ref(null)
-const viewerUrl = ref('')
-// 大图 objectURL 由本组件持有（loadPublicViewerUrl 不进共享缓存），关闭/卸载时必须 revoke；
-// 失败回退到的 thumbOf() 是共享缓存里的 URL，不得 revoke
-let viewerOwnedUrl = ''
-
-function setViewerUrl(url, owned) {
-  if (viewerOwnedUrl) URL.revokeObjectURL(viewerOwnedUrl)
-  viewerOwnedUrl = owned ? url : ''
-  viewerUrl.value = url
-}
-
 const playingItem = ref(null)
-const playerError = ref('')
-const videoEl = ref(null)
-let hls = null
-let alive = true
-
-/* 360 全景查看器状态：照片取 lg 缩略图贴球面，视频走公开 HLS */
 const panoItem = ref(null)
-/* Phase 4 P1：带宽自测结束前先不挂载 360 播放器（避免用错档位起播） */
-const panoReady = ref(false)
-/* 实测下行带宽（kbps）；0 = 未知/测速失败 → 360Player 走 hls.js 默认 ABR */
-const panoBandwidthKbps = ref(0)
-/* 带宽自测等待上限：超时先播放，拿不到提示就交给 hls.js 默认 ABR（绝不无限阻塞） */
-const BW_HINT_TIMEOUT_MS = 1500
-/* 用户快速切换媒体时，丢弃上一轮迟到的测量结果 */
-let panoSeq = 0
-
-const panoSrc = computed(() => {
-  if (!panoItem.value) return ''
-  if (panoItem.value.type === 'photo') return publicThumbUrl(token, panoItem.value.id, 'lg', password.value)
-  return publicHlsUrl(token, panoItem.value.id, password.value)
-})
-// 密码分享的 HLS ts 切片请求不继承 master URL 查询串，需逐请求补挂
-const panoAppendQuery = computed(() => (password.value ? `password=${encodeURIComponent(password.value)}` : ''))
-
-// preparePano 打开 360 媒体：照片无需 HLS，立即进播放器；
-// 视频先做带宽自测（有上界），据测速值让 360Player 选初始档位。
-async function preparePano(item) {
-  panoItem.value = item
-  panoBandwidthKbps.value = 0
-  if (item.type === 'photo') {
-    panoReady.value = true
-    return
-  }
-  panoReady.value = false
-  const seq = ++panoSeq
-  const measured = measureShareBandwidth(token, password.value)
-    .then((r) => (r && Number(r.down_kbps) > 0 ? Number(r.down_kbps) : 0))
-    .catch(() => 0) // 测速失败 → 0 → 360Player 走 hls.js 默认 ABR
-  const hint = await Promise.race([
-    measured,
-    new Promise((resolve) => setTimeout(() => resolve(0), BW_HINT_TIMEOUT_MS))
-  ])
-  if (seq !== panoSeq || !alive) return // 已切走/已卸载：丢弃
-  panoBandwidthKbps.value = hint
-  panoReady.value = true
-}
+let alive = true
 
 function isVideo(m) {
   // 360 视频走全景播放，不进普通播放器
@@ -233,14 +143,6 @@ function is360(m) {
 
 function thumbOf(id) {
   return thumbs.get(id) || ''
-}
-
-function durationLabel(m) {
-  const d = Number(m.duration)
-  if (!d || !Number.isFinite(d)) return ''
-  const mm = Math.floor(d / 60)
-  const ss = Math.floor(d % 60)
-  return `${mm}:${String(ss).padStart(2, '0')}`
 }
 
 function showError(code, status) {
@@ -316,89 +218,12 @@ async function submitPassword() {
 
 async function openItem(m) {
   if (is360(m)) {
-    return preparePano(m) // 360 照片/视频统一进全景查看器（视频需先测速定初始档）
-  }
-  if (isVideo(m)) {
-    openPlayer(m)
+    panoItem.value = m // 360 照片/视频统一进全景查看器（视频需先测速定初始档）
+  } else if (isVideo(m)) {
+    playingItem.value = m
   } else {
     viewerItem.value = m
-    setViewerUrl('', false)
-    try {
-      const url = await loadPublicViewerUrl(token, m.id, password.value)
-      if (alive && viewerItem.value === m) setViewerUrl(url, true)
-      else URL.revokeObjectURL(url) // 已切走/已卸载：立即回收，不滞留
-    } catch (e) {
-      if (alive && viewerItem.value === m) setViewerUrl(thumbOf(m.id), false)
-    }
   }
-}
-
-function closeViewer() {
-  viewerItem.value = null
-  setViewerUrl('', false)
-}
-
-async function openPlayer(m) {
-  playingItem.value = m
-  playerError.value = ''
-  await nextTick()
-  const v = videoEl.value
-  if (!v) return
-  const url = publicHlsUrl(token, m.id, password.value)
-  if (Hls.isSupported()) {
-    hls = new Hls({
-      enableWorker: true,
-      // 密码分享：m3u8 相对路径的 ts 切片请求不继承 master URL 查询串，逐请求补挂 password
-      xhrSetup: (xhr, url) => {
-        if (password.value) {
-          const sep = url.includes('?') ? '&' : '?'
-          xhr.open('GET', url + sep + 'password=' + encodeURIComponent(password.value), true)
-        }
-      }
-    })
-    hls.on(Hls.Events.ERROR, (_evt, data) => {
-      if (data?.fatal) playerError.value = '视频加载失败，请稍后重试'
-    })
-    hls.loadSource(url)
-    hls.attachMedia(v)
-  } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-    // iOS Safari / 微信内置浏览器原生 HLS：无法给 m3u8 相对路径的 ts 切片逐个补挂密码
-    // （hls.js 的 xhrSetup 在原生分支不存在），密码分享必 403 —— 明确提示，不静默失败。
-    // 长期方案：后端为切片签发一次性查询令牌（签名 URL）。
-    if (password.value) {
-      playerError.value = '当前浏览器不支持受保护视频播放，请用桌面或 Android 设备观看'
-      return
-    }
-    v.src = url
-  } else {
-    playerError.value = '当前浏览器不支持视频播放'
-  }
-}
-
-function destroyPlayer() {
-  if (hls) {
-    hls.destroy()
-    hls = null
-  }
-  const v = videoEl.value
-  if (v) {
-    v.pause()
-    v.removeAttribute('src')
-    v.load()
-  }
-}
-
-function closePlayer() {
-  destroyPlayer()
-  playingItem.value = null
-  playerError.value = ''
-}
-
-function closePano() {
-  panoSeq++ // 作废在途的带宽测量，避免其回填后重新挂载播放器
-  panoReady.value = false
-  panoBandwidthKbps.value = 0
-  panoItem.value = null // v-if 卸载即触发 Player360 自身资源销毁
 }
 
 onMounted(async () => {
@@ -427,9 +252,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   alive = false
-  panoSeq++
-  destroyPlayer()
-  if (viewerOwnedUrl) URL.revokeObjectURL(viewerOwnedUrl)
   for (const url of thumbs.values()) URL.revokeObjectURL(url)
   thumbs.clear()
 })
@@ -463,12 +285,6 @@ onBeforeUnmount(() => {
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-}
-
-.spinner.sm {
-  width: 20px;
-  height: 20px;
-  border-width: 2px;
 }
 
 @keyframes spin {
@@ -590,146 +406,5 @@ onBeforeUnmount(() => {
   margin-top: 4px;
   font-size: var(--font-size-sm);
   color: var(--color-text-disabled);
-}
-
-.media-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 3px;
-  padding: 0 3px;
-}
-
-.media-cell {
-  position: relative;
-  aspect-ratio: 1 / 1;
-  padding: 0;
-  border: none;
-  background-color: var(--color-surface-hover);
-  cursor: pointer;
-  overflow: hidden;
-}
-
-.thumb {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.thumb-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.thumb-failed-icon {
-  color: var(--color-text-disabled);
-}
-
-.badge {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-size: 10px;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.55);
-}
-
-.video-badge {
-  right: 4px;
-  bottom: 4px;
-}
-
-.pano-badge {
-  left: 4px;
-  top: 4px;
-  background-color: var(--color-primary);
-}
-
-/* 查看器 / 播放器 */
-.viewer-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(0, 0, 0, 0.9);
-}
-
-.viewer-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 210;
-  width: 40px;
-  height: 40px;
-  border: none;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  background-color: rgba(255, 255, 255, 0.15);
-  cursor: pointer;
-}
-
-.viewer-img {
-  max-width: 100vw;
-  max-height: 100vh;
-  object-fit: contain;
-}
-
-.player-box {
-  width: 100%;
-  max-width: 720px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.player-video {
-  width: 100%;
-  max-height: 80vh;
-  background-color: #000;
-}
-
-/* 360 球面渲染容器：占满可视区（Player360 内部自带控制栏） */
-.pano-box {
-  position: relative;
-  width: 94vw;
-  height: 84vh;
-  max-width: 1200px;
-  background-color: var(--player-bg);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.pano-note {
-  margin-top: 10px;
-  padding: 0 16px;
-  font-size: var(--font-size-sm);
-  color: rgba(255, 255, 255, 0.75);
-  text-align: center;
-}
-
-/* 带宽自测期间的占位（有上限，不会长期停留） */
-.pano-loading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.player-error {
-  margin-top: 10px;
-  font-size: var(--font-size-sm);
-  color: var(--player-error-text);
 }
 </style>
