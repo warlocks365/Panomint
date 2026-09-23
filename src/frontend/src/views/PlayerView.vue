@@ -2,43 +2,31 @@
   <div class="player-view">
     <!-- 舞台区：按类型渲染核心（照片 / 普通视频 / 360 全景直接球面渲染） -->
     <div class="stage-area">
-      <div v-if="loading" class="state">加载中…</div>
-      <div v-else-if="error" class="state error">{{ error }}</div>
+      <div v-if="media.loading.value" class="state">加载中…</div>
+      <div v-else-if="media.error.value" class="state error">{{ media.error.value }}</div>
 
       <!-- 照片：直接显示原图 -->
-      <div v-else-if="mode === 'photo'" class="photo-wrap">
-        <img v-if="photoUrl" :src="photoUrl" :alt="detail?.filename || '照片'" class="photo">
+      <div v-else-if="media.mode.value === 'photo'" class="photo-wrap">
+        <img v-if="media.photoUrl.value" :src="media.photoUrl.value" :alt="media.detail.value?.filename || '照片'" class="photo">
       </div>
 
       <!-- 360：照片 → 球面渲染（TextureLoader）；视频已转码 → 全景播放 -->
       <Player360
-        v-else-if="mode === 'pano' && panoReady"
-        :key="panoSrc"
+        v-else-if="media.mode.value === 'pano' && media.panoReady.value"
+        :key="media.panoSrc.value"
         :media-id="mediaId"
-        :mode="panoKind"
-        :src="panoSrc"
-        :title="detail?.filename || ''"
+        :mode="media.panoKind.value"
+        :src="media.panoSrc.value"
+        :title="media.detail.value?.filename || ''"
         class="pano"
       />
 
       <!-- 360 视频：未转码 → 提示并发起转码（照片无需转码） -->
-      <div v-else-if="mode === 'pano' && panoKind === 'video'" class="state transcode">
-        <template v-if="!transcode.jobId && !transcode.failed">
-          <div class="msg">该 360 视频尚未转码</div>
-          <div class="sub">转码为 HLS 多码率流后才能全景播放</div>
-          <button class="primary" :disabled="transcode.starting" @click="startTranscode">
-            {{ transcode.starting ? '发起中…' : '发起转码（1080p）' }}
-          </button>
-        </template>
-        <template v-else-if="transcode.failed">
-          <div class="msg">转码失败</div>
-          <button class="primary" @click="startTranscode">重新发起转码</button>
-        </template>
-        <template v-else>
-          <div class="msg">转码中…（{{ transcode.status }}）</div>
-          <div class="sub">完成后将自动加载播放</div>
-        </template>
-      </div>
+      <TranscodePrompt
+        v-else-if="media.mode.value === 'pano' && media.panoKind.value === 'video'"
+        :transcode="media.transcode.value"
+        @start="media.startTranscode"
+      />
 
       <!-- 普通视频 -->
       <div v-else class="video-wrap">
@@ -65,27 +53,21 @@
       </button>
 
       <!-- 播放集导航：上一张 / 下一张（← / →），计数器 -->
-      <template v-if="playset.length > 1">
-        <button class="nav-arrow prev" :disabled="!hasPrev" title="上一张（←）" @click="go(-1)">
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
-            <path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-        <button class="nav-arrow next" :disabled="!hasNext" title="下一张（→）" @click="go(1)">
-          <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
-            <path d="M9 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-        <div class="nav-counter">{{ idx + 1 }} / {{ playset.length }}</div>
-      </template>
+      <PlaysetNav
+        :playset="nav.playset.value"
+        :idx="nav.idx.value"
+        :has-prev="nav.hasPrev.value"
+        :has-next="nav.hasNext.value"
+        @go="nav.go"
+      />
     </div>
 
     <!-- 桌面端：右侧信息窗格平铺 -->
     <MediaInfoPanel
       v-if="isDesktop"
       :media-id="mediaId"
-      :detail="detail"
-      :loading="loading"
+      :detail="media.detail.value"
+      :loading="media.loading.value"
       :show-close="false"
       @deleted="exit"
     />
@@ -95,8 +77,8 @@
       <div class="drawer">
         <MediaInfoPanel
           :media-id="mediaId"
-          :detail="detail"
-          :loading="loading"
+          :detail="media.detail.value"
+          :loading="media.loading.value"
           @close="drawerOpen = false"
           @deleted="exit"
         />
@@ -106,209 +88,30 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+// Job000091 拆解（媒体加载状态机 + 播放集导航双 composable，转码提示/播放集导航拆展示件）：
+// - usePlayerMedia：load 四态分支/blob 池代次守卫/转码发起轮询（plainVideoRef 宿主传入）
+// - usePlaysetNav：来源解析/索引定位/go 切换（router+store 编排）
+// - TranscodePrompt：转码三态提示（start 上抛宿主编排）；PlaysetNav：导航箭头+计数器
+// 宿主留：舞台五态分发/退出钮组/键盘/Esc 退出/抽屉开合与页面布局样式。
+import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import Hls from 'hls.js'
-import http from '../api/http'
-import { getAccessToken } from '../utils/tokenStore'
 import { useResponsive } from '../composables/useResponsive'
 import Player360 from '../components/player/360Player.vue'
 import MediaInfoPanel from '../components/player/MediaInfoPanel.vue'
-import { useViewerStore } from '../stores/viewer'
-import { useSearchStore } from '../stores/search'
+import PlaysetNav from '../components/player/PlaysetNav.vue'
+import TranscodePrompt from '../components/player/TranscodePrompt.vue'
+import { usePlayerMedia } from './player/usePlayerMedia'
+import { usePlaysetNav } from './player/usePlaysetNav'
 
 const route = useRoute()
 const router = useRouter()
 const { isDesktop } = useResponsive()
-const viewerStore = useViewerStore()
-const searchStore = useSearchStore()
 const mediaId = computed(() => String(route.params.id || ''))
 
-// 播放集来源：?source=search 用搜索结果集，否则用查看器 store 中镜像的播放集
-const source = computed(() => String(route.query.source || viewerStore.source || 'timeline'))
-const playset = computed(() => {
-  if (source.value === 'search' && searchStore.results?.length) return searchStore.results
-  if (viewerStore.items?.length) return viewerStore.items
-  // 兜底：直接链接进入且搜索结果集恰好包含该媒体时，仍支持连续播放
-  if (searchStore.results?.length) return searchStore.results
-  return []
-})
-const idx = computed(() => playset.value.findIndex((m) => String(m.id) === mediaId.value))
-const hasPrev = computed(() => idx.value > 0)
-const hasNext = computed(() => idx.value >= 0 && idx.value < playset.value.length - 1)
-
-function go(delta) {
-  const i = idx.value + delta
-  if (i < 0 || i >= playset.value.length) return
-  const next = playset.value[i]
-  if (!next) return
-  viewerStore.setIndex(i)
-  router.push({ name: 'player', params: { id: next.id }, query: route.query })
-}
-
-const loading = ref(true)
-const error = ref('')
-const detail = ref(null)
-const pano = ref(null)
-const mode = ref('') // photo | pano | video
-const hlsUrl = ref('')
-const photoUrl = ref('')
-const panoPhotoUrl = ref('') // 360 照片：原图 blob URL（球面贴图）
-const plainVideoRef = ref(null)
-const transcode = ref({ jobId: '', status: '', starting: false, failed: false })
+const plainVideoRef = ref(null) // 普通视频元素宿主自持（DOM 归属宿主）
+const media = usePlayerMedia(mediaId, plainVideoRef)
+const nav = usePlaysetNav(mediaId)
 const drawerOpen = ref(false)
-
-let pollTimer = 0
-let plainHls = null
-let blobUrls = []
-let loadSeq = 0 // 代次守卫（同 MediaViewer.loadCurrent）：快速切换媒体时旧响应不得落地
-let pollFailCount = 0 // 转码轮询连续失败计数（P2-06：达上限置 failed 停止重试）
-
-const API_BASE = http.defaults.baseURL
-
-/* 360 播放属性：照片走 TextureLoader，视频走 HLS */
-const panoKind = computed(() => (detail.value?.type === 'photo' ? 'photo' : 'video'))
-const panoSrc = computed(() => (panoKind.value === 'photo' ? panoPhotoUrl.value : hlsUrl.value))
-const panoReady = computed(() => !!panoSrc.value)
-
-function trackBlob(url) { blobUrls.push(url); return url }
-
-async function fetchBlobUrl(path) {
-  const res = await http.get(path, { responseType: 'blob' })
-  return trackBlob(URL.createObjectURL(res.data))
-}
-
-async function load() {
-  const seq = ++loadSeq
-  cleanup()
-  loading.value = true
-  error.value = ''
-  mode.value = ''
-  hlsUrl.value = ''
-  detail.value = null
-  pano.value = null
-  drawerOpen.value = false
-  transcode.value = { jobId: '', status: '', starting: false, failed: false }
-  pollFailCount = 0
-
-  try {
-    const [d, p] = await Promise.all([
-      http.get(`/media/${mediaId.value}`),
-      http.get(`/media/${mediaId.value}/360`)
-    ])
-    if (seq !== loadSeq) return // 已切到新媒体：旧响应不得落地（其 blob 可能已被 cleanup revoke）
-    detail.value = d.data
-    pano.value = p.data
-
-    if (p.data.is_360) {
-      // 360 媒体：直接全景播放（照片贴球面 / 视频走 HLS），无「普通播放器 → 点按钮」两步
-      mode.value = 'pano'
-      if (d.data.type === 'photo') {
-        const url = await fetchBlobUrl(`/media/${mediaId.value}/download`)
-        if (seq !== loadSeq) return
-        panoPhotoUrl.value = url
-      } else if (p.data.hls_master) {
-        hlsUrl.value = API_BASE + p.data.hls_master
-      }
-    } else if (d.data.type === 'photo') {
-      mode.value = 'photo'
-      const url = await fetchBlobUrl(`/media/${mediaId.value}/download`)
-      if (seq !== loadSeq) return
-      photoUrl.value = url
-    } else {
-      mode.value = 'video'
-      loading.value = false // 先渲染出 video 元素再挂载 HLS
-      await nextTick()
-      if (seq !== loadSeq) return
-      setupPlainVideo(p.data.hls_master, seq)
-    }
-  } catch (e) {
-    if (seq !== loadSeq) return
-    error.value = e.response?.data?.error?.message || '加载失败'
-  } finally {
-    if (seq === loadSeq) loading.value = false
-  }
-}
-
-function setupPlainVideo(master, seq) {
-  const v = plainVideoRef.value
-  if (!v) return
-  if (master && Hls.isSupported()) {
-    plainHls = new Hls({
-      xhrSetup: (xhr) => {
-        const token = getAccessToken()
-        if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
-      }
-    })
-    plainHls.loadSource(API_BASE + master)
-    plainHls.attachMedia(v)
-  } else {
-    // 无 HLS 或 Safari 原生：回退下载 blob（Safari 原生 HLS 无法带 Bearer，同样走 blob）
-    fetchBlobUrl(`/media/${mediaId.value}/download`).then((url) => {
-      if (seq !== loadSeq) return // 过期代次的 blob 不回填（URL 可能已被 revoke）
-      v.src = url
-    })
-      .catch(() => {
-        if (seq !== loadSeq) return
-        error.value = '视频加载失败'
-      })
-  }
-}
-
-async function startTranscode() {
-  transcode.value.starting = true
-  transcode.value.failed = false
-  try {
-    const res = await http.post('/transcode/job', { media_id: mediaId.value, profile: '1080p' })
-    transcode.value.jobId = res.data.job_id
-    transcode.value.status = 'pending'
-    pollFailCount = 0
-    pollJob()
-  } catch (e) {
-    error.value = e.response?.data?.error?.message || '发起转码失败'
-  } finally {
-    transcode.value.starting = false
-  }
-}
-
-function pollJob() {
-  clearTimeout(pollTimer)
-  pollTimer = setTimeout(async () => {
-    try {
-      const res = await http.get(`/transcode/job/${transcode.value.jobId}`)
-      pollFailCount = 0
-      transcode.value.status = res.data.status
-      if (res.data.status === 'done') {
-        const p = await http.get(`/media/${mediaId.value}/360`)
-        pano.value = p.data
-        if (p.data.hls_master) hlsUrl.value = API_BASE + p.data.hls_master
-        return
-      }
-      if (res.data.status === 'failed') {
-        transcode.value.failed = true
-        return
-      }
-      pollJob()
-    } catch {
-      // 轮询连续失败达上限则停止（服务下线等场景不再无限重试）
-      pollFailCount++
-      if (pollFailCount >= 5) {
-        transcode.value.failed = true
-        return
-      }
-      pollJob()
-    }
-  }, 2000)
-}
-
-function cleanup() {
-  clearTimeout(pollTimer)
-  if (plainHls) { plainHls.destroy(); plainHls = null }
-  for (const u of blobUrls) URL.revokeObjectURL(u)
-  blobUrls = []
-  photoUrl.value = ''
-  panoPhotoUrl.value = ''
-}
 
 /* 退出：返回来源页（优先路由历史，直达链接则回时间轴） */
 function exit() {
@@ -331,24 +134,23 @@ function onKeydown(e) {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'VIDEO' || tag === 'SELECT') return
   if (e.key === 'ArrowLeft') {
     e.preventDefault()
-    go(-1)
+    nav.go(-1)
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
-    go(1)
+    nav.go(1)
   }
 }
 
 watch(mediaId, (id) => {
   if (!id) return
-  load()
+  media.load()
   // 保持播放集索引与当前媒体一致（供返回/切换时定位）
-  const i = playset.value.findIndex((m) => String(m.id) === id)
-  if (i >= 0) viewerStore.setIndex(i)
+  nav.syncIndex(id)
 }, { immediate: true })
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
-  cleanup()
+  media.cleanup()
 })
 </script>
 
@@ -380,15 +182,6 @@ onBeforeUnmount(() => {
   color: var(--player-text-dim); font-size: var(--font-size-md);
 }
 .state.error { color: var(--color-danger); }
-.state .msg { font-size: var(--font-size-lg); color: var(--player-text); }
-.state .sub { font-size: var(--font-size-sm); }
-.primary {
-  background: var(--color-primary); color: #fff; border: none;
-  border-radius: var(--radius-md); padding: 10px 24px;
-  font-size: var(--font-size-lg); cursor: pointer;
-}
-.primary:hover { background: var(--color-primary-hover); }
-.primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .photo-wrap {
   height: 100%; display: flex; align-items: center; justify-content: center;
 }
@@ -432,57 +225,6 @@ onBeforeUnmount(() => {
 .info-btn {
   top: 10px;
   right: 56px;
-}
-
-/* 播放集导航箭头 + 计数器 */
-.nav-arrow {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 25;
-  width: 48px;
-  height: 48px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: 50%;
-  background: rgba(20, 24, 29, 0.5);
-  color: var(--color-text-on-dark);
-  backdrop-filter: blur(6px);
-}
-
-.nav-arrow:hover:not(:disabled) {
-  background: rgba(20, 24, 29, 0.85);
-  color: #fff;
-}
-
-.nav-arrow:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.nav-arrow.prev {
-  left: 14px;
-}
-
-.nav-arrow.next {
-  right: 14px;
-}
-
-.nav-counter {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  z-index: 25;
-  padding: 3px 12px;
-  border-radius: 999px;
-  background: rgba(20, 24, 29, 0.6);
-  color: var(--color-text-on-dark);
-  font-size: var(--font-size-sm);
-  font-variant-numeric: tabular-nums;
-  backdrop-filter: blur(6px);
 }
 
 /* 移动端信息抽屉：底部上滑面板 */
