@@ -94,8 +94,9 @@
 // - TranscodePrompt：转码三态提示（start 上抛宿主编排）；PlaysetNav：导航箭头+计数器
 // 宿主留：舞台五态分发/退出钮组/键盘/Esc 退出/抽屉开合与页面布局样式。
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useResponsive } from '../composables/useResponsive'
+import { useBackNavigation } from '../composables/useBackNavigation'
 import Player360 from '../components/player/360Player.vue'
 import MediaInfoPanel from '../components/player/MediaInfoPanel.vue'
 import PlaysetNav from '../components/player/PlaysetNav.vue'
@@ -104,8 +105,8 @@ import { usePlayerMedia } from './player/usePlayerMedia'
 import { usePlaysetNav } from './player/usePlaysetNav'
 
 const route = useRoute()
-const router = useRouter()
 const { isDesktop } = useResponsive()
+const { goBack } = useBackNavigation()
 const mediaId = computed(() => String(route.params.id || ''))
 
 const plainVideoRef = ref(null) // 普通视频元素宿主自持（DOM 归属宿主）
@@ -113,13 +114,9 @@ const media = usePlayerMedia(mediaId, plainVideoRef)
 const nav = usePlaysetNav(mediaId)
 const drawerOpen = ref(false)
 
-/* 退出：返回来源页（优先路由历史，直达链接则回时间轴） */
+/* 退出（Job000102 抽 useBackNavigation，判定口径不变）：返回来源页（优先路由历史，直达链接则回时间轴） */
 function exit() {
-  if (window.history.state?.back) {
-    router.back()
-  } else {
-    router.replace({ name: 'timeline' })
-  }
+  goBack({ name: 'timeline' })
 }
 
 function onKeydown(e) {

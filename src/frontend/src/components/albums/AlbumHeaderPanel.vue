@@ -12,6 +12,7 @@
     </div>
     <div class="header-main">
       <div class="title-row">
+        <BackButton @click="emit('back')" />
         <template v-if="!editing">
           <h2 class="album-name">{{ album.name }}</h2>
           <span v-if="album.kind === 'smart'" class="kind-tag">智能</span>
@@ -67,11 +68,13 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { errMsg, updateAlbum } from '../albums/albumApi'
 import { summarizeCriteria } from '../albums/criteriaSummary'
 import { loadThumbUrl } from '../timeline/mediaLoader'
+import BackButton from '../BackButton.vue'
 const props = defineProps({
   album: { type: Object, required: true },
   items: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['action', 'saved'])
+// back（Job000102）：返回钮点击上抛，宿主握 goBack（useBackNavigation）——router 属视图职责
+const emit = defineEmits(['action', 'saved', 'back'])
 /* ---------------- 名称/描述行内编辑 ---------------- */
 const editing = ref(false)
 const editForm = ref({ name: '', description: '' })

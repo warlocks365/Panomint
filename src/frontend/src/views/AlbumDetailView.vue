@@ -12,6 +12,7 @@
         :items="items"
         @action="onHeaderAction"
         @saved="onHeaderSaved"
+        @back="onBack"
       />
 
       <section class="media-section">
@@ -88,11 +89,19 @@ import AlbumComments from '../components/albums/AlbumComments.vue'
 import ShareCreateDialog from '../components/shares/ShareCreateDialog.vue'
 import ShareManageDialog from '../components/albums/ShareManageDialog.vue'
 import AlbumHeaderPanel from '../components/albums/AlbumHeaderPanel.vue'
+import { useBackNavigation } from '../composables/useBackNavigation'
 import { errMsg, getAlbum, removeAlbumItem } from '../components/albums/albumApi'
 import { dialogs } from '../components/dialogs/dialogs'
 
 const route = useRoute()
 const router = useRouter()
+const { goBack } = useBackNavigation()
+
+// Job000102 层级返回：从列表下钻（/albums、/spaces 分组）→ 历史后退回来源页；
+// 直达/刷新（无历史）→ replace 到逻辑父级 /albums（不产生多余历史条目）
+function onBack() {
+  goBack({ name: 'albums' })
+}
 
 const album = ref(null)
 const items = ref([])

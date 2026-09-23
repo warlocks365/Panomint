@@ -72,7 +72,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TimelineGrid from '../components/timeline/TimelineGrid.vue'
 import MediaViewer from '../components/viewer/MediaViewer.vue'
@@ -85,6 +85,14 @@ const typeFilter = ref('')
 const favOnly = ref(false)
 // Job000062：地点页带 ?place= 进入时按地点过滤（'/media?place=' 后端已支持）
 const placeFilter = ref(typeof route.query.place === 'string' ? route.query.place : '')
+// Job000102 历史栈同步：同路由 query 变化（浏览器前进/后退、地点页改点另一地点）时同步过滤——
+// 此前只在 setup 初始化一次，前进/后退到不同 place 的条目时过滤不刷新（SearchResultsView person watch 同模式）
+watch(
+  () => (typeof route.query.place === 'string' ? route.query.place : ''),
+  (p) => {
+    if (placeFilter.value !== p) placeFilter.value = p
+  }
+)
 const gridRef = ref(null)
 const viewerOpen = ref(false)
 const viewerIndex = ref(0)
