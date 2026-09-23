@@ -296,6 +296,12 @@ func main() {
 	// Job000034 用户自助改密：只要求已登录（对自己的口令不需要额外权限），
 	// handler 内部会验证旧口令 + 吊销全部会话。/user 前缀已在 nginx 反代组内，无需改 nginx。
 	authed.PUT("/user/password", authH.ChangePassword)
+	// Job000098 应用密码自助管理（WebDAV/第三方客户端专用凭据）：状态查询 + 生成/轮换 + 清除。
+	// 三个端点都只要求已登录（对自己的凭据不需要额外权限），handler 内部验证当前密码。
+	// /user 前缀已在 nginx 反代组内（Job000034 已确认），无需改 nginx。
+	authed.GET("/user/app-password", authH.AppPasswordStatus)
+	authed.PUT("/user/app-password", authH.AppPasswordGenerate)
+	authed.POST("/user/app-password/clear", authH.AppPasswordClear)
 	authed.GET("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.GetMapConfig)
 	authed.PUT("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.PutMapConfig)
 

@@ -1,21 +1,25 @@
 package geo
 
-// 地图四端点（/geo/items、/geo/clusters、/geo/histogram、/geo/places）的可见性守卫。
+// 地图五端点（/geo/items、/geo/clusters、/geo/histogram、/geo/places、/geo/places-overview）的可见性守卫。
 //
 // 背景：baseCond 原先只有 gps / deleted_at / bbox 三个条件，**没有任何属主或空间条件**，
-// 而四个端点全部从它派生。实测：一个只持 media:read 的普通账号把 bbox 放大到全世界后，
+// 而全部端点都从它派生。实测：一个只持 media:read 的普通账号把 bbox 放大到全世界后，
 // /geo/items 返回 owner 的全部 GPS 媒体（含 filename 与精确经纬度），ID 集合哈希与 owner
 // 视角完全相同；clusters/histogram/places 同样泄漏。这与 /media 系列的越权事故同形 ——
 // "作用域默认为全部"，漏加条件不会报错、只会多返回数据。
+//
+// ⚠️ 数量纪律：Job000062 增 places-overview 时未同步本守卫（计数仍钉 4），
+// 致全量 test 门自那时起静默红灯 —— 本文件的"逐个断言"清单与 COUNT 断言必须在
+// 新增 /geo 媒体查询时同步更新，这是 Job000098 守卫补账的一部分。
 //
 // 本文件用三种互补方式钉住修复（对应任务的三条验证要求）：
 //
 //	1. 无身份时 WHERE 必须含**恒假条件**（而不是"根本没有条件"）—— fail-closed 的靶心；
 //	2. 可见性谓词必须**逐字节来自 mediascope**（唯一真源），且占位符编号与 len(args) 自洽；
-//	3. 四个查询**逐个**断言都把调用者身份接进了 baseCond（只覆盖两个等于另外两个还可能漏）。
+//	3. 五个查询**逐个**断言都把调用者身份接进了 baseCond（只覆盖两个等于另外两个还可能漏）。
 //
 // 第 3 条用源码形状守卫（与 internal/search/query_visible_test.go 同一手法）：
-// 本仓库没有 pgx mock 设施，四个函数都直接吃 *pgxpool.Pool，无法在无数据库时运行查询；
+// 本仓库没有 pgx mock 设施，五个函数都直接吃 *pgxpool.Pool，无法在无数据库时运行查询；
 // 因此断言"每个函数体都调用了带身份的 baseCond"是这里能达到的最强证据。
 
 import (
@@ -128,7 +132,7 @@ func TestBaseCondVisibilityComesFromMediascope(t *testing.T) {
 		t.Fatalf("可见性谓词必须逐字节来自 mediascope.VisibleCondFor(..., alias=\"\")：\n得到 %q\n期望 %q", got, want)
 	}
 
-	// alias 依据：四处查询都是 `FROM media` 的裸列名单表查询（无 JOIN、无表别名），
+	// alias 依据：五处查询都是 `FROM media` 的裸列名单表查询（无 JOIN、无表别名），
 	// 故谓词必须输出裸列名；带 m. 前缀在此处会直接是 SQL 错误（column m.space does not exist）。
 	//
 	// ⚠️ 只查 "m.space"/"m.owner_id" 这两个 media 列，**不能**用 Contains(got, "m.") ——
@@ -157,7 +161,7 @@ func TestGeoWherePlaceholderNumberingSelfConsistent(t *testing.T) {
 		for _, kind := range []string{KindAll, KindPhoto} {
 			for _, useTime := range []bool{false, true} {
 				t.Run(fmt.Sprintf("uid=%q/kind=%s/time=%v", uid, kind, useTime), func(t *testing.T) {
-					// 按四个查询的真实顺序组装：baseCond → appendTimeRange → appendKind → 尾部参数。
+					// 按各查询的真实顺序组装：baseCond → appendTimeRange → appendKind → 尾部参数。
 					conds, args := baseCond(testBBox(), uid)
 					if useTime {
 						conds, args = appendTimeRange(conds, args, &from, &to)
@@ -182,7 +186,7 @@ func TestGeoWherePlaceholderNumberingSelfConsistent(t *testing.T) {
 						t.Fatalf("args[4] 应为可见性谓词的 userID %q，实际 %v", uid, args)
 					}
 
-					// ② 再模拟四个查询尾部追加的 LIMIT / 网格尺寸参数（调用方按 len(args) 续编），
+					// ② 再模拟各查询尾部追加的 LIMIT / 网格尺寸参数（调用方按 len(args) 续编），
 					//    断言"最高占位符 == args 个数"，这是 pgx 真正会校验的不变量。
 					args = append(args, 200)
 					tail := fmt.Sprintf("$%d", len(args))
@@ -210,19 +214,19 @@ func TestGeoWherePlaceholderNumberingSelfConsistent(t *testing.T) {
 	}
 }
 
-// 要求 3（存储层）：四个查询**逐个**断言都带上了可见性条件（表格驱动，覆盖全部四处）。
-func TestAllFourGeoStoreQueriesCarryVisibility(t *testing.T) {
+// 要求 3（存储层）：五个查询**逐个**断言都带上了可见性条件（表格驱动，覆盖全部五处）。
+func TestAllFiveGeoStoreQueriesCarryVisibility(t *testing.T) {
 	b, err := os.ReadFile("media_store.go")
 	if err != nil {
 		t.Fatalf("读不到 media_store.go（测试需在包目录下运行）: %v", err)
 	}
 	src := string(b)
 
-	// 普查：media_store.go 里恰好 4 处 media 表数据源，且都不是 JOIN ——
-	// 出现第 5 处（或改成 JOIN media）时必须同步接上可见性谓词，故这里显式钉住数量。
+	// 普查：media_store.go 里恰好 5 处 media 表数据源，且都不是 JOIN ——
+	// 出现第 6 处（或改成 JOIN media）时必须同步接上可见性谓词，故这里显式钉住数量。
 	// 用"行首两 tab + FROM media + 换行"匹配 SQL 行，避免把注释里提到的 FROM media 算进来。
-	if n := strings.Count(src, "\n\t\tFROM media\n"); n != 4 {
-		t.Fatalf("media_store.go 里 SQL 的 \"FROM media\" 出现 %d 次，预期 4。"+
+	if n := strings.Count(src, "\n\t\tFROM media\n"); n != 5 {
+		t.Fatalf("media_store.go 里 SQL 的 \"FROM media\" 出现 %d 次，预期 5。"+
 			"新增/moved 的 media 查询必须同样接上可见性谓词（见 baseCond）", n)
 	}
 	if n := strings.Count(src, "JOIN media"); n != 0 {
@@ -235,6 +239,7 @@ func TestAllFourGeoStoreQueriesCarryVisibility(t *testing.T) {
 		t.Fatal("守卫失效/回退：baseCond 仍在「无身份」形式下被调用")
 	}
 
+	// 常规四查询：baseCond(b, userID)。
 	for _, fn := range []string{"Clusters", "Items", "Histogram", "Places"} {
 		t.Run(fn, func(t *testing.T) {
 			body := geoFuncBody(src, "func (s *MediaStore) "+fn+"(")
@@ -250,19 +255,39 @@ func TestAllFourGeoStoreQueriesCarryVisibility(t *testing.T) {
 			}
 		})
 	}
+
+	// PlaceOverviews（Job000062 地点页）：bbox 是全世界的显式字面量而非参数 b，
+	// 但可见性收敛同样必须存在 —— 漏接 = 地点页泄漏全站地名+封面。
+	t.Run("PlaceOverviews", func(t *testing.T) {
+		body := geoFuncBody(src, "func (s *MediaStore) PlaceOverviews(")
+		if body == "" {
+			t.Fatal("找不到 PlaceOverviews 的函数体")
+		}
+		if !strings.Contains(body, "userID string") {
+			t.Fatal("PlaceOverviews 的签名里没有 userID 参数：调用者身份无从传入")
+		}
+		if !strings.Contains(body, "baseCond(BBox{") || !strings.Contains(body, "}, userID)") {
+			t.Fatalf("PlaceOverviews 必须把 userID 接进 baseCond（bbox 字面量形式）：\n%s", body)
+		}
+	})
 }
 
-// 要求 3（HTTP 层）：四个 handler 逐个断言把会话身份传给了 store。
+// 要求 3（HTTP 层）：五个 handler 逐个断言把会话身份传给了 store。
 // 漏传 userID 会让 baseCond 收到空串 → 恒假 → 端点变空（fail-closed，不漏数据但功能坏掉），
 // 因此这一处也需要被钉住，否则"修好了但不接线"是不可见的。
-func TestAllFourGeoHandlersPassIdentity(t *testing.T) {
+func TestAllFiveGeoHandlersPassIdentity(t *testing.T) {
 	b, err := os.ReadFile("handlers.go")
 	if err != nil {
 		t.Fatalf("读不到 handlers.go（测试需在包目录下运行）: %v", err)
 	}
 	src := string(b)
 
-	for _, fn := range []string{"Clusters", "Items", "Histogram", "Places"} {
+	// handler 名 → store 方法名（PlacesOverview handler 调 PlaceOverviews store， Job000062）。
+	storeMethod := map[string]string{
+		"Clusters": "Clusters", "Items": "Items", "Histogram": "Histogram",
+		"Places": "Places", "PlacesOverview": "PlaceOverviews",
+	}
+	for fn, sm := range storeMethod {
 		t.Run(fn, func(t *testing.T) {
 			body := geoFuncBody(src, "func (h *Handler) "+fn+"(")
 			if body == "" {
@@ -271,8 +296,8 @@ func TestAllFourGeoHandlersPassIdentity(t *testing.T) {
 			if !strings.Contains(body, `c.GetString("user_id")`) {
 				t.Fatalf("handler %s 未把会话身份传给 store（应传 c.GetString(\"user_id\")）:\n%s", fn, body)
 			}
-			if !strings.Contains(body, "h.Media."+fn+"(") {
-				t.Fatalf("handler %s 未调用 h.Media.%s：接线被摘掉了", fn, fn)
+			if !strings.Contains(body, "h.Media."+sm+"(") {
+				t.Fatalf("handler %s 未调用 h.Media.%s：接线被摘掉了", fn, sm)
 			}
 		})
 	}

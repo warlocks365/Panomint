@@ -56,6 +56,9 @@
 
     <!-- 二次验证（TOTP）——独立成卡（Job000058 拆分）；行为验证见 verify_2fa_ui.py -->
     <MfaSettingsCard />
+
+    <!-- 应用密码（第三方客户端/WebDAV）——独立成卡（Job000098） -->
+    <AppPasswordCard />
   </div>
 </template>
 
@@ -64,6 +67,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore, errMessage, errCode } from '../stores/auth'
 import MfaSettingsCard from './settings/MfaSettingsCard.vue'
+import AppPasswordCard from './settings/AppPasswordCard.vue'
 
 const auth = useAuthStore()
 const router = useRouter()

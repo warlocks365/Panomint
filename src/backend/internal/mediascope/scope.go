@@ -212,13 +212,19 @@ func VisibleCond(start int, userID string) (string, []any) {
 // 查询，都应调用本函数或 CondsFor，而不是自己拼谓词。理由见包文档：
 // 本包之外的每一份手写副本都迟早会漂移，而漂移方向往往是**放宽**（漏掉某一臂 = 多返回数据，
 // SQL 不报错）。alias 参数的存在就是为了让"表别名不同"不再成为不复用的借口。
+//
+// 形状纪律：personal 臂必须与 CondsFor 的 personal 档**逐字节同构** —
+// `(space='personal' AND (owner_id=$start OR folderGrantArm($start)))`，
+// 目录授权臂收在 personal 档内部、**不**单独成顶层 OR。
+// Job000069 曾把授权臂写成单独的第三 OR，与 CondsFor 的折叠形状分裂成两种"真源"，
+// 导致 search 的守卫测试（byte 对比 CondsFor）自那时起红灯 —— 本函数产出的谓词
+// 会被嵌进各种子查询，形状分裂会让"逐字节来自同一真源"的断言失去意义。
 func VisibleCondFor(start int, userID, alias string) (string, []any) {
 	if userID == "" {
 		return FailClosed, nil
 	}
-	return fmt.Sprintf("((%[3]s = 'personal' AND %[4]s = $%[1]d)\n"+
-		"\t\tOR (%[3]s = 'shared' AND %[2]s)\n"+
-		"\t\tOR (%[5]s))",
+	return fmt.Sprintf("((%[3]s = 'personal' AND (%[4]s = $%[1]d OR %[5]s))\n"+
+		"\t\tOR (%[3]s = 'shared' AND %[2]s))",
 		start, sharedVerdict(start), qual(alias, "space"), qual(alias, "owner_id"), folderGrantArm(start, alias)), []any{userID}
 }
 

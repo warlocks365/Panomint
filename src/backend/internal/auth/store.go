@@ -243,6 +243,35 @@ func (s *Store) AppPasswordHash(ctx context.Context, userID string) (string, err
 	return hash, nil
 }
 
+// SetAppPassword 写入（轮换）应用密码散列（Job000098）。单列直改，理由同 SetPassword：
+// 通用 patch 路径会把"自助凭据管理"与"管理员改用户"的语义缠在一起。
+// 应用密码是**服务端生成的随机串**，调用方拿到的明文只在这一次响应里出现一次。
+func (s *Store) SetAppPassword(ctx context.Context, userID, hash string) error {
+	tag, err := s.Pool.Exec(ctx,
+		`UPDATE users SET app_password_hash = $1, updated_at = now() WHERE id = $2::uuid`, hash, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("用户不存在")
+	}
+	return nil
+}
+
+// ClearAppPassword 清除应用密码（Job000098）：置 NULL —— DAV 的 davPasswordOK
+// 以 hash != "" 判定"已设置"，NULL 与空串都回落主密码，但置 NULL 才能与 DDL 缺省一致。
+func (s *Store) ClearAppPassword(ctx context.Context, userID string) error {
+	tag, err := s.Pool.Exec(ctx,
+		`UPDATE users SET app_password_hash = NULL, updated_at = now() WHERE id = $1::uuid`, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("用户不存在")
+	}
+	return nil
+}
+
 // FindByID 按 ID 查用户（me 端点与二次验证端点）。
 func (s *Store) FindByID(ctx context.Context, id string) (*User, error) {
 	var u User

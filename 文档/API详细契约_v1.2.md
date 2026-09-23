@@ -1,9 +1,26 @@
-# API 详细契约 (v1.3)
+# API 详细契约 (v1.4)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.3 ｜ 日期：2026-09-20\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.4 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.4 变更说明（2026-09-23，Job000098「应用密码管理自助化」）
+
+补录 §2 应用密码三端点。背景：WebDAV Basic 认证（§16）早已支持「邮箱+应用密码」，
+但此前没有任何端点能设置它（列是 DDL 预留的、消费方 `dav.go` 是现成的，唯独写入路径缺失）。
+没有它，第三方客户端只能配主密码，主密码一泄漏就是全部。实现见 `internal/auth/password.go`：
+
+1. §2 新增 `GET /user/app-password` → `{set}`（只回是否已设置，**永不回散列**）
+2. §2 新增 `PUT /user/app-password`（生成/轮换）→ `{app_password}`；格式 `pano-` + 40 位 hex
+   （20 字节 crypto/rand，160 位熵；45 字符远低于 bcrypt 72 字节上限）
+3. §2 新增 `POST /user/app-password/clear`（清除）→ `{ok}`
+4. 安全语义：生成与清除**都必须验证当前密码**（防「捡到开着的电脑即可铸造/抹除长期凭据」）；
+   轮换语义为覆盖（旧应用密码立即失效）；**不吊销任何会话**（应用密码不走登录、不产生会话，
+   与 `PUT /user/password` 有意不同）；明文只在生成响应里出现一次，服务端只存 bcrypt 散列
+5. 审计：`user.app_password`，detail 仅 `{operation: rotate|clear}`，明文绝不入审计
+6. 前端：设置页「应用密码」卡（`AppPasswordCard.vue`），状态徽章/生成/轮换/清除 +
+   一次性明文展示与逐级降级复制（局域网 http 无 Clipboard API 时退化 execCommand/手动）
 
 ## v1.3 变更说明（2026-09-20，Job000054「SSO/OIDC 登录」）
 
@@ -163,6 +180,18 @@ OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`（
 - 防枚举同形响应：旧密码错误与「用户无口令记录」返回同一形状 400 `WRONG_PASSWORD`。
 - 校验：新密码长度沿用全局下限（与 `POST /admin/users` 一致），且不得与当前密码相同（400 `INVALID_INPUT`）。
 - 全程审计（`user.password.change`），口令类字段不入审计 detail。
+
+### GET /user/app-password ｜ PUT /user/app-password ｜ POST /user/app-password/clear
+
+应用密码自助管理（Job000098，v1.4 补录）。均需已登录（操作自己的凭据）。消费方：§16 WebDAV Basic 认证（`邮箱 + 应用密码`，邮箱仍用注册邮箱）。
+
+- `GET /user/app-password` → `{ "set": true|false }`。只回状态，**永不回散列**（散列是「该账号开了这道凭据」的信号；明文服务端只存散列，本就不可能回）。
+- `PUT /user/app-password`：生成（未设置时）或**轮换**（覆盖，旧应用密码立即失效）。请求 `{ "current_password": "…" }` → 响应 `{ "app_password": "pano-<40位hex>" }`。**明文仅此一次响应**，之后任何接口都取不回。
+- `POST /user/app-password/clear`：清除。请求 `{ "current_password": "…" }` → 响应 `{ "ok": true }`。清除后 DAV 客户端回落主密码分支（`davPasswordOK`）——用应用密码配置的客户端会认证失败，需改回主密码或重新生成。
+- 安全语义：生成与清除**都必须提供当前密码**（同 `PUT /user/password` 的「捡到开着的电脑」防线；否则 access token 一泄漏，攻击者即可铸造/抹除长期凭据）；两处校验的响应**逐字同形**（400 `WRONG_PASSWORD` / 500 `QUERY_FAILED`），不暴露探测面。
+- **不吊销会话**：应用密码不走 `/auth/login`、不产生会话（DAV Basic 逐请求校验），轮换/清除不影响任何现有登录态——与自助改密「必须吊销全部会话」**有意不同**。
+- 错误码：400 `BAD_REQUEST`（请求体非 JSON）/ `INVALID_INPUT`（缺当前密码）/ `WRONG_PASSWORD`；500 `QUERY_FAILED` / `GENERATE_FAILED` / `HASH_FAILED` / `UPDATE_FAILED`。
+- 审计：`user.app_password`，detail 仅 `{ "operation": "rotate" }`（PUT）或 `{ "operation": "clear" }`（POST），明文绝不入审计。
 
 ### 管理端点（需 `admin:users`）
 

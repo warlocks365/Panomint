@@ -44,10 +44,13 @@ func TestAliasParamKeepsLegacyTextByteIdentical(t *testing.T) {
 	}
 
 	// --- VisibleCond（并集版）---
+	// ⚠️ 期望文本是**有意统一后的折叠形**（Job000098）：目录授权臂收在 personal 档内部
+	// `(space='personal' AND (owner_id=$1 OR 目录臂))`，与 CondsFor 的 personal 档同构 ——
+	// 旧的三顶层 OR 形（授权臂单独成臂、无 space 限定）在 Job000069 引入后与 CondsFor
+	// 分裂成两种"真源"，已被 search 守卫测试逮住。此处硬编码新金样，防再次漂移。
 	got, args := VisibleCond(1, uid)
-	want := "((m.space = 'personal' AND m.owner_id = $1)\n" +
-		"\t\tOR (m.space = 'shared' AND " + wantShared + ")\n" +
-		"\t\tOR (" + wantFolderGrant(1, "m") + "))"
+	want := "((m.space = 'personal' AND (m.owner_id = $1 OR " + wantFolderGrant(1, "m") + "))\n" +
+		"\t\tOR (m.space = 'shared' AND " + wantShared + "))"
 	if got != want {
 		t.Errorf("VisibleCond 文本漂移：\n got=%q\nwant=%q", got, want)
 	}
@@ -84,7 +87,7 @@ func TestAliasEmptyProducesBareColumns(t *testing.T) {
 	}
 
 	got, args := VisibleCondFor(5, "u", "")
-	if !strings.Contains(got, "space = 'personal' AND owner_id = $5") {
+	if !strings.Contains(got, "space = 'personal' AND (owner_id = $5") {
 		t.Errorf("VisibleCondFor(alias=\"\") 占位符/列名不对：%q", got)
 	}
 	// ⚠️ 这里必须断言 `m.space` / `m.owner_id` 而不是裸的 "m."：

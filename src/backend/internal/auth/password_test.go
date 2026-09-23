@@ -55,3 +55,64 @@ func TestValidateChangePassword(t *testing.T) {
 		}
 	})
 }
+
+// TestGenerateAppPassword 应用密码明文生成的格式与唯一性（Job000098）。
+//
+// 应用密码是服务端随机生成、只下发一次的凭据：格式错误（客户端不兼容）或
+// 可预测（熵不足）都会让"独立于主密码的泄漏面更小"这个设计目标落空，所以钉死：
+// ① 前缀可识别 ② hex 字符集零客户端兼容风险 ③ 熵足够 ④ 两次生成绝不重复。
+func TestGenerateAppPassword(t *testing.T) {
+	const prefix = "pano-"
+
+	t.Run("格式：前缀 + 40 位 hex", func(t *testing.T) {
+		p, err := GenerateAppPassword()
+		if err != nil {
+			t.Fatalf("生成失败: %v", err)
+		}
+		if !strings.HasPrefix(p, prefix) {
+			t.Fatalf("缺前缀 %q: %q", prefix, p)
+		}
+		body := strings.TrimPrefix(p, prefix)
+		if len(body) != 40 {
+			t.Fatalf("hex 体应为 40 字符（20 字节），实得 %d: %q", len(body), body)
+		}
+		for _, r := range body {
+			if !('0' <= r && r <= '9' || 'a' <= r && r <= 'f') {
+				t.Fatalf("hex 体含非小写十六进制字符 %q: %q", string(r), body)
+			}
+		}
+	})
+
+	t.Run("唯一性：200 次无重复", func(t *testing.T) {
+		seen := make(map[string]struct{}, 200)
+		for i := 0; i < 200; i++ {
+			p, err := GenerateAppPassword()
+			if err != nil {
+				t.Fatalf("第 %d 次生成失败: %v", i, err)
+			}
+			if _, dup := seen[p]; dup {
+				t.Fatalf("第 %d 次生成重复: %q", i, p)
+			}
+			seen[p] = struct{}{}
+		}
+	})
+
+	t.Run("熵：前 8 位 hex 不全相同（弱随机一眼可见的退化）", func(t *testing.T) {
+		p, err := GenerateAppPassword()
+		if err != nil {
+			t.Fatalf("生成失败: %v", err)
+		}
+		body := strings.TrimPrefix(p, prefix)
+		head := body[:8]
+		allSame := true
+		for _, r := range head[1:] {
+			if r != rune(head[0]) {
+				allSame = false
+				break
+			}
+		}
+		if allSame {
+			t.Fatalf("前 8 位全同，疑似随机源退化: %q", head)
+		}
+	})
+}

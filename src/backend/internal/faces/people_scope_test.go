@@ -102,7 +102,7 @@ func TestPersonMediaQueryScopedToCaller(t *testing.T) {
 	// 谓词的各臂逐一在场：只判 personal 会漏掉共享空间，只判 shared 会漏掉本人个人空间，
 	// 而 shared 只判 members 会漏掉 shared_space.owner_id —— 每一次漏臂都是**多返回数据**。
 	for _, arm := range []string{
-		"m.space = 'personal' AND m.owner_id = $2",
+		"m.space = 'personal' AND (m.owner_id = $2 OR",
 		"shared_space_members sm WHERE sm.user_id = $2",
 		"shared_space ss WHERE ss.owner_id = $2",
 	} {

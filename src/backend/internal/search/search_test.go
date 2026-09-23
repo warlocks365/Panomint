@@ -144,7 +144,9 @@ func TestPersonNameParticipatesInRecallAndScore(t *testing.T) {
 // deleted_at/embedding，**不做 owner/space 限定**（TopK 可命中全库任何人的媒体）。
 // 并集分支若只写 `m.id = ANY(...)`，授权与软删会被完全绕过——
 // 实测「按可见性条件可见媒体数为 0 的用户」仍能搜到他人个人空间的照片。
-const unionBranchPrefix = "OR (m.deleted_at IS NULL AND ((m.space = 'personal' AND m.owner_id = $1)"
+// 形状说明（Job000098 统一折叠形后）：personal 臂已折叠为
+// (space='personal' AND (owner_id=$1 OR <folderGrantArm>))，与 mediascope.CondsFor 逐字节同构。
+const unionBranchPrefix = "OR (m.deleted_at IS NULL AND ((m.space = 'personal' AND (m.owner_id = $1 OR"
 
 // 查询命中已命名人物时，语义并集必须被闸门抑制（否则搜"爱因斯坦"会混进林肯等同为人像的结果）。
 func TestPersonIntentGatesSemanticUnion(t *testing.T) {
@@ -376,7 +378,7 @@ func TestBuildWhere(t *testing.T) {
 	if !strings.Contains(where, "m.deleted_at IS NULL") {
 		t.Errorf("缺软删过滤: %s", where)
 	}
-	if !strings.Contains(where, "m.space = 'personal' AND m.owner_id = $1") ||
+	if !strings.Contains(where, "m.space = 'personal' AND (m.owner_id = $1") ||
 		!strings.Contains(where, "shared_space_members sm WHERE sm.user_id = $1") {
 		t.Errorf("空间可见性条件错误: %s", where)
 	}

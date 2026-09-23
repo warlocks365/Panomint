@@ -94,6 +94,25 @@ export const useAuthStore = defineStore('auth', {
       return res.data
     },
 
+    // ---- 应用密码（Job000098）----
+    // WebDAV 等第三方客户端专用密码：与主密码分离、可单独轮换/清除，
+    // 泄漏面比"把主密码交给客户端"小得多。生成/清除都要当前密码（同改密的
+    // "捡到开着的电脑"防线）；轮换/清除不吊销任何会话（应用密码不走登录、
+    // 不产生会话），因此成功后不需要像 changePassword 那样登出。
+    // GET 只回 {set}——明文只在 generate 的响应里出现一次，服务端只存散列。
+    async fetchAppPasswordStatus() {
+      const res = await http.get('/user/app-password')
+      return res.data
+    },
+    async generateAppPassword(current) {
+      const res = await http.put('/user/app-password', { current_password: current })
+      return res.data
+    },
+    async clearAppPassword(current) {
+      const res = await http.post('/user/app-password/clear', { current_password: current })
+      return res.data
+    },
+
     // ---- SSO/OIDC 回调登录（Job000054）----
     // IdP 带 code/state 跳回 /login 后调用；响应与密码登录同形（tokenPair）。
     // SSO 失败错误码与密码登录无关，这里原样上抛，由调用方按 code 分支提示。

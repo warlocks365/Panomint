@@ -91,6 +91,13 @@ const (
 	// **吊销全部会话**，两者在审计里要能一眼分开。
 	ActionPasswordChange = "user.password.change"
 
+	// ActionAppPassword 应用密码**生成/轮换/清除**（Job000098，PUT /user/app-password、
+	// POST /user/app-password/clear）。单列一个动作的理由同 ActionPasswordChange：
+	// 应用密码是 WebDAV/第三方客户端专用凭据，"谁在什么时候动过它"是凭据审计最常问的问题。
+	// detail 只记 operation=rotate|clear —— **明文绝不入审计**（服务端只存散列，
+	// 明文只在那一次响应里出现，这是与 MFA secret 同级的纪律）。
+	ActionAppPassword = "user.app_password"
+
 	// ActionShareCreate 创建分享链接。
 	ActionShareCreate = "share.create"
 	// ActionShareRevoke 撤销分享链接。

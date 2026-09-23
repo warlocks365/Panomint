@@ -25,6 +25,10 @@ func NewDetector(Options) (*Detector, error) { return nil, ErrCGORequired }
 // Detect 不可用。
 func (*Detector) Detect(image.Image) ([]Detection, error) { return nil, ErrCGORequired }
 
+// DetectMulti 不可用（Job000041 多尺度加入 cgo 版时漏配占位 —— 曾致 CGO_ENABLED=0
+// 下 cmd/facesgen 编译失败、CI 全量 test 门静默断链；方法集必须与 cgo 版保持一致）。
+func (*Detector) DetectMulti(image.Image) ([]Detection, error) { return nil, ErrCGORequired }
+
 // Size 占位实现下无意义。
 func (*Detector) Size() int { return 0 }
 
