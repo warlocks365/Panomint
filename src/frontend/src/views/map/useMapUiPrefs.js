@@ -12,7 +12,10 @@ export function useMapUiPrefs({ errRef }) {
     map_filter_collapsed: false, // Job000059：桌面筛选悬浮化收起状态
     map_marker_mode: 'icon', // Job000060：标记样式 icon|thumb
     map_default_provider: 'auto',
-    map_default_zoom: null
+    map_default_zoom: null,
+    // Job000101：空间页视图模式（本页不消费，但 PUT 是整行替换——缺键会把空间页偏好清回默认，
+    // 故原样携带；两页各自持有进场时的全量副本，后写者覆盖先写者的同键值是 UI 偏好可接受语义）。
+    spaces_group_by_album: false
   })
   const kind = ref('all') // 媒体类型过滤 all|photo|video|pano
   const filterOpen = ref(false) // 移动端筛选浮层开关
@@ -29,7 +32,8 @@ export function useMapUiPrefs({ errRef }) {
         map_filter_collapsed: d.map_filter_collapsed === true,
         map_marker_mode: d.map_marker_mode === 'thumb' ? 'thumb' : 'icon',
         map_default_provider: d.map_default_provider || 'auto',
-        map_default_zoom: typeof d.map_default_zoom === 'number' ? d.map_default_zoom : null
+        map_default_zoom: typeof d.map_default_zoom === 'number' ? d.map_default_zoom : null,
+        spaces_group_by_album: d.spaces_group_by_album === true
       }
     } catch {
       // 保持默认值即可，不提示（用户没做任何操作，弹错误只会困惑）

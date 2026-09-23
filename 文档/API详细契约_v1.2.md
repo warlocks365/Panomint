@@ -1,9 +1,19 @@
-# API 详细契约 (v1.5)
+# API 详细契约 (v1.6)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.5 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.6 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.6 变更说明（2026-09-23，Job000101「个人空间按相册分组视图」）
+
+补录 `GET /albums/groups`（个人空间分组视图数据源）与 `GET /media` 的 `album=none` 过滤。实现见 `internal/albums/groups.go` / `internal/media/timeline.go`：
+
+1. `GET /albums/groups`：本人 personal 空间「按相册分组」首屏聚合。分组范围 = `type IN ('manual','favorites')` 且**有可见成员**的相册（favorites 置顶序，与 `GET /albums` 一致）；smart 不入分组（成员由 criteria 动态计算、无 `album_items` 行）。响应 `{groups:[{album_id,name,kind,count,items[≤8],truncated}], ungrouped:{count,items[≤24],has_more,next_cursor?}}`；全部媒体行过 `mediascope.VisibleCondFor`（调用者可见集），fail-closed
+2. 未分组桶 = 不在「本人拥有的任何相册」里的 personal 媒体（仅被 smart criteria 命中仍算未分组）；`has_more` 时给 `next_cursor`，续翻走 `GET /media?album=none&cursor=…`（同族游标契约）
+3. `GET /media` 增 `album=none` 查询参数：过滤出不属于本人任何相册的 personal 媒体（谓词同未分组桶口径，`NoAlbum` 绑 `Scope.OwnerID`）；其余取值暂不识别（YAGNI）
+4. `GET/PUT /user/ui-prefs` 增固定键 `spaces_group_by_album`（bool，默认 false）= 空间页个人空间默认视图模式（与地图偏好同端点同契约：固定键整体替换）
+5. 前端：空间页「时间轴｜按相册」分段切换（个人空间专属；偏好 500ms 防抖落服务端）；每组前 8 项 + 「查看全部」跳相册详情页；未分组桶前 24 项 + 截断提示
 
 ## v1.5 变更说明（2026-09-23，Job000100「移动/复制目标选择」）
 
@@ -225,7 +235,7 @@ OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`（
 ### GET /media
 
 时间轴分页（年/月/日/全部 + 筛选）。
-- 查询：`space=personal|shared`、`view=year|month|day|all`、`date=2026-08`、`type=photo|video|360`、`favorites=true`、`tag=`、`person=`、`cursor=`、`limit=`
+- 查询：`space=personal|shared`、`view=year|month|day|all`、`date=2026-08`、`type=photo|video|360`、`favorites=true`、`tag=`、`person=`、`album=none`（Job000101：仅 personal，过滤出不属于本人任何相册的媒体，续翻消费 `GET /albums/groups` 的 `ungrouped.next_cursor`）、`cursor=`、`limit=`
 - **作用域（安全不变量，2026-09-16 修复跨用户越权后确立）**：`space` **缺省 = `personal` = 仅本人**，绝不等于「全部」；`space=shared` 限「该共享空间的成员或属主」（失败关闭：两者都不是则返回**空结果**，而不是所有 shared 媒体）；`space` 取枚举外值 → **400 `INVALID_PARAMS`**（且不回显 PostgreSQL 枚举原文）；无 `user_id` 身份 → **401 `UNAUTHENTICATED`**。谓词本体见 `internal/media/scope.go` 的 `scopeConds`；`GET /media`、`GET /media/date-histogram`、`GET /media/duplicates` 三处**共用同一函数**，不接受各写一份而漂移。
 
 - 响应：`{ "items": [MediaRef...], "next_cursor", "total", "buckets": [{"key":"2026-08","count":N}] }`
@@ -393,6 +403,13 @@ v1.1 声明的手动触发索引端点**未注册**（后端 grep `media/index` 
 
 列表（含 `type` 过滤：`manual|smart|shared|favorites`）。
 
+### GET /albums/groups（v1.6 补录，Job000101）
+
+个人空间「按相册分组」首屏聚合（空间页分组视图数据源）。
+- 语义：分组 = 本人 personal 空间 `type IN ('manual','favorites')` 且有可见成员的相册（smart 不入分组——无 `album_items` 行）；未分组桶 = 不在本人任何相册里的 personal 媒体（仅被 smart criteria 命中仍算未分组）
+- 响应：`{ "groups": [{ "album_id", "name", "kind", "count", "items": [MediaRef×≤8], "truncated" }], "ungrouped": { "count", "items": [MediaRef×≤24], "has_more", "next_cursor"? } }`（`next_cursor` 仅 `has_more` 时给出，续翻 `GET /media?album=none&cursor=`）
+- 可见性：全部媒体行过 `mediascope.VisibleCondFor`（调用者可见集，与 `GET /media` 同真源）；相册行限 `owner_id=调用者`（fail-closed，无「全库」档）
+
 ### POST /albums
 
 建相册。
@@ -505,11 +522,11 @@ bbox 内去重地名列表（含计数），供地图底部「地理位置罗列
 
 ### GET /user/ui-prefs
 
-当前用户地图 UI 偏好：`{ "map_slider_pos","map_filter_side","map_default_provider","map_default_zoom" }`（需登录）
+当前用户地图 UI 偏好：`{ "map_slider_pos","map_filter_side","map_default_provider","map_default_zoom" }`（需登录）；v1.6 增 `"spaces_group_by_album"`（bool，默认 false）= 空间页个人空间「按相册分组」视图模式（Job000101）
 
 ### PUT /user/ui-prefs
 
-更新偏好（滑块位置/筛选栏侧/默认底图）。
+更新偏好（滑块位置/筛选栏侧/默认底图）；v1.6 起同步支持 `spaces_group_by_album`（固定键整体替换契约，未携带键不落库变更）。
 
 ### GET /admin/map-config
 

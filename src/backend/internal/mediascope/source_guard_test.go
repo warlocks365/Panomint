@@ -465,6 +465,21 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 			"WHERE 自带 `owner_id = $2`（= 上传者自己），不跨用户。",
 		Evidence: "media/upload.go（Download + checkReadAccess；hash 去重 owner_id = meta.OwnerID，P2-03 已修吞错）。",
 	},
+	// Job000101 补登记（2026-09-23，GET /albums/groups 个人空间按相册分组）：
+	regKey("internal/albums/groups.go", "FROM media"): {
+		UserFacing: true,
+		Reason: "GET /albums/groups 的未分组桶（ungroupedQueries）：把不在本人任何相册里的 personal 媒体行" +
+			"返回给终端用户；可见性谓词 mediascope.VisibleCondFor(1, userID, \"m\")（调用者可见集），" +
+			"「不属于本人相册」谓词同主体绑 $2=调用者 —— 与 /media?album=none 同口径 fail-closed。",
+		Evidence: "albums/groups.go ungroupedQueries（:95 VisibleCondFor(1, userID, \"m\") + notIn 子查询 a.owner_id=$2）；handler groups.go Groups（user_id 来自会话）。",
+	},
+	regKey("internal/albums/groups.go", "JOIN media"): {
+		UserFacing: true,
+		Reason: "GET /albums/groups 的分组计数与每组前 N 项（groupCountsQueries/groupItemsQueries）：把相册成员媒体行" +
+			"返回给终端用户；可见性谓词 mediascope.VisibleCondFor(2, userID, \"m\")（调用者可见集，与 List 聚合段同真源）；" +
+			"候选相册本身已 fail-closed 在 listGroupAlbumsSQL（a.owner_id=$1 AND space='personal' AND type IN manual/favorites）。",
+		Evidence: "albums/groups.go groupCountsQueries（:66 VisibleCondFor(2, userID, \"m\")）、groupItemsQueries（:77 同）。",
+	},
 	regKey("internal/albums/store.go", "FROM media"): {
 		UserFacing: true,
 		Reason: "面向终端用户：① List 的 smart 相册摘要计数与首图（buildCriteriaWhere 按相册属主）；" +
@@ -600,6 +615,10 @@ var visibilityWiring = map[string][]wiringRef{
 	"internal/media/write.go": {
 		{File: "internal/media/write.go", Symbol: "m.owner_id = $1"},
 		{File: "internal/media/write_handlers.go", Func: "Trash", Symbol: `c.GetString("user_id")`},
+	},
+	"internal/albums/groups.go": {
+		{File: "internal/albums/groups.go", Symbol: "mediascope.VisibleCondFor("},
+		{File: "internal/albums/groups.go", Symbol: "a.owner_id = $1"},
 	},
 	"internal/albums/store.go": {
 		{File: "internal/albums/store.go", Symbol: "a.owner_id = $1"},

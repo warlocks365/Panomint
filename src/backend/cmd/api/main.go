@@ -230,6 +230,7 @@ func main() {
 	permAlbumWrite := auth.RequirePerm(authStore, "album:write")
 	authed.POST("/albums", permAlbumWrite, albumsH.Create)
 	authed.GET("/albums", permRead, albumsH.List)
+	authed.GET("/albums/groups", permRead, albumsH.Groups) // Job000101 静态段须先于 :id 注册
 	authed.GET("/albums/:id", permRead, albumsH.Get)
 	authed.PATCH("/albums/:id", permAlbumWrite, albumsH.Patch)
 	authed.DELETE("/albums/:id", permAlbumWrite, albumsH.Delete)

@@ -206,3 +206,21 @@ func TestSystemMapConfigViewNeverCarriesSecret(t *testing.T) {
 		t.Fatal("视图必须提供 china_api_key_state（否则界面无法判断 Key 是否可用）")
 	}
 }
+
+// TestNormalizeUIPrefsSpacesGroup Job000101：布尔无非法值空间，true/false 原样透传。
+func TestNormalizeUIPrefsSpacesGroup(t *testing.T) {
+	got, err := NormalizeUIPrefs(UIPrefs{SpacesGroupByAlbum: true})
+	if err != nil {
+		t.Fatalf("不应报错: %v", err)
+	}
+	if !got.SpacesGroupByAlbum {
+		t.Fatalf("true 应透传，实际 %+v", got)
+	}
+	got, err = NormalizeUIPrefs(UIPrefs{})
+	if err != nil {
+		t.Fatalf("不应报错: %v", err)
+	}
+	if got.SpacesGroupByAlbum {
+		t.Fatalf("缺省应为 false（时间轴平铺），实际 %+v", got)
+	}
+}

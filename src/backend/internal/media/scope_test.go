@@ -273,3 +273,29 @@ func TestHandlersFailClosedWithoutIdentity(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildWhereNoAlbum Job000101 未分组桶谓词：NOT EXISTS 绑 Scope.OwnerID，
+// 且占位符在作用域谓词（$1）之后续编无错位。
+func TestBuildWhereNoAlbum(t *testing.T) {
+	p := ListParams{Scope: MediaScope{Space: "personal", OwnerID: "u1"}, NoAlbum: true}
+	where, args := p.buildWhere()
+	if !strings.Contains(where, "NOT EXISTS(SELECT 1 FROM album_items ai JOIN albums a ON a.id = ai.album_id") {
+		t.Fatalf("NoAlbum 谓词缺失: %q", where)
+	}
+	if !strings.Contains(where, "a.owner_id = $2") {
+		t.Fatalf("NoAlbum 应绑 $2（作用域占 $1）: %q", where)
+	}
+	if len(args) != 2 || args[1] != "u1" {
+		t.Fatalf("args 应为 [u1 u1]，实际 %v", args)
+	}
+}
+
+// TestBuildWhereNoAlbumSharedScopeIsNoOp shared 档 OwnerID 为空 → NOT EXISTS 恒真退化不过滤
+// （前端仅在 space=personal 使用 album=none；语义见 albums/groups.go 头注释）。
+func TestBuildWhereNoAlbumSharedScopeIsNoOp(t *testing.T) {
+	p := ListParams{Scope: MediaScope{Space: "shared", MemberID: "u1"}, NoAlbum: true}
+	where, _ := p.buildWhere()
+	if !strings.Contains(where, "a.owner_id = $") {
+		t.Fatalf("shared 档仍应拼出谓词（绑空串不命中任何属主）: %q", where)
+	}
+}

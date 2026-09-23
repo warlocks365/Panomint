@@ -31,6 +31,9 @@ type ListParams struct {
 	Cursor    string
 	Limit     int
 	Folder    string // 目录前缀过滤（folder_path = Folder 或 Folder/ 前缀子目录）
+	// NoAlbum Job000101「未分组」桶：仅保留不属于调用者任何相册的媒体
+	// （album=none；smart 相册是动态 criteria 视图、无 album_items 行，不参与判定）。
+	NoAlbum bool
 }
 
 // MediaRef 时间轴条目（契约 MediaRef 轻量结构）。
@@ -138,6 +141,14 @@ func (p *ListParams) buildWhere() (string, []any) {
 		// 收藏模型：favorites 相册成员（DDL 无 is_favorite 字段，决策记录见报告）
 		conds = append(conds, `EXISTS(SELECT 1 FROM album_items ai JOIN albums a ON a.id = ai.album_id
 			WHERE ai.media_id = m.id AND a.type = 'favorites')`)
+	}
+	if p.NoAlbum {
+		// Job000101 未分组桶：不在「调用者本人拥有的任何相册」里。
+		// 谓词绑 Scope.OwnerID（personal 档=本人；shared 档 OwnerID 为空串，
+		// 空串不命中任何 albums.owner_id → NOT EXISTS 恒真 → 退化为不过滤，
+		// 前端仅在 space=personal 使用该参数，语义见 albums.Groups 头注释）。
+		add(`NOT EXISTS(SELECT 1 FROM album_items ai JOIN albums a ON a.id = ai.album_id
+			WHERE ai.media_id = m.id AND a.owner_id = $%d)`, p.Scope.OwnerID)
 	}
 	if p.Date != "" {
 		if start, end, ok := parseDateRange(p.Date); ok {

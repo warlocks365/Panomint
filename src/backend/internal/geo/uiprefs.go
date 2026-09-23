@@ -59,6 +59,8 @@ type UIPrefs struct {
 	// Job000059/060：筛选悬浮层收起状态 + 标记样式（icon|thumb，非法值 400 同其他枚举）。
 	MapFilterCollapsed bool   `json:"map_filter_collapsed"`
 	MapMarkerMode      string `json:"map_marker_mode"`
+	// Job000101：空间页视图模式——false=时间轴平铺（默认）/true=按相册分组。
+	SpacesGroupByAlbum bool `json:"spaces_group_by_album"`
 }
 
 // DefaultUIPrefs 未设置时返回的默认值（与 DDL 默认值一致）。
@@ -97,6 +99,8 @@ func NormalizeUIPrefs(in UIPrefs) (UIPrefs, error) {
 		out.MapMarkerMode = v
 	}
 	out.MapFilterCollapsed = in.MapFilterCollapsed
+	// 布尔无非法值空间（缺失= false = 默认平铺），原样透传即可。
+	out.SpacesGroupByAlbum = in.SpacesGroupByAlbum
 
 	if v := strings.ToLower(strings.TrimSpace(in.MapDefaultProvider)); v != "" {
 		if v != providerAuto && v != providerAmap && v != providerOSM {
@@ -115,11 +119,11 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 	out := DefaultUIPrefs()
 	var slider, side, provider, marker string
 	var zoom *int
-	var collapsed bool
+	var collapsed, spacesGroup bool
 	err := s.Pool.QueryRow(ctx, `
 		SELECT map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
-		       map_filter_collapsed, map_marker_mode
-		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom, &collapsed, &marker)
+		       map_filter_collapsed, map_marker_mode, spaces_group_by_album
+		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom, &collapsed, &marker, &spacesGroup)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
@@ -132,6 +136,7 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 		MapSliderPos: slider, MapFilterSide: side,
 		MapDefaultProvider: provider, MapDefaultZoom: zoom,
 		MapFilterCollapsed: collapsed, MapMarkerMode: marker,
+		SpacesGroupByAlbum: spacesGroup,
 	})
 	if nerr != nil {
 		return DefaultUIPrefs(), nil
@@ -143,8 +148,8 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 func (s *MediaStore) PutUIPrefs(ctx context.Context, userID string, p UIPrefs) error {
 	_, err := s.Pool.Exec(ctx, `
 		INSERT INTO user_ui_prefs (user_id, map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
-		                           map_filter_collapsed, map_marker_mode, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+		                           map_filter_collapsed, map_marker_mode, spaces_group_by_album, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			map_slider_pos       = EXCLUDED.map_slider_pos,
 			map_filter_side      = EXCLUDED.map_filter_side,
@@ -152,8 +157,9 @@ func (s *MediaStore) PutUIPrefs(ctx context.Context, userID string, p UIPrefs) e
 			map_default_zoom     = EXCLUDED.map_default_zoom,
 			map_filter_collapsed = EXCLUDED.map_filter_collapsed,
 			map_marker_mode      = EXCLUDED.map_marker_mode,
+			spaces_group_by_album = EXCLUDED.spaces_group_by_album,
 			updated_at           = now()`,
 		userID, p.MapSliderPos, p.MapFilterSide, p.MapDefaultProvider, p.MapDefaultZoom,
-		p.MapFilterCollapsed, p.MapMarkerMode)
+		p.MapFilterCollapsed, p.MapMarkerMode, p.SpacesGroupByAlbum)
 	return err
 }

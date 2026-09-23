@@ -73,6 +73,8 @@ func (h *Handler) List(c *gin.Context) {
 		Place:     c.Query("place"),
 		Folder:    c.Query("folder"),
 		Cursor:    c.Query("cursor"),
+		// Job000101：album=none → 未分组桶（不属于调用者任何相册）；其余取值暂不识别（YAGNI）。
+		NoAlbum: c.Query("album") == "none",
 	}
 	if v := c.Query("limit"); v != "" {
 		p.Limit, _ = strconv.Atoi(v)
