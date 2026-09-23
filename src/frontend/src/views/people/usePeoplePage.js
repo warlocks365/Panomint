@@ -77,6 +77,33 @@ export function usePeoplePage() {
     else namedSelected.value.push(id)
   }
 
+  // Job000099 全选/反选统一（人物实体集，语义同媒体批量：成功清空、失败保留）
+  const allNamedPicked = () =>
+    named.value.length > 0 && named.value.every((p) => namedSelected.value.includes(p.id))
+
+  function toggleAllNamed() {
+    namedSelected.value = allNamedPicked() ? [] : named.value.map((p) => p.id)
+  }
+
+  function invertNamed() {
+    namedSelected.value = named.value
+      .filter((p) => !namedSelected.value.includes(p.id))
+      .map((p) => p.id)
+  }
+
+  const allClustersPicked = () =>
+    unnamed.value.length > 0 && unnamed.value.every((c) => selected.value.includes(c.cluster_id))
+
+  function toggleAllClusters() {
+    selected.value = allClustersPicked() ? [] : unnamed.value.map((c) => c.cluster_id)
+  }
+
+  function invertClusters() {
+    selected.value = unnamed.value
+      .filter((c) => !selected.value.includes(c.cluster_id))
+      .map((c) => c.cluster_id)
+  }
+
   async function batchHide(hidden) {
     const targets = named.value.filter((p) => namedSelected.value.includes(p.id))
     if (!targets.length) return
@@ -172,6 +199,8 @@ export function usePeoplePage() {
     named, unnamed, covers, loading, loadError,
     selected, namedSelected, scanning, scanNotice,
     load, togglePick, toggleNamedPick, batchHide,
+    allNamedPicked, toggleAllNamed, invertNamed,
+    allClustersPicked, toggleAllClusters, invertClusters,
     openMerge, startRename, toggleHidden, triggerScan
   }
 }

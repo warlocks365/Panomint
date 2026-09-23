@@ -1,6 +1,6 @@
 {
  "components\\player\\MediaInfoPanel.vue": 368,
- "components\\timeline\\TimelineGrid.vue": 318,
+ "components\\timeline\\TimelineGrid.vue": 326,
  "components\\viewer\\MediaViewer.vue": 469,
  "views\\SharePublicView.vue": 410
 }

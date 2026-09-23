@@ -21,6 +21,33 @@ export function useBatchOps(onChanged) {
     selected.clear()
   }
 
+  // Job000099 统一全选/反选：宿主传「当前可选全集」的 id 数组（虚拟滚动宿主=已加载集，
+  // 地图宿主=簇内容物；全集语义由宿主决定， composable 不感知数据源）。
+  function isAllSelected(allIds) {
+    return allIds.length > 0 && allIds.every((id) => selected.has(id))
+  }
+
+  function toggleAll(allIds) {
+    if (isAllSelected(allIds)) {
+      selected.clear()
+    } else {
+      for (const id of allIds) selected.add(id)
+    }
+  }
+
+  function invertAll(allIds) {
+    const keep = new Set(allIds)
+    const next = []
+    for (const id of allIds) {
+      if (!selected.has(id)) next.push(id)
+    }
+    for (const id of selected) {
+      if (!keep.has(id)) next.push(id) // 全集外的选中项保留（防误清其他批次勾选项）
+    }
+    selected.clear()
+    for (const id of next) selected.add(id)
+  }
+
   async function run(op, params = {}, okText) {
     if (busy.value || selected.size === 0) return
     busy.value = true
@@ -29,6 +56,7 @@ export function useBatchOps(onChanged) {
       const { data } = await http.post('/media/batch', { ids: ids(), op, ...params })
       const fail = (data?.failed || []).length
       lastResult.value = `${okText}：成功 ${data?.succeeded ?? 0} 项${fail ? `，失败 ${fail} 项` : ''}`
+      // Job000099 统一约定：操作成功 → 清空选择集 + 通知宿主刷新；失败 → 保留选择集（可修正后重试）
       selected.clear()
       onChanged?.()
     } catch (e) {
@@ -148,7 +176,9 @@ export function useBatchOps(onChanged) {
         }
       }
       lastResult.value = `已创建 ${ok}/${selected.size} 个分享链接（管理后台可见）`
+      // 统一约定：成功即清空选择集并通知宿主刷新（与 run() 对齐，Job000099 修正此前漏发）
       selected.clear()
+      onChanged?.()
     } finally {
       busy.value = false
     }
@@ -161,6 +191,9 @@ export function useBatchOps(onChanged) {
     lastResult,
     toggle,
     clear,
+    isAllSelected,
+    toggleAll,
+    invertAll,
     onDelete,
     onMove,
     onCopy,

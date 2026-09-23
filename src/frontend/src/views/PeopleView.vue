@@ -25,6 +25,10 @@
           已命名
           <span v-if="page.namedSelected.value.length" class="batch-bar-entity" data-testid="people-batch-bar">
             <span class="pb-count">已选 {{ page.namedSelected.value.length }} 项</span>
+            <button class="mini" data-testid="pb-select-all" @click="page.toggleAllNamed">
+              {{ page.allNamedPicked() ? '取消全选' : '全选' }}
+            </button>
+            <button class="mini" data-testid="pb-invert" @click="page.invertNamed">反选</button>
             <button class="mini" data-testid="pb-hide" @click="page.batchHide(true)">隐藏</button>
             <button class="mini" data-testid="pb-unhide" @click="page.batchHide(false)">取消隐藏</button>
             <button class="mini" data-testid="pb-clear" @click="page.namedSelected.value = []">清除</button>
@@ -50,6 +54,12 @@
         <h3 class="section-title">
           未命名聚类
           <span class="hint">勾选多个可合并为同一人</span>
+          <template v-if="page.unnamed.value.length">
+            <button class="mini" data-testid="pc-select-all" @click="page.toggleAllClusters">
+              {{ page.allClustersPicked() ? '取消全选' : '全选' }}
+            </button>
+            <button class="mini" data-testid="pc-invert" @click="page.invertClusters">反选</button>
+          </template>
           <button v-if="page.selected.value.length" class="mini primary" data-testid="people-merge-open" @click="page.openMerge">
             合并命名（已选 {{ page.selected.value.length }}）
           </button>

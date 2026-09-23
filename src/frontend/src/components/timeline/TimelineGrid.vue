@@ -63,6 +63,11 @@
       <BatchBar
         v-if="selectable && batch.count.value > 0"
         :count="batch.count.value"
+        show-select-all
+        :all-selected="batch.isAllSelected(allIds())"
+        show-invert
+        @toggle-all="batch.toggleAll(allIds())"
+        @invert="batch.invertAll(allIds())"
         @meta="batch.onMeta"
         @tags="batch.onTags"
         @move="batch.onMove"
@@ -106,6 +111,9 @@ const emit = defineEmits(['open', 'changed'])
 
 // 选中集按媒体 id 存于本组件（虚拟滚动只复用 DOM，选中态不丢）；操作完成后 emit changed 让宿主 reload
 const batch = useBatchOps(() => emit('changed'))
+
+// Job000099 全选/反选全集 = 已加载集（pager 游标累积的 items；加载未完成时=「当前已加载」语义）
+const allIds = () => pager.items.map((m) => m.id)
 
 const GAP = 8
 const MIN_CELL = 140

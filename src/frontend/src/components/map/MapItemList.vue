@@ -7,8 +7,8 @@
         class="il-all"
         type="button"
         data-testid="map-list-select-all"
-        @click="toggleAll"
-      >{{ allSelected ? '取消全选' : '全选此处' }}</button>
+        @click="batch.toggleAll(allIds())"
+      >{{ batch.isAllSelected(allIds()) ? '取消全选' : '全选' }}</button>
       <button class="il-close" type="button" @click="$emit('close')">关闭</button>
     </div>
 
@@ -42,6 +42,11 @@
     <BatchBar
       v-if="selectable && batch.count.value > 0"
       :count="batch.count.value"
+      show-select-all
+      :all-selected="batch.isAllSelected(allIds())"
+      show-invert
+      @toggle-all="batch.toggleAll(allIds())"
+      @invert="batch.invertAll(allIds())"
       @meta="batch.onMeta"
       @tags="batch.onTags"
       @move="batch.onMove"
@@ -58,7 +63,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, reactive, watch } from 'vue'
+import { onBeforeUnmount, reactive, watch } from 'vue'
 // 复用 mediaLoader：缓存 + pending 去重 + 404 回退（原 thumbBlobUrl 每次挂载重拉）
 import { loadThumbUrl } from '../timeline/mediaLoader'
 import BatchBar from '../media/BatchBar.vue'
@@ -67,23 +72,16 @@ import { useBatchOps } from '../media/useBatchOps'
 const props = defineProps({
   items: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
-  selectable: { type: Boolean, default: true } // Job000080 地图批量：列表=cluster 内容物，「全选此处」=整簇
+  selectable: { type: Boolean, default: true } // Job000080 地图批量：列表=cluster 内容物，「全选」=整簇（Job000099 统一措辞）
 })
 const emit = defineEmits(['close', 'open', 'changed'])
 
 // 选中集按媒体 id 存于本组件（面板关闭即弃，天然清空）；操作完成 emit changed 让宿主重取列表+簇
 const batch = useBatchOps(() => emit('changed'))
 
-const allSelected = computed(
-  () => props.items.length > 0 && props.items.every((it) => batch.selected.has(it.id))
-)
-
-function toggleAll() {
-  if (allSelected.value) {
-    batch.clear()
-  } else {
-    for (const it of props.items) batch.selected.add(it.id)
-  }
+// Job000099：全选/反选逻辑上提 useBatchOps（与全部宿主同源），此处只传全集（簇内容物）
+function allIds() {
+  return props.items.map((it) => it.id)
 }
 
 // 缩略图需 Bearer 鉴权 → 经 mediaLoader 取 blob 转本地 URL（img src 无法带 header）。

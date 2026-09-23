@@ -1,7 +1,20 @@
 <template>
-  <!-- 批量操作栏（Job000066）：选中数 > 0 时吸底出现；七模块行为统一（后端 /media/batch 单点语义）。 -->
+  <!-- 批量操作栏（Job000066）：选中数 > 0 时吸底出现；七模块行为统一（后端 /media/batch 单点语义）。
+       Job000099 增统一全选/反选：宿主传 allSelected 状态与 showInvert，行为与地图「全选此处」同源。 -->
   <div class="batch-bar" data-testid="batch-bar">
     <span class="bb-count">已选 {{ count }} 项</span>
+    <button
+      v-if="showSelectAll"
+      class="bb-btn"
+      data-testid="bb-select-all"
+      @click="$emit('toggle-all')"
+    >{{ allSelected ? '取消全选' : '全选' }}</button>
+    <button
+      v-if="showInvert"
+      class="bb-btn"
+      data-testid="bb-invert"
+      @click="$emit('invert')"
+    >反选</button>
     <button class="bb-btn" data-testid="bb-meta" @click="$emit('meta')">修改元数据</button>
     <button class="bb-btn" data-testid="bb-tags" @click="$emit('tags')">编辑标签</button>
     <button class="bb-btn" data-testid="bb-move" @click="$emit('move')">移动</button>
@@ -15,9 +28,13 @@
 
 <script setup>
 defineProps({
-  count: { type: Number, default: 0 }
+  count: { type: Number, default: 0 },
+  // Job000099：全选/反选（宿主传全集状态；不传 showSelectAll 则不渲染，向后兼容）
+  showSelectAll: { type: Boolean, default: false },
+  allSelected: { type: Boolean, default: false },
+  showInvert: { type: Boolean, default: false }
 })
-defineEmits(['meta', 'tags', 'move', 'copy', 'share', 'space', 'delete', 'clear'])
+defineEmits(['toggle-all', 'invert', 'meta', 'tags', 'move', 'copy', 'share', 'space', 'delete', 'clear'])
 </script>
 
 <style scoped>

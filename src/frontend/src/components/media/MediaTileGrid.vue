@@ -45,6 +45,11 @@
     <BatchBar
       v-if="selectable && batch.count.value > 0"
       :count="batch.count.value"
+      show-select-all
+      :all-selected="batch.isAllSelected(allIds())"
+      show-invert
+      @toggle-all="batch.toggleAll(allIds())"
+      @invert="batch.invertAll(allIds())"
       @meta="batch.onMeta"
       @tags="batch.onTags"
       @move="batch.onMove"
@@ -77,6 +82,11 @@ const props = defineProps({
 const emit = defineEmits(['open', 'changed', 'remove'])
 
 const batch = useBatchOps(() => emit('changed'))
+
+// Job000099 全选/反选全集 = 当前 items（宿主传入的网格集合）
+function allIds() {
+  return props.items.map((m) => m.id)
+}
 
 function onTileClick(m) {
   // 勾选模式下点击=打开预览；勾选由复选框负责（stop 传播）
