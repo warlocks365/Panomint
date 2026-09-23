@@ -5,6 +5,5 @@
  "components\\timeline\\TimelineGrid.vue": 318,
  "components\\viewer\\MediaViewer.vue": 469,
  "views\\MapView.vue": 991,
- "views\\SharePublicView.vue": 410,
- "views\\SpacesView.vue": 328
+ "views\\SharePublicView.vue": 410
 }
