@@ -1,5 +1,5 @@
 <template>
-  <div class="dlg-mask" @click.self="close">
+  <div class="dlg-mask" @click.self="emit('close')">
     <div class="dlg" role="dialog" aria-label="挂载编辑" data-testid="storage-dialog">
       <h3 class="dlg-title">{{ mode === 'create' ? '新建挂载' : '编辑挂载' }}</h3>
 

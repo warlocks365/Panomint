@@ -3,7 +3,7 @@
  "components\\player\\360Player.vue": 725,
  "components\\player\\MediaInfoPanel.vue": 368,
  "components\\shares\\ShareCreateDialog.vue": 313,
- "components\\timeline\\TimelineGrid.vue": 531,
+ "components\\timeline\\TimelineGrid.vue": 318,
  "components\\viewer\\MediaViewer.vue": 469,
  "views\\FoldersView.vue": 343,
  "views\\MapView.vue": 991,
