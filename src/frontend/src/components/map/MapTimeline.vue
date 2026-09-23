@@ -54,22 +54,22 @@
 
       <div class="tl-stats">
         <div class="stat-cell">
-          <span class="stat-dot" style="background:#3b82f6"></span>
+          <span class="stat-dot" style="background:var(--stat-photo)"></span>
           <span class="stat-name">照片</span>
           <span class="stat-num">{{ statTotals.photos }}</span>
         </div>
         <div class="stat-cell">
-          <span class="stat-dot" style="background:#8b5cf6"></span>
+          <span class="stat-dot" style="background:var(--stat-video)"></span>
           <span class="stat-name">视频</span>
           <span class="stat-num">{{ statTotals.videos }}</span>
         </div>
         <div class="stat-cell">
-          <span class="stat-dot" style="background:#f59e0b"></span>
+          <span class="stat-dot" style="background:var(--stat-pano-photo)"></span>
           <span class="stat-name">全景照片</span>
           <span class="stat-num">{{ statTotals.panoPhotos }}</span>
         </div>
         <div class="stat-cell">
-          <span class="stat-dot" style="background:#ef4444"></span>
+          <span class="stat-dot" style="background:var(--stat-pano-video)"></span>
           <span class="stat-name">全景视频</span>
           <span class="stat-num">{{ statTotals.panoVideos }}</span>
         </div>

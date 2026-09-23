@@ -705,7 +705,7 @@ onBeforeUnmount(() => {
   width: 94vw;
   height: 84vh;
   max-width: 1200px;
-  background-color: #14181d;
+  background-color: var(--player-bg);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
@@ -730,6 +730,6 @@ onBeforeUnmount(() => {
 .player-error {
   margin-top: 10px;
   font-size: var(--font-size-sm);
-  color: #fca5a5;
+  color: var(--player-error-text);
 }
 </style>

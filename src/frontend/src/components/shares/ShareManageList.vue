@@ -190,7 +190,7 @@ defineExpose({ refresh })
 
 .status-tag.active {
   color: var(--color-success);
-  background-color: #e8f7ee;
+  background-color: var(--color-success-bg);
 }
 
 .status-tag.expired {

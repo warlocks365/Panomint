@@ -14,6 +14,13 @@
   --color-success: #16a34a;
   --color-warning-bg: #fef3c7;
   --color-warning-text: #92400e;
+  --color-success-bg: #e8f7ee;      /* 成功态浅底（状态角标） */
+
+  /* 时间轴统计图例四类别色（颜色即数据：照片/视频/全景照片/全景视频） */
+  --stat-photo: #3b82f6;
+  --stat-video: #8b5cf6;
+  --stat-pano-photo: #f59e0b;
+  --stat-pano-video: #ef4444;
 
   /* 尺寸 */
   --sidebar-width: 220px;
@@ -41,6 +48,7 @@
   --player-text-dim: #9aa7b4;
   --player-success: #7fd18a;         /* 播放器暗底上的成功色 */
   --player-danger: #ff9b9b;          /* 播放器暗底上的危险色 */
+  --player-error-text: #fca5a5;      /* 播放器/分享页暗底上的错误文案 */
 
   /* 阴影 */
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);

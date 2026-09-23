@@ -1,7 +1,1 @@
-{
- "components/map/MapTimeline.vue": 4,
- "components/shares/ShareManageList.vue": 1,
- "views/MapView.vue": 4,
- "views/SharePublicView.vue": 2,
- "views/TagsView.vue": 1
-}
+{}

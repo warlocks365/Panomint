@@ -924,7 +924,7 @@ onBeforeUnmount(() => {
 }
 
 .ms-item:hover {
-  background: #f1f5f9;
+  background: var(--color-surface-hover);
 }
 
 .ms-name {
