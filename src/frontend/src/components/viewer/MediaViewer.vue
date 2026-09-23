@@ -19,7 +19,7 @@
                   :key="current.id"
                   :src="mediaUrl"
                   class="stage-media"
-                  :style="mediaStyle"
+                  :style="editStyle"
                   controls
                   autoplay
                 ></video>
@@ -28,20 +28,13 @@
                   :key="current.id"
                   :src="mediaUrl"
                   class="stage-media"
-                  :style="mediaStyle"
+                  :style="editStyle"
                   :alt="current.filename"
                 />
                 <div v-else key="fail" class="stage-tip">媒体加载失败</div>
               </transition>
 
-              <!-- 裁剪选择层（仅照片，覆盖整个媒体框） -->
-              <div v-if="cropMode && !isVideo" class="crop-overlay">
-                <div class="crop-rect" :style="cropRectStyle" @pointerdown.prevent="onRectDown">
-                  <span class="crop-handle" @pointerdown.prevent.stop="onHandleDown"></span>
-                </div>
-              </div>
-
-              <div v-if="is360 && !cropMode" class="pano-entry">
+              <div v-if="is360 && !(editRef && editRef.cropMode)" class="pano-entry">
                 <button class="pano-btn" @click="goPano">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none">
                     <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.6" />
@@ -68,27 +61,14 @@
                   </label>
                 </div>
 
-                <div v-if="editable" class="tb-group">
-                  <span v-if="editStateText" class="tb-state" :class="editState">{{ editStateText }}</span>
-                  <template v-if="!cropMode">
-                    <button class="tb-btn" title="向左旋转 90°" @click="rotateBy(-90)">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M9 7H5V3M5.5 7.5A7 7 0 1 1 5 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                    </button>
-                    <button class="tb-btn" title="向右旋转 90°" @click="rotateBy(90)">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M15 7h4V3M18.5 7.5A7 7 0 1 0 19 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                    </button>
-                    <button class="tb-btn" title="裁剪" :disabled="isVideo" @click="startCrop">
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-                    </button>
-                    <button class="tb-btn primary" :disabled="!editDirty || editState === 'saving'" @click="saveEdits">保存</button>
-                    <button class="tb-btn" :disabled="!editDirty && !hasSavedEdits" @click="resetEdits">重置</button>
-                  </template>
-                  <template v-else>
-                    <span class="tb-hint">拖动选框 / 右下角缩放</span>
-                    <button class="tb-btn primary" @click="applyCrop">应用裁剪</button>
-                    <button class="tb-btn" @click="cancelCrop">取消</button>
-                  </template>
-                </div>
+                <ViewerEditTools
+                  v-if="editable && current"
+                  ref="editRef"
+                  :editable="editable"
+                  :media-id="String(current.id)"
+                  :stage-ref="stageRef"
+                  @updated="onEditsUpdated"
+                />
               </div>
             </template>
           </div>
@@ -114,11 +94,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, reactive, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import http from '../../api/http'
 import { loadFullUrl } from '../timeline/mediaLoader'
 import MediaInfoPanel from '../player/MediaInfoPanel.vue'
+import ViewerEditTools from './ViewerEditTools.vue'
 import { useViewerStore, SLIDESHOW_INTERVALS } from '../../stores/viewer'
 
 const props = defineProps({
@@ -158,6 +139,16 @@ const is360 = computed(() => !!(detail.value?.is_360 || current.value?.is_360 ||
 // 编辑仅对非 360 照片开放（视频/360 不适用基础旋转裁剪）
 const editable = computed(() => !is360.value && !isVideo.value)
 
+// 编辑子系统（ViewerEditTools 自持）：宿主经 expose 消费预览样式，加载后重初始化
+const editRef = ref(null)
+const editStyle = computed(() => (editRef.value && editRef.value.mediaStyle) || {})
+function onEditsUpdated(e) {
+  if (detail.value) detail.value.edits = e
+}
+
+// 舞台元素：触摸手势（宿主）与裁剪拖动换算/旋转适配（经 prop 交给编辑子组件）共用
+const stageRef = ref(null)
+
 /* ---------------- 媒体加载 ---------------- */
 watch(
   () => [store.open, store.index, current.value?.id],
@@ -174,7 +165,6 @@ async function loadCurrent() {
   detailLoading.value = true
   loadingMedia.value = true
   detail.value = null
-  cancelCrop()
   try {
     const [detailRes, url] = await Promise.all([
       http.get(`/media/${item.id}`),
@@ -183,17 +173,13 @@ async function loadCurrent() {
     if (seq !== loadSeq) return
     detail.value = detailRes.data
     mediaUrl.value = url
-    // 用已保存的编辑参数初始化本地编辑态
-    const e = detailRes.data?.edits || null
-    saved.rotate = e?.rotate || 0
-    saved.crop = e?.crop ? { ...e.crop } : null
-    edit.rotate = saved.rotate
-    edit.crop = saved.crop ? { ...saved.crop } : null
-    editState.value = ''
+    // 用已保存的编辑参数初始化本地编辑态（含退出裁剪模式）
+    editRef.value?.initFromEdits(detailRes.data?.edits || null)
   } catch (e) {
     if (seq !== loadSeq) return
     detail.value = null
     mediaUrl.value = ''
+    editRef.value?.initFromEdits(null)
   } finally {
     if (seq === loadSeq) {
       detailLoading.value = false
@@ -245,153 +231,6 @@ function onTouchEnd(e) {
   go(dx < 0 ? 1 : -1)
 }
 
-/* ---------------- 基本编辑（非破坏式 CSS 预览 + PATCH 保存） ---------------- */
-const edit = reactive({ rotate: 0, crop: null })
-const saved = reactive({ rotate: 0, crop: null })
-const editState = ref('') // '' | saving | saved | error
-
-const cropMode = ref(false)
-const cropSel = reactive({ x: 0.1, y: 0.1, w: 0.8, h: 0.8 })
-
-const editDirty = computed(() => {
-  if (edit.rotate !== saved.rotate) return true
-  const a = edit.crop
-  const b = saved.crop
-  if (!a && !b) return false
-  if (!a || !b) return true
-  return Math.abs(a.x - b.x) > 1e-4 || Math.abs(a.y - b.y) > 1e-4 ||
-    Math.abs(a.w - b.w) > 1e-4 || Math.abs(a.h - b.h) > 1e-4
-})
-const hasSavedEdits = computed(() => !!(saved.rotate || saved.crop))
-const editStateText = computed(() => {
-  if (editState.value === 'saving') return '保存中…'
-  if (editState.value === 'saved') return '已保存'
-  if (editState.value === 'error') return '保存失败'
-  return ''
-})
-
-// 即时预览：先裁剪（clip-path，按未旋转方向）后旋转（transform）。
-// 90°/270° 旋转后按舞台宽高比缩放，保证旋转后的图不出界（媒体框 == 舞台框）。
-const stageRef = ref(null)
-const stageW = ref(0)
-const stageH = ref(0)
-const fitScale = computed(() => {
-  if (edit.rotate % 180 === 0 || !stageW.value || !stageH.value) return 1
-  const ar = stageW.value / stageH.value
-  return Math.min(ar, 1 / ar)
-})
-
-const mediaStyle = computed(() => {
-  const c = edit.crop
-  const clip = c
-    ? `inset(${(c.y * 100).toFixed(3)}% ${((1 - c.x - c.w) * 100).toFixed(3)}% ${((1 - c.y - c.h) * 100).toFixed(3)}% ${(c.x * 100).toFixed(3)}%)`
-    : 'none'
-  // 裁剪选择时临时按未旋转方向显示，便于在原始方向框选
-  const r = cropMode.value ? 0 : edit.rotate
-  const s = cropMode.value ? 1 : fitScale.value
-  return { clipPath: clip, transform: `rotate(${r}deg) scale(${s})` }
-})
-
-const cropRectStyle = computed(() => ({
-  left: `${cropSel.x * 100}%`,
-  top: `${cropSel.y * 100}%`,
-  width: `${cropSel.w * 100}%`,
-  height: `${cropSel.h * 100}%`
-}))
-
-function rotateBy(deg) {
-  edit.rotate = ((edit.rotate + deg) % 360 + 360) % 360
-  editState.value = ''
-}
-
-function startCrop() {
-  cropSel.x = edit.crop?.x ?? 0.1
-  cropSel.y = edit.crop?.y ?? 0.1
-  cropSel.w = edit.crop?.w ?? 0.8
-  cropSel.h = edit.crop?.h ?? 0.8
-  cropMode.value = true
-}
-
-function cancelCrop() {
-  cropMode.value = false
-}
-
-function applyCrop() {
-  edit.crop = { x: +cropSel.x.toFixed(4), y: +cropSel.y.toFixed(4), w: +cropSel.w.toFixed(4), h: +cropSel.h.toFixed(4) }
-  cropMode.value = false
-  editState.value = ''
-}
-
-// 裁剪选框拖动：移动 / 右下角缩放
-let drag = null
-const frameRect = () => stageRef.value?.getBoundingClientRect() || null
-function relPoint(e) {
-  const r = frameRect()
-  if (!r) return { x: 0, y: 0 }
-  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
-}
-const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi)
-
-function onRectDown(e) {
-  drag = { mode: 'move', start: relPoint(e), orig: { ...cropSel } }
-  addDragListeners()
-}
-function onHandleDown(e) {
-  drag = { mode: 'resize', start: relPoint(e), orig: { ...cropSel } }
-  addDragListeners()
-}
-function onDragMove(e) {
-  if (!drag) return
-  const p = relPoint(e)
-  const dx = p.x - drag.start.x
-  const dy = p.y - drag.start.y
-  if (drag.mode === 'move') {
-    cropSel.x = clamp(drag.orig.x + dx, 0, 1 - cropSel.w)
-    cropSel.y = clamp(drag.orig.y + dy, 0, 1 - cropSel.h)
-  } else {
-    cropSel.w = clamp(drag.orig.w + dx, 0.05, 1 - cropSel.x)
-    cropSel.h = clamp(drag.orig.h + dy, 0.05, 1 - cropSel.y)
-  }
-}
-function onDragUp() {
-  drag = null
-  removeDragListeners()
-}
-function addDragListeners() {
-  window.addEventListener('pointermove', onDragMove)
-  window.addEventListener('pointerup', onDragUp)
-}
-function removeDragListeners() {
-  window.removeEventListener('pointermove', onDragMove)
-  window.removeEventListener('pointerup', onDragUp)
-}
-
-async function saveEdits() {
-  if (!current.value || editState.value === 'saving') return
-  editState.value = 'saving'
-  const hasEdits = !!(edit.rotate || edit.crop)
-  const payload = hasEdits
-    ? { rotate: edit.rotate, ...(edit.crop ? { crop: { ...edit.crop } } : {}) }
-    : null
-  try {
-    const res = await http.patch(`/media/${current.value.id}`, { edits: payload })
-    const e = res.data?.edits || null
-    saved.rotate = e?.rotate || 0
-    saved.crop = e?.crop ? { ...e.crop } : null
-    if (detail.value) detail.value.edits = e
-    editState.value = 'saved'
-    setTimeout(() => { if (editState.value === 'saved') editState.value = '' }, 2000)
-  } catch {
-    editState.value = 'error'
-  }
-}
-
-function resetEdits() {
-  edit.rotate = 0
-  edit.crop = null
-  saveEdits() // 立即持久化清空（PATCH edits:null）
-}
-
 /* ---------------- 关闭 / 键盘 ---------------- */
 function close() {
   store.setOpen(false)
@@ -404,8 +243,8 @@ function onKeydown(e) {
   const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
   if (e.key === 'Escape') {
     if (typing) return
-    if (cropMode.value) {
-      cancelCrop()
+    if (editRef.value && editRef.value.cropMode) {
+      editRef.value.cancelCrop()
       return
     }
     close()
@@ -420,30 +259,14 @@ function onKeydown(e) {
   }
 }
 
-// 舞台尺寸（用于旋转后的等比缩放），打开时测量并跟随窗口变化
-let stageRO = null
-function measureStage() {
-  const r = stageRef.value?.getBoundingClientRect()
-  if (r) {
-    stageW.value = r.width
-    stageH.value = r.height
-  }
-}
-
+// 打开时挂键盘监听（舞台尺寸测量由编辑子组件经 stageRef prop 自持）
 watch(
   () => store.open,
   (open) => {
     if (open) {
       window.addEventListener('keydown', onKeydown)
-      nextTick(() => {
-        measureStage()
-        stageRO = new ResizeObserver(measureStage)
-        if (stageRef.value) stageRO.observe(stageRef.value)
-      })
     } else {
       window.removeEventListener('keydown', onKeydown)
-      stageRO?.disconnect()
-      stageRO = null
     }
   },
   { immediate: true }
@@ -466,10 +289,7 @@ function onDeletedFromPanel(id) {
 
 onBeforeUnmount(() => {
   clearInterval(slideTimer)
-  removeDragListeners()
   window.removeEventListener('keydown', onKeydown)
-  stageRO?.disconnect()
-  stageRO = null
 })
 </script>
 
@@ -531,30 +351,6 @@ onBeforeUnmount(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-}
-
-/* 裁剪选择层 */
-.crop-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 15;
-}
-.crop-rect {
-  position: absolute;
-  border: 2px solid #fff;
-  cursor: move;
-  box-sizing: border-box;
-}
-.crop-handle {
-  position: absolute;
-  right: -8px;
-  bottom: -8px;
-  width: 16px;
-  height: 16px;
-  background: #fff;
-  border-radius: 3px;
-  cursor: nwse-resize;
 }
 
 .pano-entry {
@@ -648,16 +444,6 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   opacity: 0.85;
-}
-.tb-hint,
-.tb-state {
-  opacity: 0.85;
-}
-.tb-state.saved {
-  color: var(--player-success);
-}
-.tb-state.error {
-  color: var(--player-danger);
 }
 
 .nav-btn {
