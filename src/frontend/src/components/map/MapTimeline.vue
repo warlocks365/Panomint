@@ -1,100 +1,72 @@
 <template>
-  <div class="map-timeline" :class="{ 'tl--collapsed': detailHidden, 'tl--top': position === 'top' }">
+  <div class="map-timeline" :class="{ 'tl--collapsed': chrome.detailHidden.value, 'tl--top': position === 'top' }">
     <div class="tl-head">
       <span class="tl-title">时间轴</span>
-      <span v-if="!detailHidden" class="tl-range">{{ rangeLabel }}</span>
-      <span v-if="loading && !detailHidden" class="tl-loading">加载中…</span>
-      <span v-if="!detailHidden" class="tl-zoom">
-        <button class="tl-zoom-btn" type="button" :disabled="granularity === 'year'" @click="zoomOut">−</button>
-        <span class="tl-zoom-label">{{ granularityLabel }}</span>
-        <button class="tl-zoom-btn" type="button" :disabled="granularity === 'day'" @click="zoomIn">＋</button>
+      <span v-if="!chrome.detailHidden.value" class="tl-range">{{ sel.rangeLabel.value }}</span>
+      <span v-if="loading && !chrome.detailHidden.value" class="tl-loading">加载中…</span>
+      <span v-if="!chrome.detailHidden.value" class="tl-zoom">
+        <button class="tl-zoom-btn" type="button" :disabled="granularity === 'year'" @click="chrome.zoomOut">−</button>
+        <span class="tl-zoom-label">{{ chrome.granularityLabel.value }}</span>
+        <button class="tl-zoom-btn" type="button" :disabled="granularity === 'day'" @click="chrome.zoomIn">＋</button>
       </span>
-      <button v-if="hasRange && !detailHidden" class="tl-clear" type="button" @click="clear">清除</button>
+      <button v-if="sel.hasRange.value && !chrome.detailHidden.value" class="tl-clear" type="button" @click="sel.clear">清除</button>
       <!-- 移动端折叠开关：折叠后只剩本行（≤40px），把高度让给地图 -->
       <button
-        v-if="isMobile"
+        v-if="chrome.isMobile.value"
         class="tl-toggle"
         type="button"
-        :aria-expanded="String(!collapsed)"
-        :title="collapsed ? '展开时间轴' : '收起时间轴'"
-        @click="collapsed = !collapsed"
+        :aria-expanded="String(!chrome.collapsed.value)"
+        :title="chrome.collapsed.value ? '展开时间轴' : '收起时间轴'"
+        @click="chrome.collapsed.value = !chrome.collapsed.value"
       >
-        {{ collapsed ? '展开' : '收起' }}
-        <svg viewBox="0 0 10 6" width="9" height="6" fill="none" :class="{ 'tl-chevron--up': collapsed }">
+        {{ chrome.collapsed.value ? '展开' : '收起' }}
+        <svg viewBox="0 0 10 6" width="9" height="6" fill="none" :class="{ 'tl-chevron--up': chrome.collapsed.value }">
           <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
         </svg>
       </button>
     </div>
 
-    <div v-if="!detailHidden" class="tl-body">
+    <div v-if="!chrome.detailHidden.value" class="tl-body">
       <div
-        v-if="bars.length"
+        v-if="sel.bars.value.length"
         ref="trackRef"
         class="tl-track"
-        @pointerdown="onDown"
-        @pointermove="onMove"
-        @pointerup="onUp"
-        @pointercancel="onUp"
+        @pointerdown="sel.onDown"
+        @pointermove="sel.onMove"
+        @pointerup="sel.onUp"
+        @pointercancel="sel.onUp"
       >
         <div
-          v-for="(b, i) in bars"
+          v-for="(b, i) in sel.bars.value"
           :key="b.key"
           class="tl-bar"
-          :class="{ on: inRange(i) }"
-          :style="{ height: barHeight(b.count) + '%' }"
-          :title="barTitle(b)"
+          :class="{ on: sel.inRange(i) }"
+          :style="{ height: sel.barHeight(b.count) + '%' }"
+          :title="sel.barTitle(b)"
         ></div>
       </div>
       <div v-else class="tl-empty">当前视野内没有带时间的照片</div>
 
-      <div v-if="bars.length" class="tl-axis">
-        <span>{{ bars[0].key }}</span>
-        <span>{{ bars[bars.length - 1].key }}</span>
+      <div v-if="sel.bars.value.length" class="tl-axis">
+        <span>{{ sel.bars.value[0].key }}</span>
+        <span>{{ sel.bars.value[sel.bars.value.length - 1].key }}</span>
       </div>
 
-      <div class="tl-stats">
-        <div class="stat-cell">
-          <span class="stat-dot" style="background:var(--stat-photo)"></span>
-          <span class="stat-name">照片</span>
-          <span class="stat-num">{{ statTotals.photos }}</span>
-        </div>
-        <div class="stat-cell">
-          <span class="stat-dot" style="background:var(--stat-video)"></span>
-          <span class="stat-name">视频</span>
-          <span class="stat-num">{{ statTotals.videos }}</span>
-        </div>
-        <div class="stat-cell">
-          <span class="stat-dot" style="background:var(--stat-pano-photo)"></span>
-          <span class="stat-name">全景照片</span>
-          <span class="stat-num">{{ statTotals.panoPhotos }}</span>
-        </div>
-        <div class="stat-cell">
-          <span class="stat-dot" style="background:var(--stat-pano-video)"></span>
-          <span class="stat-name">全景视频</span>
-          <span class="stat-num">{{ statTotals.panoVideos }}</span>
-        </div>
-      </div>
-
-      <div v-if="places.length" class="tl-places">
-        <span class="pl-label">位置</span>
-        <div class="pl-scroll">
-          <button
-            v-for="p in places"
-            :key="p.name"
-            class="pl-chip"
-            type="button"
-            :title="`${p.name} · ${p.count} 项（点击定位）`"
-            @click="$emit('place', p)"
-          >{{ p.name }}</button>
-        </div>
-      </div>
+      <TimelineStatsPanel :totals="sel.statTotals.value" :places="places" @place="$emit('place', $event)" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { useResponsive } from '../../composables/useResponsive'
+// Job000089 拆解（交互密集：拖拽框选状态机 + 范围反推 + 折叠/缩放，展示段拆面板）：
+// - useMapTimelineChrome：移动端折叠 + 年/月/日粒度缩放
+// - useMapTimelineSel：bars 过滤排序 / 拖拽框选状态机 / range 反推高亮 / 四类统计 / bucket↔ISO
+// - TimelineStatsPanel：统计四格 + 位置 chips 纯展示
+// 宿主留：头/轨道/轴/空态模板与轨道样式；trackRef 宿主自持（DOM 归属宿主），传入 sel 消费。
+import { ref } from 'vue'
+import TimelineStatsPanel from './TimelineStatsPanel.vue'
+import { useMapTimelineChrome } from './useMapTimelineChrome'
+import { useMapTimelineSel } from './useMapTimelineSel'
 
 // 时间轴（Job000009 优化）：年/月/日粒度缩放 + 拖拽框选 + 四类媒体实时统计
 const props = defineProps({
@@ -107,192 +79,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['change', 'zoom', 'place'])
 
-const trackRef = ref(null)
-const dragging = ref(false)
-const sel = ref([-1, -1]) // 框选中的索引区间（未提交）
-const downX = ref(0) // 按下时的 clientX（用于位移阈值，区分单击/拖拽）
-const downIndex = ref(-1) // 按下时的 bucket 索引
-
-// ---- 移动端折叠 ----
-// 手机默认折叠：展开态实测占 170~190px（track 54 + stats + places + padding），
-// 在 812×375 横屏下会把地图压到 ~90px 高。桌面端恒为展开，观感与改动前一致。
-const { isMobile, isLandscape } = useResponsive()
-const collapsed = ref(isMobile.value)
-// 跨过 1024px 断点时重置为「移动端折叠 / 桌面端展开」
-watch(isMobile, (m) => {
-  collapsed.value = m
-})
-// 手机上转成横屏 → 重新折叠（横屏只有 375px 高，必须优先保地图高度）
-watch(isLandscape, (l) => {
-  if (isMobile.value && l) collapsed.value = true
-})
-const detailHidden = computed(() => isMobile.value && collapsed.value)
-
-const granularityLabel = computed(() => ({ year: '年', month: '月', day: '日' })[props.granularity] || '月')
-
-function zoomIn() {
-  const order = ['year', 'month', 'day']
-  const i = order.indexOf(props.granularity)
-  if (i < order.length - 1) emit('zoom', order[i + 1])
-}
-function zoomOut() {
-  const order = ['year', 'month', 'day']
-  const i = order.indexOf(props.granularity)
-  if (i > 0) emit('zoom', order[i - 1])
-}
-
-// bucket key 正则随粒度变化：year=YYYY，month=YYYY-MM，day=YYYY-MM-DD
-const keyRe = computed(() => {
-  if (props.granularity === 'year') return /^\d{4}$/
-  if (props.granularity === 'day') return /^\d{4}-\d{2}-\d{2}$/
-  return /^\d{4}-\d{2}$/
-})
-
-// 'unknown' 桶（taken_at 为空）无法定位时间轴，剔除
-const bars = computed(() =>
-  props.buckets
-    .filter((b) => b && keyRe.value.test(b.bucket))
-    .sort((a, b) => (a.bucket < b.bucket ? -1 : 1))
-    .map((b) => ({
-      key: b.bucket,
-      count: b.count || 0,
-      photos: b.photos || 0,
-      videos: b.videos || 0,
-      panoPhotos: b.pano_photos || 0,
-      panoVideos: b.pano_videos || 0
-    }))
-)
-
-const maxCount = computed(() => Math.max(1, ...bars.value.map((b) => b.count)))
-
-function barHeight(count) {
-  return Math.max(6, Math.round((count / maxCount.value) * 100))
-}
-
-function barTitle(b) {
-  return `${b.key} · 照片${b.photos} 视频${b.videos} 全景照片${b.panoPhotos} 全景视频${b.panoVideos}`
-}
-
-// 由已提交的 range（ISO）反推高亮索引（按当前粒度截断 bucket 前缀）
-const committedIdx = computed(() => {
-  if (!props.range) return [-1, -1]
-  const keys = bars.value.map((b) => b.key)
-  const prefixLen = { year: 4, month: 7, day: 10 }[props.granularity] || 7
-  const prefixOf = (iso) => (iso || '').slice(0, prefixLen)
-  const a = keys.indexOf(prefixOf(props.range.from))
-  const b = keys.indexOf(prefixOf(props.range.to))
-  if (a < 0 || b < 0) return [-1, -1]
-  return [Math.min(a, b), Math.max(a, b)]
-})
-
-const active = computed(() => (dragging.value ? sel.value : committedIdx.value))
-const hasRange = computed(() => active.value[0] >= 0)
-
-function inRange(i) {
-  const [a, b] = active.value
-  return a >= 0 && i >= a && i <= b
-}
-
-const rangeLabel = computed(() => {
-  const [a, b] = active.value
-  if (a < 0) return '全部时间'
-  return a === b ? bars.value[a].key : `${bars.value[a].key} ~ ${bars.value[b].key}`
-})
-
-// 四类统计：默认统计全视野；有框选时统计选中区间
-const statTotals = computed(() => {
-  let list = bars.value
-  const [a, b] = active.value
-  if (a >= 0 && b >= a) list = bars.value.slice(a, b + 1)
-  return list.reduce(
-    (acc, b) => {
-      acc.photos += b.photos
-      acc.videos += b.videos
-      acc.panoPhotos += b.panoPhotos
-      acc.panoVideos += b.panoVideos
-      return acc
-    },
-    { photos: 0, videos: 0, panoPhotos: 0, panoVideos: 0 }
-  )
-})
-
-function indexAt(clientX) {
-  const track = trackRef.value
-  if (!track) return 0
-  const rect = track.getBoundingClientRect()
-  const ratio = (clientX - rect.left) / Math.max(1, rect.width)
-  const i = Math.floor(ratio * bars.value.length)
-  return Math.min(bars.value.length - 1, Math.max(0, i))
-}
-
-// 位移阈值（px）：pointermove 移动超过此值才视为拖拽，更新结束索引；
-// 否则视为单击（可能因浮点抖动派发 1~2px 的 pointermove，不改变选区）
-const DRAG_THRESHOLD = 6
-
-function onDown(e) {
-  if (!bars.value.length) return
-  dragging.value = true
-  downX.value = e.clientX
-  downIndex.value = indexAt(e.clientX)
-  sel.value = [downIndex.value, downIndex.value]
-  trackRef.value.setPointerCapture?.(e.pointerId)
-}
-
-function onMove(e) {
-  if (!dragging.value) return
-  if (Math.abs(e.clientX - downX.value) < DRAG_THRESHOLD) return // 未达拖拽阈值，保持单选
-  const i = indexAt(e.clientX)
-  sel.value = [downIndex.value, i]
-}
-
-function onUp(e) {
-  if (!dragging.value) return
-  dragging.value = false
-  const [a0, b0] = sel.value
-  const a = Math.min(a0, b0)
-  const b = Math.max(a0, b0)
-  if (!bars.value[a] || !bars.value[b]) return
-  // 判断单击 vs 拖拽：sel 未扩展（起止仍相同）→ 单击单选该 bucket；否则范围选择
-  if (a === b) {
-    emit('change', toRange(bars.value[a].key, bars.value[a].key))
-  } else {
-    emit('change', toRange(bars.value[a].key, bars.value[b].key))
-  }
-}
-
-function clear() {
-  sel.value = [-1, -1]
-  emit('change', null)
-}
-
-// bucket → ISO 区间（闭区间：起始 00:00 ~ 末尾 23:59:59.999）
-// 注意：一律用 UTC 构造，避免 toISOString() 因本地时区导致月初/月末跨月错位
-// （否则 committedIdx 反推时 prefixOf(from/to) 与 bucket key 对不上，单选会退化为范围）
-function toRange(fromKey, toKey) {
-  const from = bucketStart(fromKey)
-  const to = bucketEnd(toKey)
-  return { from: from.toISOString(), to: to.toISOString() }
-}
-
-function bucketStart(key) {
-  if (/^\d{4}$/.test(key)) return new Date(Date.UTC(+key, 0, 1, 0, 0, 0, 0))
-  if (/^\d{4}-\d{2}$/.test(key)) {
-    const [y, m] = key.split('-').map(Number)
-    return new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0))
-  }
-  const [y, m, d] = key.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0))
-}
-
-function bucketEnd(key) {
-  if (/^\d{4}$/.test(key)) return new Date(Date.UTC(+key + 1, 0, 1, 0, 0, 0, -1))
-  if (/^\d{4}-\d{2}$/.test(key)) {
-    const [y, m] = key.split('-').map(Number)
-    return new Date(Date.UTC(y, m, 1, 0, 0, 0, -1)) // 次月 1 日 -1ms
-  }
-  const [y, m, d] = key.split('-').map(Number)
-  return new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999))
-}
+const chrome = useMapTimelineChrome(props, emit)
+const trackRef = ref(null) // 轨道元素宿主自持（v-if 切换时 Vue 自动置 null，拖拽前守卫 bars 非空）
+const sel = useMapTimelineSel(props, emit, trackRef)
 </script>
 
 <style scoped>
@@ -438,91 +227,4 @@ function bucketEnd(key) {
   display: flex;
   justify-content: space-between;
 }
-
-.tl-stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.stat-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--color-bg);
-  border-radius: 6px;
-  padding: 6px 10px;
-}
-
-.stat-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.stat-name {
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-}
-
-.stat-num {
-  margin-left: auto;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  font-variant-numeric: tabular-nums;
-}
-
-.tl-places {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.pl-label {
-  font-size: 11px;
-  color: var(--color-text-disabled);
-  flex-shrink: 0;
-}
-
-.pl-scroll {
-  flex: 1;
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
-}
-
-.pl-scroll::-webkit-scrollbar {
-  height: 4px;
-}
-
-.pl-scroll::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.5);
-  border-radius: 2px;
-}
-
-.pl-chip {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg);
-  border: none;
-  border-radius: 10px;
-  padding: 2px 10px;
-  cursor: pointer;
-}
-
-.pl-chip:hover {
-  background: var(--color-surface-hover);
-  color: var(--color-text-primary);
-}
-
 </style>
