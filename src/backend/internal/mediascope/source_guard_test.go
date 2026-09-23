@@ -566,6 +566,13 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 			"端点要求 admin:system 权限。",
 		Evidence: "audit/store.go:259-270；cmd/api/main.go:385（RequirePerm(authStore, \"admin:system\")）。",
 	},
+	regKey("internal/storage/locations.go", "FROM media"): {
+		UserFacing: false,
+		Reason: "存储位置管理的两处 COUNT 子查询：ListLocations 的引用计数（media_count，关联 location_id）与 DeleteLocation 的" +
+			"删除前守卫（COUNT(*)>0 则 409 LOCATION_IN_USE）。两查询只取计数、不返回任何 media 行/字段；且四个端点全部" +
+			"requirePrivileged（仅系统管理员），非管理员 403，不面向终端用户。",
+		Evidence: "storage/locations.go:83-86（ListLocations 计数子查询）、:150-155（DeleteLocation COUNT 守卫）；routes 见 cmd/api/main.go 的 /storage/locations 四端点（GET/POST/PATCH/DELETE 均 requirePrivileged）。",
+	},
 }
 
 // wiringRef 一条接线断言。
