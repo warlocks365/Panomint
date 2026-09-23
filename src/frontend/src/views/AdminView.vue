@@ -66,7 +66,7 @@ const tabs = [
   { key: 'jobs', label: '任务' },
   { key: 'audit', label: '审计' },
   { key: 'map', label: '地图配置' },
-  { key: 'storage', label: '存储挂载' }
+  { key: 'storage', label: '存储' }
 ]
 
 // 权限预检：管理端点分两级（admin:users 管用户/角色/审计，admin:system 管概览/任务/地图配置）。

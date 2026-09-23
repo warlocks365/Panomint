@@ -37,6 +37,9 @@
       @saved="onSaved"
     />
   </section>
+
+  <!-- Job000103 存储位置（命名物理存储根）管理：自持加载与 CRUD，面板内聚 -->
+  <StorageLocationPanel />
 </template>
 
 <script setup>
@@ -51,6 +54,7 @@ import { errMessage } from '../../stores/auth'
 import { deleteMount, listMounts } from '../../api/storage'
 import StorageMountList from './StorageMountList.vue'
 import StorageMountDialog from './StorageMountDialog.vue'
+import StorageLocationPanel from './StorageLocationPanel.vue'
 
 const mounts = ref([])
 const loading = ref(false)

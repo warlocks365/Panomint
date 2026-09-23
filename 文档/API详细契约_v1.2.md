@@ -1,9 +1,21 @@
-# API 详细契约 (v1.6)
+# API 详细契约 (v1.7)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.6 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.7 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.7 变更说明（2026-09-23，Job000103「存储位置管理」）
+
+新增 §18 存储位置四端点（命名物理存储根）。实现见 `internal/storage/locations.go`，迁移 `00034_storage_locations.sql`：
+
+1. 存储位置 = 命名物理存储根，名称对应部署时容器内映射目录名（Docker 映射名约束 slug 化：`^[a-z][a-z0-9-]{0,31}$`，禁点号/斜杠/大写/空格——HTTP 层 400 `INVALID_NAME` 与表 CHECK 双保险，防路径穿越与非法挂载名）
+2. `media.location_id` 可空 UUID FK `ON DELETE SET NULL`：NULL = 默认存储根（存量行为不变）；删除位置时其媒体自动回默认存储根
+3. 名称创建后不可修改：`PATCH` 带 `name` → 400 `NAME_IMMUTABLE`（引用稳定裁决）；`PATCH` 仅改 `description`
+4. 删除前置引用守卫：仍有媒体引用 → 409 `LOCATION_IN_USE`「该位置仍有 N 项媒体引用，须先迁回默认存储」；无引用物理删，回 204
+5. 重名 → 409 `DUPLICATE_NAME`（表 UNIQUE 约束；HTTP 层 pg 23505 翻译）
+6. 权限：四端点均要求系统管理员（`requirePrivileged`，与网络挂载同口径），非管理员 403
+7. 已知文档缺口（登记不修）：Job000070 网络挂载 `/storage/mounts` 六端点未入契约，后续补录
 
 ## v1.6 变更说明（2026-09-23，Job000101「个人空间按相册分组视图」）
 
@@ -828,4 +840,28 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 
 ---
 
-文档结束（API v1.2）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。
+
+## 18. 存储位置（命名物理存储根，v1.7 补录，Job000103）
+
+管理后台「存储」页签内嵌面板（`StorageLocationPanel.vue`）。位置 = 命名物理存储根（容器内挂载目录名），媒体经 `media.location_id` 归属；NULL = 默认存储根。
+
+### GET /storage/locations
+
+列表。需系统管理员（非管理员 403）。响应 `{ "locations":[ { "id","name","description","media_count","created_at" } ] }`；`media_count` = 引用计数（>0 时前端禁删入口，后端 409 双保险）。
+
+### POST /storage/locations
+
+新建。请求 `{ "name","description?" }`。`name` 违反 `^[a-z][a-z0-9-]{0,31}$` → 400 `INVALID_NAME`；重名 → 409 `DUPLICATE_NAME`。成功 201，响应 = 该位置对象。
+
+### PATCH /storage/locations/:id
+
+改描述。请求 `{ "description" }`；**带 `name` → 400 `NAME_IMMUTABLE`（名称创建后不可改，引用稳定裁决）**。不存在 → 404。成功 204。
+
+### DELETE /storage/locations/:id
+
+删除。仍有媒体引用 → 409 `LOCATION_IN_USE`；无引用物理删（引用行经 `ON DELETE SET NULL` 回默认存储根），成功 204；不存在 → 404。
+
+
+---
+
+文档结束（API v1.7）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。
