@@ -61,7 +61,9 @@ say "2/5 后端构建（golang:1.26-bookworm 容器，CGO=api 系）"
 BINHOST="$OUT/.binhost"
 rm -rf "$BINHOST"; mkdir -p "$BINHOST"
 LDFLAGS="-X panoalbum/internal/version.Version=$VERSION -X panoalbum/internal/version.Commit=$COMMIT -X panoalbum/internal/version.BuildDate=$BUILD_DATE"
-docker run --rm -v "$ROOT/src/backend":/src -w /src -v "$BINHOST":/out golang:1.26-bookworm \
+docker run --rm -v "$ROOT/src/backend":/src -w /src -v "$BINHOST":/out \
+  -e GOPROXY=https://goproxy.cn,direct \
+  golang:1.26-bookworm \
   sh -c "
     set -e
     apt-get update -qq >/dev/null 2>&1 || true
