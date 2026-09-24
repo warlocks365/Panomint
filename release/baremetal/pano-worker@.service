@@ -1,0 +1,46 @@
+# Panomint Worker —— 裸机部署 systemd 模板（v1.0.0）
+#
+# 实例：index（缩略图+挂载执行）/ transcode（HLS 转码）/ storage（仅挂载执行）
+# 占位符 @INSTALL_DIR@ / @RUN_USER@ / @RUN_GROUP@ 由 baremetal/install.sh 替换。
+#
+# ⚠️ 分发语义与 docker/worker/Dockerfile 的 worker-entrypoint.sh 对齐（双入口单一行为）。
+
+[Unit]
+Description=Panomint Worker (%i)（缩略图/转码/挂载执行 常驻消费进程）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_GROUP@
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=@INSTALL_DIR@/.env
+Environment=THUMB_DIR=@INSTALL_DIR@/data/thumbnails
+Environment=HLS_DIR=@INSTALL_DIR@/data/hls
+Environment=FFMPEG_PATH=/usr/bin
+Environment=MEDIA_ROOT=@INSTALL_DIR@/data/media
+
+ExecStart=@INSTALL_DIR@/bin/pano-worker-run %i
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pano-worker-%i
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# 媒体根可能位于 /home 或外挂盘：不设 ProtectHome
+
+[Install]
+WantedBy=multi-user.target

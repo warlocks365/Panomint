@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+# pano-ai-run <embed|tag|faces|phash> —— AI 常驻清扫进程入口分发（裸机/集成包共用）
+# 扫描间隔与 docker-compose.yml 中对应 worker 的 -interval 参数一致（改一边必须同步另一边）。
+set -e
+BIN="$(dirname "$0")"
+case "$1" in
+  embed)  exec "$BIN/pano-embedgen" -mode watch -interval 30 ;;
+  tag)    exec "$BIN/pano-taggen"   -mode watch -interval 60 ;;
+  faces)  exec "$BIN/pano-facesgen" -mode watch -interval 30 ;;
+  phash)  exec "$BIN/pano-phashgen" -mode watch -interval 30 ;;
+  *)
+    echo "用法: pano-ai-run <embed|tag|faces|phash>" >&2
+    exit 2
+    ;;
+esac

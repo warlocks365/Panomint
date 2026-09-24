@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+# pano-worker-run <index|transcode|storage> —— 裸机/集成包形态的 worker 入口分发
+# 语义与 docker/worker/Dockerfile 的 worker-entrypoint.sh 逐条对齐：
+# 改这里必须同步改那边（容器/裸机两套入口是同一行为的两个镜像）。
+set -e
+case "${1:-${WORKER_KIND:-}}" in
+  index)
+    # F4 挂载执行器与缩略图 worker 同进程组（共享 mount 命名空间）；
+    # storagectl 崩溃不拖垮 indexctl（& 后台 + exec 只接管前台）。
+    "$(dirname "$0")/pano-storagectl" run &
+    exec "$(dirname "$0")/pano-indexctl" worker -thumbdir "${THUMB_DIR:-./data/thumbnails}"
+    ;;
+  storage)
+    exec "$(dirname "$0")/pano-storagectl" run
+    ;;
+  transcode)
+    exec "$(dirname "$0")/pano-transcodectl" worker -hlsdir "${HLS_DIR:-./data/hls}"
+    ;;
+  *)
+    echo "用法: pano-worker-run <index|transcode|storage>" >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,224 @@
+# Panomint Docker 发布编排（v1.0.0）
+#
+# 与仓库根 docker-compose.yml（开发/测试编排）的区别：
+#   · 全部服务使用 **tag 化发布镜像**（panomint/app:<V> 等，由 build-images.sh 构建），
+#     不在目标机上做源码构建；
+#   · API 启动自迁移（AUTO_MIGRATE 默认开），不再需要手工跑 migrate；
+#   · 仅保留运行必需服务；MinIO（可选对象存储）与 Caddy（入口/TLS）为 profile 可选。
+#
+# 快速开始：
+#   cp .env.example .env   # 填 POSTGRES_PASSWORD 与 JWT_SECRET（必填）
+#   docker compose up -d
+#   浏览器打开 http://<主机IP>:8088 —— 首次访问自动进入初始化向导
+name: panomint
+
+services:
+  db:
+    image: panomint/db:${PANOMINT_VERSION:?set in .env}
+    container_name: panomint-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pano}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-pano_album}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  valkey:
+    image: valkey/valkey:8.0-alpine
+    container_name: panomint-valkey
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - valkeydata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    image: panomint/app:${PANOMINT_VERSION}
+    container_name: panomint-api
+    restart: unless-stopped
+    environment:
+      API_PORT: "8080"
+      APP_ENV: prod
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      VALKEY_ADDR: valkey:6379
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      UPLOAD_DIR: /data/media
+      UPLOAD_TMP: /data/uploads
+      HLS_DIR: /data/hls
+      MEDIA_ROOT: /data/media
+      THUMB_DIR: /data/thumbnails
+      TILE_CACHE_DIR: /tile-cache
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      TRUSTED_PROXIES: 172.16.0.0/12
+      AMAP_KEY: ${AMAP_KEY:-}
+      AMAP_SECRET: ${AMAP_SECRET:-}
+      STORAGE_CIPHER_KEY: ${STORAGE_CIPHER_KEY:-}
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+    volumes:
+      - mediadata:/data
+      - tilecache:/tile-cache
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  embed-worker:
+    image: panomint/app:${PANOMINT_VERSION}
+    container_name: panomint-embed-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/embedgen", "-mode", "watch", "-interval", "30"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+      EMBED_FAMILY: ${EMBED_FAMILY:-chinese-clip}
+      EMBED_MODEL_DIR: /opt/models/chinese-clip
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  tag-worker:
+    image: panomint/app:${PANOMINT_VERSION}
+    container_name: panomint-tag-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/taggen", "-mode", "watch", "-interval", "60"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+      EMBED_FAMILY: ${EMBED_FAMILY:-chinese-clip}
+      EMBED_MODEL_DIR: /opt/models/chinese-clip
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  phash-worker:
+    image: panomint/app:${PANOMINT_VERSION}
+    container_name: panomint-phash-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/phashgen", "-mode", "watch", "-interval", "30"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  faces-worker:
+    image: panomint/app:${PANOMINT_VERSION}
+    container_name: panomint-faces-worker
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/facesgen", "-mode", "watch", "-interval", "30"]
+    environment:
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      THUMB_DIR: /data/thumbnails
+      MEDIA_ROOT: /data/media
+      FACE_MODEL_DIR: /opt/models/faces
+      FACE_DEVICE: ${FACE_DEVICE:-}
+      EMBED_DEVICE: ${EMBED_DEVICE:-auto}
+      FACE_MERGE_SIM: ${FACE_MERGE_SIM:-0.40}
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: panomint/web:${PANOMINT_VERSION}
+    container_name: panomint-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8088}:80"
+    depends_on:
+      - api
+
+  # ---- 可选：缩略图/转码队列消费（镜像内 ffmpeg；媒体量大时启用）----
+  index-worker:
+    profiles: ["workers"]
+    image: panomint/worker:${PANOMINT_VERSION}
+    container_name: panomint-index-worker
+    restart: unless-stopped
+    environment:
+      WORKER_KIND: index
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      VALKEY_ADDR: valkey:6379
+      FFMPEG_PATH: /usr/bin
+      THUMB_DIR: /data/thumbnails
+      UPLOAD_DIR: /data/media
+      HLS_DIR: /data/hls
+      MEDIA_ROOT: /data/media
+      STORAGE_CIPHER_KEY: ${STORAGE_CIPHER_KEY:-}
+      AMAP_KEY: ${AMAP_KEY:-}
+      AMAP_SECRET: ${AMAP_SECRET:-}
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  transcode-worker:
+    profiles: ["workers"]
+    image: panomint/worker:${PANOMINT_VERSION}
+    container_name: panomint-transcode-worker
+    restart: unless-stopped
+    environment:
+      WORKER_KIND: transcode
+      PG_DSN: postgres://${POSTGRES_USER:-pano}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pano_album}
+      VALKEY_ADDR: valkey:6379
+      FFMPEG_PATH: /usr/bin
+      THUMB_DIR: /data/thumbnails
+      UPLOAD_DIR: /data/media
+      HLS_DIR: /data/hls
+      MEDIA_ROOT: /data/media
+    volumes:
+      - mediadata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+
+  # ---- 可选：入口 TLS 反代（自动 ACME；或手动证书，见 docker/caddy 文档）----
+  caddy:
+    profiles: ["edge"]
+    image: caddy:2-alpine
+    container_name: panomint-caddy
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS is required with profile edge}
+    ports:
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ../caddy-deploy:/etc/caddy:ro
+      - caddydata:/data
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  valkeydata:
+  mediadata:
+  tilecache:
+  caddydata:

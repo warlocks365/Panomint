@@ -1,0 +1,46 @@
+# Panomint AI 常驻进程 —— 裸机部署 systemd 模板（v1.0.0）
+#
+# 实例：embed（CLIP 向量化）/ tag（零样本打标）/ faces（人脸检测聚类）/ phash（感知哈希）
+# 占位符 @INSTALL_DIR@ / @RUN_USER@ / @RUN_GROUP@ 由 baremetal/install.sh 替换。
+#
+# 与 pano-api.service 的差异：这些进程不对外监听，崩溃重启语义同 worker。
+
+[Unit]
+Description=Panomint AI worker (%i)（CLIP/打标/人脸/哈希 清扫式常驻进程）
+After=network-online.target pano-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_GROUP@
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=@INSTALL_DIR@/.env
+Environment=EMBED_LIB=@INSTALL_DIR@/assets/lib/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so
+Environment=EMBED_MODEL_DIR=@INSTALL_DIR@/assets/models/chinese-clip
+Environment=EMBED_FAMILY=chinese-clip
+Environment=FACE_MODEL_DIR=@INSTALL_DIR@/assets/models/faces
+Environment=THUMB_DIR=@INSTALL_DIR@/data/thumbnails
+Environment=MEDIA_ROOT=@INSTALL_DIR@/data/media
+
+ExecStart=@INSTALL_DIR@/bin/pano-ai-run %i
+
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pano-ai-%i
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# 媒体根可能位于 /home 或外挂盘：不设 ProtectHome
+
+[Install]
+WantedBy=multi-user.target

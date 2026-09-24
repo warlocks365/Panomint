@@ -1,0 +1,45 @@
+# Panomint API —— 裸机部署 systemd 模板（v1.0.0）
+# 占位符 @INSTALL_DIR@ / @RUN_USER@ / @RUN_GROUP@ 由 baremetal/install.sh 替换。
+# 行为与 deploy/systemd/pano-api.service 一致（该文件仍供"仓库内直装"场景使用）。
+
+[Unit]
+Description=Panomint API（通用相册系统 · 裸机部署）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+Group=@RUN_GROUP@
+WorkingDirectory=@INSTALL_DIR@
+EnvironmentFile=@INSTALL_DIR@/.env
+Environment=EMBED_LIB=@INSTALL_DIR@/assets/lib/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so
+Environment=EMBED_MODEL_DIR=@INSTALL_DIR@/assets/models/chinese-clip
+Environment=EMBED_FAMILY=chinese-clip
+Environment=EMBED_DEVICE=auto
+Environment=FACE_MODEL_DIR=@INSTALL_DIR@/assets/models/faces
+
+ExecStart=@INSTALL_DIR@/bin/pano-api
+
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=40
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pano-api
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# 媒体根可能位于 /home 或外挂盘：不设 ProtectHome
+
+[Install]
+WantedBy=multi-user.target

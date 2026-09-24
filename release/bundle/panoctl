@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# panoctl —— Panomint 集成包统一控制 CLI（v1.0.0，Job000106 形态二）
+#
+# 设计定位：不碰系统目录、不需要 systemd、不需要 root（数据目录归属当前用户即可）——
+# 面向面板（宝塔类）/NAS/容器内自管理等"应用级"运行环境。
+#
+# 用法（在解包目录内）：
+#   ./bundle/panoctl env-check        环境自检（PG/Valkey/ffmpeg/资产连通性）
+#   ./bundle/panoctl start [all|api|embed|tag|faces|phash|index|transcode|storage]
+#   ./bundle/panoctl stop  [同上]
+#   ./bundle/panoctl status           全部进程状态
+#   ./bundle/panoctl logs <名字>      tail -f 对应日志
+#   ./bundle/panoctl init-config      交互生成 .env（等价于 bundle/install.sh）
+set -uo pipefail
+
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+cd "$BASE" || exit 9
+
+PID_DIR="$BASE/var/pids"
+LOG_DIR="$BASE/var/log"
+ENV_FILE="$BASE/.env"
+
+# 进程表：名字|启动命令（相对 BASE）|是否需要 ffmpeg
+PROCS="api|bin/pano-api|0
+embed|bin/pano-ai-run embed|0
+tag|bin/pano-ai-run tag|0
+faces|bin/pano-ai-run faces|0
+phash|bin/pano-ai-run phash|0
+index|bin/pano-worker-run index|1
+transcode|bin/pano-worker-run transcode|1
+storage|bin/pano-worker-run storage|0"
+
+say() { printf '%s\n' "$*"; }
+die() { printf '[panoctl] 错误：%s\n' "$*" >&2; exit 1; }
+
+load_env() {
+  [ -f "$ENV_FILE" ] || die "缺 $ENV_FILE（先跑 ./bundle/install.sh 或 panoctl init-config）"
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+}
+
+cmd_for() { printf '%s' "$PROCS" | awk -F'|' -v n="$1" '$1==n {print $2; exit}'; }
+need_ff() { printf '%s' "$PROCS" | awk -F'|' -v n="$1" '$1==n {print $3; exit}'; }
+pid_alive() { [ -f "$PID_DIR/$1.pid" ] && kill -0 "$(cat "$PID_DIR/$1.pid")" 2>/dev/null; }
+
+env_check() {
+  load_env
+  local fails=0
+  # PostgreSQL：优先 pg_isready，退化到 TCP 探测（不依赖客户端工具）
+  if command -v pg_isready >/dev/null 2>&1; then
+    pg_isready -d "${PG_DSN:-}" >/dev/null 2>&1 && say '  [ OK ] PostgreSQL 可连通' || { say '  [FAIL] PostgreSQL 不可连通（pg_isready）'; fails=$((fails+1)); }
+  else
+    # PG 主机解析：从 DSN 粗取（部署文档约定 DSN 显式写 host:port）
+    local pg_host pg_port
+    pg_host="$(printf '%s' "${PG_DSN:-}" | sed -n 's|.*@\([^:/]*\):\([0-9]*\)/.*|\1|p')"
+    pg_port="$(printf '%s' "${PG_DSN:-}" | sed -n 's|.*@\([^:/]*\):\([0-9]*\)/.*|\2|p')"
+    [ -n "$pg_host" ] && [ -n "$pg_port" ] || { say '  [FAIL] PG_DSN 无法解析 host:port'; fails=$((fails+1)); pg_host=; }
+    if [ -n "${pg_host:-}" ]; then
+      (exec 3<>"/dev/tcp/$pg_host/$pg_port") 2>/dev/null && say '  [ OK ] PostgreSQL 端口可连通' || { say '  [FAIL] PostgreSQL 端口不通'; fails=$((fails+1)); }
+    fi
+  fi
+  # Valkey
+  local vh vp
+  vh="${VALKEY_ADDR%:*}"; vp="${VALKEY_ADDR##*:}"
+  [ "$vp" = "$VALKEY_ADDR" ] && vp=6379
+  (exec 3<>"/dev/tcp/$vh/$vp") 2>/dev/null && say '  [ OK ] Valkey 可连通' || { say '  [FAIL] Valkey 不可连通'; fails=$((fails+1)); }
+  # ffmpeg（index/transcode 需要）
+  if command -v ffmpeg >/dev/null 2>&1; then say "  [ OK ] ffmpeg：$(ffmpeg -version 2>/dev/null | head -n 1)"
+  else say '  [warn] 无 ffmpeg（index/transcode 将无法工作；AI 进程不受影响）'; fi
+  # 资产
+  [ -s "${EMBED_LIB:-$BASE/assets/lib/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so}" ] \
+    && say '  [ OK ] ONNX Runtime 库就位' || { say '  [FAIL] ONNX Runtime 库缺失'; fails=$((fails+1)); }
+  [ -d "${EMBED_MODEL_DIR:-$BASE/assets/models/chinese-clip}" ] \
+    && say '  [ OK ] CLIP 模型就位' || { say '  [FAIL] CLIP 模型缺失'; fails=$((fails+1)); }
+  return "$fails"
+}
+
+do_start() {
+  load_env
+  local target="${1:-all}"
+  mkdir -p "$PID_DIR" "$LOG_DIR"
+  printf '%s\n' "$PROCS" | awk -F'|' -v t="$target" 't=="all" || $1==t' | while IFS='|' read -r name _cmd _ff; do
+    if pid_alive "$name"; then say "  $name 已在运行（pid $(cat "$PID_DIR/$name.pid")）"; continue; fi
+    if [ "$_ff" = "1" ] && ! command -v ffmpeg >/dev/null 2>&1; then
+      say "  [skip] $name：无 ffmpeg"; continue
+    fi
+    # 工作目录 = 包根：config 的 ./data/* 相对路径与 .env 都以此为基
+    nohup $_cmd >> "$LOG_DIR/$name.log" 2>&1 &
+    echo $! > "$PID_DIR/$name.pid"
+    say "  $name 已启动（pid $!，日志 var/log/$name.log）"
+  done
+  [ "$target" = all ] && say "访问 http://<本机IP>:\${API_PORT:-8080} （首次进入自动打开初始化向导）"
+}
+
+do_stop() {
+  local target="${1:-all}"
+  printf '%s\n' "$PROCS" | awk -F'|' -v t="$target" 't=="all" || $1==t' | while IFS='|' read -r name _ _; do
+    if pid_alive "$name"; then
+      local pid; pid="$(cat "$PID_DIR/$name.pid")"
+      kill "$pid" 2>/dev/null
+      for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+      kill -9 "$pid" 2>/dev/null || true
+      rm -f "$PID_DIR/$name.pid"
+      say "  $name 已停止"
+    else
+      rm -f "$PID_DIR/$name.pid"
+      say "  $name 未在运行"
+    fi
+  done
+}
+
+do_status() {
+  printf '%-10s %s\n' PROC STATE
+  printf '%s\n' "$PROCS" | awk -F'|' '{print $1}' | while read -r name; do
+    if pid_alive "$name"; then printf '%-10s RUNNING (pid %s)\n' "$name" "$(cat "$PID_DIR/$name.pid")"
+    else printf '%-10s STOPPED\n' "$name"; fi
+  done
+}
+
+do_logs() {
+  [ -n "${1:-}" ] || die "logs 需要进程名（api/embed/tag/faces/phash/index/transcode/storage）"
+  [ -f "$LOG_DIR/$1.log" ] || die "日志不存在：$LOG_DIR/$1.log"
+  tail -f "$LOG_DIR/$1.log"
+}
+
+case "${1:-}" in
+  env-check)  env_check ;;
+  init-config) exec "$BASE/bundle/install.sh" ;;
+  start)      do_start "${2:-all}" ;;
+  stop)       do_stop "${2:-all}" ;;
+  restart)    do_stop "${2:-all}"; sleep 1; do_start "${2:-all}" ;;
+  status)     do_status ;;
+  logs)       do_logs "${2:-}" ;;
+  *) sed -n '2,20p' "$0"; exit 2 ;;
+esac
