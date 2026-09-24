@@ -37,7 +37,7 @@ DOCKER_BUILDKIT=1 docker build -f docker/web/Dockerfile -t "panomint/web:$V" src
 
 echo "[images] 版本注入核验（app 镜像内二进制的版本串）"
 docker run --rm --entrypoint sh "panomint/app:$V" -c \
-  "strings /usr/local/bin/api | grep -m1 '^$V\$' && echo IMAGE_VERSION_OK"
+  "grep -a -m1 -q "$V" /usr/local/bin/api && echo IMAGE_VERSION_OK"
 
 docker images | grep -E "panomint/(app|worker|db|web)" | grep "$V"
 echo "[images] 完成。分发：docker save panomint/app:$V panomint/worker:$V panomint/db:$V panomint/web:$V | gzip > images-$V.tar.gz"

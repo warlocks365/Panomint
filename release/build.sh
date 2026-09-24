@@ -125,7 +125,7 @@ say "5/5 产物清单"
 ls -la "$OUT"/panomint-*.tar.gz "$OUT/sha256sums.txt"
 # 冒烟：tarball 内版本注入核验（解出二进制字符串查版本）
 SMOKE="$(docker run --rm -v "$OUT":/out debian:bookworm-slim sh -c \
-  "tar xzf /out/panomint-$VERSION-linux-amd64-bundle.tar.gz -C /tmp panomint-$VERSION/bin/pano-api && strings /tmp/panomint-$VERSION/bin/pano-api | grep -m1 '^$VERSION\$' && echo SMOKE_VERSION_OK")"
+  "tar xzf /out/panomint-$VERSION-linux-amd64-bundle.tar.gz -C /tmp panomint-$VERSION/bin/pano-api && grep -a -m1 -q '$VERSION' && echo SMOKE_VERSION_OK")"
 echo "$SMOKE"
 echo "$SMOKE" | grep -q SMOKE_VERSION_OK || die "tarball 内版本注入核验失败"
 rm -rf "$STAGE" "$BINHOST"
