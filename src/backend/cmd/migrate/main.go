@@ -13,6 +13,7 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"panoalbum/internal/config"
+	"panoalbum/migrations"
 )
 
 func main() {
@@ -35,12 +36,16 @@ func main() {
 	if err := goose.SetDialect("postgres"); err != nil {
 		log.Fatal(err)
 	}
+	// 迁移源改为编译期嵌入（panoalbum/migrations）：pano-migrate 二进制从此
+	// **无需 migrations/ 目录随行**（裸机/集成包形态的关键），且与 cmd/api 的
+	// 启动自迁移读到的永远是同一批文件。相对路径参数 "." = 嵌入 FS 根。
+	goose.SetBaseFS(migrations.FS)
 
 	switch cmd {
 	case "up":
-		err = goose.Up(db, "migrations")
+		err = goose.Up(db, ".")
 	case "status":
-		err = goose.Status(db, "migrations")
+		err = goose.Status(db, ".")
 	case "reset":
 		// 仅开发环境：清库重建（drop schema public cascade）
 		if cfg.Env == "prod" {
@@ -48,7 +53,7 @@ func main() {
 		}
 		if _, err = db.Exec("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"); err == nil {
 			fmt.Println("schema 已清空，重新执行 up…")
-			err = goose.Up(db, "migrations")
+			err = goose.Up(db, ".")
 		}
 	default:
 		log.Fatalf("未知命令 %q（up|status|reset）", cmd)

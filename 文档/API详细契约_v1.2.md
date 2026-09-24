@@ -1,9 +1,21 @@
-# API 详细契约 (v1.7)
+# API 详细契约 (v1.8)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.7 ｜ 日期：2026-09-23\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.8 ｜ 日期：2026-09-24\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.8 变更说明（2026-09-24，v1.0.0 发布：首次安装引导 + 版本端点，Job000105/107）
+
+新增 §19 首次安装引导两端点与 `GET /version`。实现见 `internal/setup/setup.go`、`internal/version/version.go`：
+
+1. `GET /setup/status`（公开）：`{initialized: bool, version: string}`。`initialized` = users 表是否已有任何用户；查库失败 → 500（**fail-closed**：状态不明时绝不放行初始化动作）
+2. `POST /setup`（公开）：一次性创建首个 owner 账号。请求 `{email, password(8~128), display_name?(≤64，缺省「管理员」)}`；成功 201 `{id, email}`；系统已有用户 → 409 `SETUP_COMPLETED`「系统已完成初始化，请直接登录」（引导不再出现的后端权威闸门）；格式错 → 400 `BAD_REQUEST`
+3. 并发语义：检查与创建在同一事务内、先取 `pg_advisory_xact_lock` 固定键 —— 并发提交不可能双双通过（竞态由库层消除，不依赖"先查再改"）
+4. 审计：创建成功写 `setup.complete`（actor = 被创建者本人，detail 只记邮箱）
+5. `GET /version`（公开）：`{version, commit, build_date}` —— 发布产物由 `release/build.sh` 经 `-ldflags -X panoalbum/internal/version.*` 注入（`VERSION` 文件为唯一真源，规则见《版本管理规范.md》）；开发产物恒 `"dev"`
+6. 生产种子语义变更（衔接 §2 登录）：`cmd/api` 的管理员种子（`admin@pano.local`）**仅在非 prod 环境或显式设置 `ADMIN_PASSWORD` 时写入**；prod 全新部署的第一个账号由本向导创建
+7. 前端配套：`/setup` 公开路由 + 全局守卫（未初始化 → 全部导航重定向 `/setup`；已初始化 → `/setup` 重定向 `/login`）；nginx 反代新增两前缀（`setup` 进导航判别组、`version` 进纯 API 组）
 
 ## v1.7 变更说明（2026-09-23，Job000103「存储位置管理」）
 
@@ -862,6 +874,20 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 删除。仍有媒体引用 → 409 `LOCATION_IN_USE`；无引用物理删（引用行经 `ON DELETE SET NULL` 回默认存储根），成功 204；不存在 → 404。
 
 
+## 19. 首次安装引导与版本（v1.8，Job000105/107）
+
+### GET /setup/status
+
+公开，无鉴权。响应 `{ "initialized": true|false, "version": "v1.0.0" }`。`initialized=false` 时前端把全部导航重定向到 `/setup` 向导页。状态查询失败 → 500。
+
+### POST /setup
+
+公开，无鉴权；**仅系统内尚无任何用户时可用**（一次性）。请求 `{ "email", "password", "display_name"? }`（密码 8~128 位；显示名缺省「管理员」，首个账号固定 role=owner 不接受指定）。成功 201 `{ "id", "email" }`；已有用户 → 409 `SETUP_COMPLETED`；格式错 → 400 `BAD_REQUEST`。审计动作 `setup.complete`。
+
+### GET /version
+
+公开，无鉴权。响应 `{ "version": "1.0.0", "commit": "<short-sha>", "build_date": "<RFC3339>" }`；未注入版本信息的开发构建 `version` 恒为 `"dev"`。部署验收：`curl -s http://<host>/version` 应与发布版本一致。
+
 ---
 
-文档结束（API v1.7）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。
+文档结束（API v1.8）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。

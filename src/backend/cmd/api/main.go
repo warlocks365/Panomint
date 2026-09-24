@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"os"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 	"go.uber.org/zap"
 
 	"panoalbum/internal/albums"
@@ -32,10 +35,13 @@ import (
 	"panoalbum/internal/middleware"
 	"panoalbum/internal/queue"
 	"panoalbum/internal/search"
+	"panoalbum/internal/setup"
 	"panoalbum/internal/shares"
 	"panoalbum/internal/spaces"
 	"panoalbum/internal/tags"
 	"panoalbum/internal/transcode"
+	"panoalbum/internal/version"
+	"panoalbum/migrations"
 )
 
 func main() {
@@ -63,6 +69,17 @@ func main() {
 		log.Fatal("PG 连接池创建失败", zap.Error(err))
 	}
 	defer pool.Close()
+
+	// 启动自迁移（v1.0.0 发布形态"解压即起"的根基）：迁移经编译期嵌入执行，
+	// 三种发布形态（裸机/集成包/Docker）由此不再需要"先手工跑 migrate"这一步。
+	// goose up 幂等；失败即拒启动（fail-closed）——绝带着半成品 schema 接流量。
+	// AUTO_MIGRATE=off 仅供本地非常规排障。
+	if cfg.AutoMigrate {
+		if err := runMigrations(cfg.PGDSN); err != nil {
+			log.Fatal("数据库自动迁移失败", zap.Error(err))
+		}
+		log.Info("数据库迁移已就位（goose up，幂等）")
+	}
 
 	q := queue.New("sys", queue.Config{Addr: cfg.ValkeyAddr, Password: cfg.ValkeyPass})
 	defer q.Close()
@@ -95,19 +112,42 @@ func main() {
 	auditRec := audit.New(pool, log)
 	authH := &auth.Handler{Store: authStore, Secret: secret, Audit: auditRec}
 
-	// 种子管理员（开发默认 admin@pano.local / ADMIN_PASSWORD，生产必须经环境变量覆盖）
-	adminPwd := os.Getenv("ADMIN_PASSWORD")
-	if adminPwd == "" {
-		adminPwd = "pano-admin-dev-only"
-	}
-	if err := authStore.EnsureSeedAdmin(ctx, "admin@pano.local", adminPwd); err != nil {
-		log.Warn("管理员种子写入失败", zap.Error(err))
+	// 种子管理员：仅开发环境自动种（admin@pano.local / ADMIN_PASSWORD 或开发默认值）。
+	// 生产环境的第一个账号由首次安装向导创建（POST /setup，Job000107）——
+	// 若运维显式设置 ADMIN_PASSWORD，视为其明确选择"跳过向导、直接种子"，照常种。
+	if cfg.Env != config.EnvProd || os.Getenv("ADMIN_PASSWORD") != "" {
+		// 种子管理员（开发默认 admin@pano.local / ADMIN_PASSWORD，生产必须经环境变量覆盖）
+		adminPwd := os.Getenv("ADMIN_PASSWORD")
+		if adminPwd == "" {
+			adminPwd = "pano-admin-dev-only"
+		}
+		if err := authStore.EnsureSeedAdmin(ctx, "admin@pano.local", adminPwd); err != nil {
+			log.Warn("管理员种子写入失败", zap.Error(err))
+		}
 	}
 
 	// 公开端点
 	r.POST("/auth/login", authH.Login)
 	r.POST("/auth/refresh", authH.Refresh)
 	r.POST("/auth/logout", authH.Logout)
+
+	// ===== 版本与首次安装引导（Job000105/107）=====
+	// /version：构建版本三元组（发布产物注入 ldflags；开发产物恒 "dev"），
+	//   无鉴权 —— 它是部署验收与故障排查的第一现场信息，不含任何敏感数据。
+	// /setup/*：一次性初始化向导（未初始化时创建首个 owner；已初始化后 POST 恒 409）。
+	//   无鉴权（系统里还没有任何账号时无法鉴权）；
+	//   ⚠️ nginx 前缀同步：setup 在「导航判别组」（/setup 同时是前端路由），
+	//     version 在「纯 API 组」——漏配会拿到 index.html 假 200（docker/web/Dockerfile）。
+	r.GET("/version", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"version":    version.Version,
+			"commit":     version.Commit,
+			"build_date": version.BuildDate,
+		})
+	})
+	setupH := &setup.Handler{Store: &setup.PGStore{Pool: pool}, Audit: auditRec}
+	r.GET("/setup/status", setupH.Status)
+	r.POST("/setup", setupH.Create)
 
 	// ===== SSO/OIDC（Job000054，契约 v1.3 补录）=====
 	// 通用 OIDC（Keycloak/Authelia/任意标准 IdP），环境变量 SSO_OIDC_* 配置；
@@ -485,7 +525,8 @@ func main() {
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 
 	go func() {
-		log.Info("API 启动", zap.String("addr", srv.Addr), zap.String("env", cfg.Env))
+		log.Info("API 启动", zap.String("addr", srv.Addr), zap.String("env", cfg.Env),
+			zap.String("version", version.String()), zap.String("commit", version.Commit))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal("服务异常退出", zap.Error(err))
 		}
@@ -501,6 +542,21 @@ func main() {
 		log.Error("优雅停机失败", zap.Error(err))
 	}
 	log.Info("已停机")
+}
+
+// runMigrations 执行编译期嵌入的 goose 迁移（与 cmd/migrate 读同一批文件：
+// panoalbum/migrations.FS）。失败语义由调用方决定（这里 = 拒启动）。
+func runMigrations(dsn string) error {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := goose.SetDialect("postgres"); err != nil {
+		return err
+	}
+	goose.SetBaseFS(migrations.FS)
+	return goose.Up(db, ".")
 }
 
 // buildRecaller 构造 Stage 4 语义召回器，并顺带构造 Phase 4 零样本打标器。

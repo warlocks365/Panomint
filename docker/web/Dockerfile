@@ -59,7 +59,9 @@ server {
     # /map/search、/map/providers 冲突，故进本组而非纯 API 组
     # admin：Job000052 管理后台 —— 前端路由 /admin（AdminView）与 API 前缀 /admin/* 冲突，
     # 同样进本组；漏配的话浏览器打开 /admin 会拿到 API 的 401 JSON 而不是页面
-    location ~ ^/(search|albums|spaces|folders|people|tags|map|admin)(/|$) {
+    # setup：Job000107 首次安装向导 —— 前端路由 /setup（SetupView）与 API 前缀
+    # /setup/status、/setup 冲突，同型进本组；漏配则向导页拿不到后端状态（index.html 假 200）
+    location ~ ^/(search|albums|spaces|folders|people|tags|map|admin|setup)(/|$) {
         error_page 418 = @spa;
         recursive_error_pages on;
         if ($spa_nav) { return 418; }
@@ -81,7 +83,9 @@ server {
     # tags / map / admin 不在此列——它们同时是前端路由，已移入上面的导航判别组
     # dav：Job000055 WebDAV（PROPFIND/MKCOL/MOVE/LOCK 等扩展方法整体透传；Basic 认证不经 JWT，
     #   由后端自认证；漏配则 nginx 405 或落 SPA 回退）
-    location ~ ^/(auth|media|transcode|shares|public|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes|dav|storage)(/|$) {
+    # version：Job000105 构建版本三元组（无鉴权，部署验收/排障第一现场；纯 API 无前缀冲突）
+    # setup 不在此列——它同时是前端路由，已移入上面的导航判别组
+    location ~ ^/(auth|media|transcode|shares|public|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes|dav|storage|version)(/|$) {
         proxy_pass http://api:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

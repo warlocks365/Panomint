@@ -41,6 +41,10 @@ type Config struct {
 	// 显式置空字符串 = 不信任任何代理（ClientIP 退回 RemoteAddr）。
 	TrustedProxies []string
 	Env            string // dev|prod
+	// AutoMigrate 启动时自动执行 goose up（v1.0.0 发布形态"解压即起"的根基）。
+	// 默认开启；AUTO_MIGRATE=off/false/0/no 关闭（仅本地非常规排障用）。
+	// 迁移幂等，重复执行无副作用；失败即拒启动（fail-closed）。
+	AutoMigrate    bool
 	UploadDir      string // 上传媒体存储根（./data/media）
 	UploadTmp      string // 分块上传临时目录（./data/uploads）
 	HLSDir         string // HLS 输出根目录（./data/hls）
@@ -55,6 +59,20 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envOn 解析布尔型开关：默认 def；显式 off/false/0/no（大小写不敏感）为关，其余为开。
+// 语义取"显式关闭才关"：这类运维开关若按"只有 =true 才开"写，排障时传 1/yes 会静默不生效。
+func envOn(key string, def bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "off", "false", "0", "no":
+		return false
+	}
+	return true
 }
 
 // splitOrigins 解析逗号分隔的允许源。
@@ -86,6 +104,7 @@ func Load() (Config, error) {
 		CORSOrigins:    splitOrigins(env("CORS_ORIGINS", DefaultCORS)),
 		TrustedProxies: splitOrigins(env("TRUSTED_PROXIES", DefaultTrustedProxies)),
 		Env:            env("APP_ENV", "dev"),
+		AutoMigrate:    envOn("AUTO_MIGRATE", true),
 		UploadDir:      env("UPLOAD_DIR", "./data/media"),
 		UploadTmp:      env("UPLOAD_TMP", "./data/uploads"),
 		HLSDir:         env("HLS_DIR", "./data/hls"),

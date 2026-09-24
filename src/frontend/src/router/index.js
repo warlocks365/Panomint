@@ -1,12 +1,20 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getAccessToken } from '../utils/tokenStore'
 import { useAuthStore } from '../stores/auth'
+import { getSetupStatus } from '../api/setup'
 
 const routes = [
   {
     path: '/login',
     name: 'login',
     component: () => import('../views/LoginView.vue'),
+    meta: { public: true }
+  },
+  {
+    // Job000107 首次安装引导（一次性初始化向导）：未初始化时所有导航被守卫重定向到这里
+    path: '/setup',
+    name: 'setup',
+    component: () => import('../views/SetupView.vue'),
     meta: { public: true }
   },
   {
@@ -115,6 +123,20 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // 安装向导闸门（Job000107）：未初始化时全站只放行 /setup；已初始化后 /setup 也不再出现。
+  // 查询失败（null）时不拦 —— 可用性优先，SetupView 提交时后端仍会 fail-closed 裁决。
+  try {
+    const st = await getSetupStatus()
+    if (st && !st.initialized && to.name !== 'setup') {
+      return { name: 'setup' }
+    }
+    if (st && st.initialized && to.name === 'setup') {
+      return { name: 'login' }
+    }
+  } catch {
+    // 状态不可达：不阻塞导航
+  }
+
   if (!to.meta.public && !getAccessToken()) {
     return { name: 'login' }
   }
