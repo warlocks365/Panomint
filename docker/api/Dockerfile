@@ -19,6 +19,12 @@
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
 ENV GOPROXY=https://goproxy.cn,direct
+# 版本三元组注入（Job000105）：compose 开发/测试构建不传参 = 默认 dev（行为与引入前一致）；
+# 发布构建由 release/docker/build-images.sh 传 --build-arg 注入真实版本。
+ARG APP_VERSION=dev
+ARG APP_COMMIT=""
+ARG APP_BUILD_DATE=""
+ENV LDFLAGS="-X panoalbum/internal/version.Version=${APP_VERSION} -X panoalbum/internal/version.Commit=${APP_COMMIT} -X panoalbum/internal/version.BuildDate=${APP_BUILD_DATE}"
 # CGO 需要 C 工具链
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
@@ -32,18 +38,21 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 COPY src/backend/cmd ./cmd
 COPY src/backend/internal ./internal
+# 编译期嵌入的 goose 迁移（Job000107：api 启动自迁移 + pano-migrate 共用同一 FS）。
+# ⚠️ 漏拷 = 构建期即报 "package panoalbum/migrations is not in std"（2026-09-24 部署实测踩坑）
+COPY src/backend/migrations ./migrations
 # 挂载 Go 构建缓存：CGO 全量编译较慢（4 核 VM 上首次约 20 分钟），
 # 缓存后增量重建只需编译变更部分
 # phashgen 与 migrateplan 都是纯 Go，用 CGO_ENABLED=0 编译：不必等 C 工具链，
 # 产物也不依赖 libonnxruntime（pHash 只用标准库 image + golang.org/x/image）。
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -trimpath -o /out/api ./cmd/api \
- && CGO_ENABLED=1 go build -trimpath -o /out/embedgen ./cmd/embedgen \
- && CGO_ENABLED=1 go build -trimpath -o /out/taggen ./cmd/taggen \
- && CGO_ENABLED=1 go build -trimpath -o /out/facesgen ./cmd/facesgen \
- && CGO_ENABLED=0 go build -trimpath -o /out/migrateplan ./cmd/migrateplan \
- && CGO_ENABLED=0 go build -trimpath -o /out/phashgen ./cmd/phashgen
+    CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/api ./cmd/api \
+ && CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/embedgen ./cmd/embedgen \
+ && CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/taggen ./cmd/taggen \
+ && CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/facesgen ./cmd/facesgen \
+ && CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o /out/migrateplan ./cmd/migrateplan \
+ && CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o /out/phashgen ./cmd/phashgen
 
 # ---- 阶段 2：资产选定与校验（按目标架构挑 ONNX Runtime，并把"缺资产"变成可读错误）----
 # 为什么单独一个阶段，而不是直接在运行阶段 `COPY assets/lib/onnxruntime-linux-${ORT_ARCH}-…`：
