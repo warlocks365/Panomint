@@ -266,6 +266,13 @@ func (h *Handler) batchCopy(c *gin.Context, ids []string, userID, folder string,
 	return succeeded, errs
 }
 
+// copyStoredName 生成副本存储名：一次性随机前缀 + 源存储名，与 upload.ingest 的命名
+// 规则逐字对齐（upload.go: storedName = newUploadID() + "_" + meta.Filename）。
+// 提取为纯函数以便钉唯一性契约（E8：旧实现用源 id 作前缀，同源两次复制同 path 互覆）。
+func copyStoredName(srcFilename string) string {
+	return newUploadID() + "_" + srcFilename
+}
+
 // copyOne 复制一行媒体：DB 行拷贝（新 id/同 filename/新 path/目标目录）+ 磁盘文件字节拷贝。
 func (h *Handler) copyOne(ctx context.Context, id string, userID string, folder string, setFolder bool) (string, error) {
 	row, rel, err := h.Store.copySourceRow(ctx, id)
@@ -276,12 +283,12 @@ func (h *Handler) copyOne(ctx context.Context, id string, userID string, folder 
 	if setFolder {
 		dstFolder = folder
 	}
-	// 新存储路径：日期目录 + 新 id 前缀文件名（与 upload.ingest 同规则）
+	// 新存储路径：日期目录 + 一次性随机前缀文件名（与 upload.ingest 同规则，upload.go
+	// newUploadID()+"_"+Filename）。E8 教训：旧实现用源 id 作前缀，同一媒体复制两次产生
+	// 相同 path，第二次 os.Create 截断覆盖第一次的磁盘文件，两行记录共用一个文件，
+	// 删其一即损其二——随机前缀保证每次复制的 path 必然唯一（Job000114）。
 	dateDir := time.Now().Format("2006/01")
-	storedName := fmt.Sprintf("%s_%s", row.id, row.filename)
-	if storedName == "_"+row.filename {
-		storedName = row.id + "_copy"
-	}
+	storedName := copyStoredName(row.filename)
 	newRel := dateDir + "/" + storedName
 	srcAbs := filepath.Join(h.UploadDir, filepath.FromSlash(rel))
 	dstAbs := filepath.Join(h.UploadDir, filepath.FromSlash(newRel))
