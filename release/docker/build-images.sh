@@ -33,6 +33,18 @@ if [ ! -f src/frontend/dist/index.html ]; then
   echo "前端 dist 不存在，先构建：cd src/frontend && npm ci && npm run build" >&2
   exit 1
 fi
+# dist 新鲜度守卫（Job000110 教训）：v1.0.0 发布时把向导合入前的旧 dist COPY 进了 web
+# 镜像，用户端向导永久缺失只见到登录页。源码比 dist 新 → 拒绝静默使用旧产物。
+STALE=$(find src/frontend/src src/frontend/index.html src/frontend/vite.config.* \
+  -type f -newer src/frontend/dist/index.html 2>/dev/null | head -1)
+if [ -n "$STALE" ]; then
+  if [ "${SKIP_FRONTEND_BUILD:-0}" = "1" ]; then
+    echo "[images] ⚠️ dist 早于前端源码（如 $STALE）；SKIP_FRONTEND_BUILD=1 已强制继续，后果自负" >&2
+  else
+    echo "[images] dist 落后于前端源码（如 $STALE）→ 自动重建 dist ..." >&2
+    (cd src/frontend && npm ci && npm run build)
+  fi
+fi
 DOCKER_BUILDKIT=1 docker build -f docker/web/Dockerfile -t "panomint/web:$V" src/frontend
 
 echo "[images] 版本注入核验（app 镜像内二进制的版本串）"

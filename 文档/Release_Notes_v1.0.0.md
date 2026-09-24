@@ -103,9 +103,18 @@ x86_64 Linux（或 Docker 可用的 NAS）；最低 2C/4G/20G（不含媒体）�
 | panomint/app:1.0.0 | api + AI 工具（embedgen/taggen/facesgen/phashgen/migrate 等） |
 | panomint/worker:1.0.0 | 后台 worker（index/transcode，独立镜像） |
 | panomint/db:1.0.0 | PostgreSQL 16 + PostGIS + pgvector 预装 |
-| panomint/web:1.0.0 | nginx 前端 + API 同源反代（含全部路由前缀规则） |
+| panomint/web:1.0.0 | nginx 前端 + API 同源反代（**已缺陷，见下方勘误，请改用 1.0.1**） |
+| panomint/web:1.0.1 | web 修复版（唯一变更：前端产物重建，含初始化向导；其余镜像维持 1.0.0 不变） |
 
 离线分发：docker save 四个镜像 | gzip 打包，目标机 docker load 后 compose 直接可用。
+
+> **⚠️ 勘误（2026-09-24，Job000110）：web:1.0.0 镜像内前端产物为向导合入前的旧构建**——首次安装向导（/setup）缺失、路由守卫缺位，全新部署时浏览器只会看到登录页、无法创建管理员（后端 /setup/status 均正常，`docker exec` 验证 `initialized:false` 可确认未初始化）。**修复版 `web:1.0.1` 已发布**（digest `sha256:4ba897b14117…`，与 latest 同指；缺陷版 1.0.0 保留可追溯）。已部署 1.0.0 的用户只需升级 web 一个容器：
+>
+> ```bash
+> # compose 中 web 服务的 image 改为 warlocks/panomint-web:1.0.1（镜像加速版加 docker.1ms.run/ 前缀），然后：
+> docker compose pull web && docker compose up -d web
+> # 强刷浏览器（Ctrl+F5）后访问 http://IP:8088 → 应见「欢迎使用全景相册」初始化向导
+> ```
 
 ### 3.3 校验值
 
