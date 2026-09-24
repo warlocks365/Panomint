@@ -1,195 +1,99 @@
 # ============================================================================
-# Panomint 全景相册系统 · 群晖 DSM Container Manager 专用 compose 样例
-# ---------------------------------------------------------------------------
-# 相册应用镜像：warlocks/panomint-app:1.0.0（API + AI 工具链）
-#               warlocks/panomint-worker:1.0.0（索引/转码 worker）
-#               warlocks/panomint-db:1.0.0（PostgreSQL 16 + PostGIS + pgvector）
-#               warlocks/panomint-web:1.0.0（nginx 前端 + API 同源反代）
-# 均已发布在 Docker Hub（hub.docker.com/repositories/warlocks，公开仓库，可直接 pull）
-# 辅助镜像：   valkey/valkey:8.0-alpine（队列/缓存，Docker Hub 可直接拉取）
-# 适用环境：   DSM 7.2+ Container Manager · x86_64 机型 · 全新部署 v1.0.0
+# Panomint 全景相册系统 · 群晖 DSM Container Manager 部署编排（v1.0.0）
+# 镜像：warlocks/panomint-{app,worker,db,web}:1.0.0（Docker Hub 公开仓库）
+# 用法：Container Manager → 项目 → 新增 → 项目路径选 /volume1/docker/panomint → 粘贴本文件
+# 访问：http://群晖IP:8088 —— 首次访问进入初始化向导
+# 改值：仅 2 处【必填】——数据库口令（须与 7 条 PG_DSN 同值）、JWT 密钥
+# 路径：宿主路径按 DSM 默认存储池 /volume1 编写，多存储池请全局替换
 # ============================================================================
-#
-# 【部署前必读】
-# 1. 镜像获取二选一：
-#    ① 在线拉取（推荐）：Container Manager 构建项目时会自动拉取 warlocks/*:1.0.0，
-#       无需任何手动步骤（若 NAS 网络到 Docker Hub 慢，可在 Container Manager
-#       → 注册表 → 设置 中配置镜像加速地址）；
-#    ② 离线导入：把发布包 images-1.0.0.tar.gz 上传 NAS，SSH 执行：
-#       sudo docker load < images-1.0.0.tar.gz
-#       然后补 tag：for i in app worker db web; do sudo docker tag panomint/$i:1.0.0 warlocks/panomint-$i:1.0.0; done
-# 2. 全文搜索【必填】：只有 2 个值要改（数据库口令、JWT 密钥），但它们出现在
-#    2 个环境变量 + 7 条 PG_DSN 连接串共 9 行里——改成同一个值，保持 9 处一致。
-# 3. 本文件的宿主路径按 DSM 默认存储池 /volume1 编写；多盘或多存储池用户
-#    请统一改成实际路径（如 /volume2/photo）。
-#
-# ----------------------------------------------------------------------------
-# 三类路径速查（与下方各服务 volumes 一一对应）
-#   ① 媒体照片目录：/volume1/photo        → 容器内 /data/media
-#      （NAS 上已有的照片共享文件夹，相册直接索引管理其中的照片；
-#        新上传的照片也会写入这个共享文件夹，可用 File Station/SMB 直接看到）
-#   ② 数据库文件路径：/volume1/docker/panomint/db     → 容器内 PG 数据目录
-#                    /volume1/docker/panomint/valkey  → 容器内 Valkey 数据目录
-#      （容器重建/升级后数据不丢的根基；备份相册=停机后备份这两个目录 + 媒体目录）
-#   ③ 应用配置文件路径：/volume1/docker/panomint/  （即 Container Manager 的"项目路径"）
-#      本 compose 文件与其同目录存放即可；应用本体无独立配置文件，
-#      全部配置 = 本文件中的环境变量 + 数据库内设置（首次启动向导写入）。
-#      缩略图/转码件等派生数据在 /volume1/docker/panomint/data 下，不必手动干预。
-# ----------------------------------------------------------------------------
-#
-# 【PUID/PGID 权限说明（重要）】
-# 本工程镜像未内建 linuxserver 风格的 PUID/PGID 环境变量——即使写上也不会生效。
-# 等效做法是 compose 的 user 字段。默认（不写 user）容器内以 root 运行，
-# 对 DSM 绑定目录天然可读写，开箱即用；代价是新增文件的属主显示为 root。
-# 如需以普通用户运行（推荐熟悉后再收紧）：
-#   1. SSH 执行 id 查看（群晖第一个用户通常是 uid=1026、gid=100）；
-#   2. 取消下方各服务的 user 注释（注意：db 服务不要加 user，
-#      PG 首次初始化要求自行管理数据目录属主，强设会启动失败）；
-#   3. 一次性修正目录属主：
-#        sudo chown -R 1026:100 /volume1/docker/panomint
-#        sudo chown -R 1026:100 /volume1/photo   # 若库中已有 root 属主文件
-# ----------------------------------------------------------------------------
-
 name: panomint
 
 services:
 
-  # ==========================================================================
-  # 数据库 PostgreSQL 16（+PostGIS 空间扩展 + pgvector 向量扩展）
-  # 作用：存放相册全部元数据（照片信息/相册/标签/人物/用户）与 AI 向量
-  # ==========================================================================
+  # ---- 数据库（PostgreSQL 16 + PostGIS 3 + pgvector）----
   db:
-    image: warlocks/panomint-db:1.0.0       # 数据库镜像（发布 tag，勿用 latest）
-    container_name: panomint-db             # 容器名，Container Manager 列表中显示用
-    restart: unless-stopped                 # 策略：除手动停止外意外退出自动拉起（NAS 开机自启）
-    # user: "1026:100"                      # 【不要设置】PG 首次初始化需自行管理数据目录属主
+    image: warlocks/panomint-db:1.0.0
+    container_name: panomint-db
+    restart: unless-stopped
     environment:
-      TZ: Asia/Shanghai                     # 容器系统时区（可选值如 Asia/Shanghai、UTC）；
-                                            # 注：PG 内部存 UTC 时间，相册按浏览器时区显示，此处仅统一容器时间
-      POSTGRES_USER: pano                   # 数据库用户名（与应用侧 PG_DSN 保持一致，一般不改）
-      POSTGRES_PASSWORD: "【必填】改成强随机口令"  # 【必填】数据库口令；
-                                            # 生成方法：SSH 执行 openssl rand -hex 16
-                                            # 仅本机自用也要改强随机；口令含特殊字符保持双引号包裹
-      POSTGRES_DB: pano_album               # 初始数据库名（与应用侧 PG_DSN 保持一致，一般不改）
-      PGDATA: /var/lib/postgresql/data/pgdata   # PG 数据在卷内的实际子目录（官方镜像约定，不改）
+      TZ: Asia/Shanghai
+      POSTGRES_USER: pano
+      POSTGRES_PASSWORD: "请改成强随机口令"           # 【必填】生成：openssl rand -hex 16
+      POSTGRES_DB: pano_album
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      # ★★★ ② 数据库文件路径（持久化核心）★★★
-      # 左=宿主机路径（DSM 实际目录结构），右=容器内 PG 数据目录，一一对应不可改右侧
-      # 作用：容器删除重建、镜像升级后，相册数据完整保留
-      # ⚠️ 三个注意：
-      #   1. 首次启动该目录必须是【空目录】（PG 自动完成 initdb 初始化），
-      #      预建文件夹时不要放任何文件进去，否则初始化失败循环重启；
-      #   2. 平时不要手动改这个目录里的文件（损坏数据库无解）；
-      #   3. 备份相册：先停止项目，再整体备份本目录 + 媒体照片目录。
+      # 数据库持久化：容器重建/升级不丢数据；首次启动目录必须为空（PG 自动初始化）
       - /volume1/docker/panomint/db:/var/lib/postgresql/data
-    healthcheck:                            # 健康检查：就绪后才允许 api 启动（防连接失败）
+    healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 5s                          # 每 5 秒检查一次
-      timeout: 3s                           # 单次检查超时 3 秒
-      retries: 12                           # 连续 12 次失败才判不健康（给首次初始化留约 60 秒）
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
-  # ==========================================================================
-  # Valkey（Redis 的开放许可复刻）：任务队列 + 缓存 + 全局限流计数
-  # 作用：相册后台任务（缩略图/转码/AI 分析）的排队与状态
-  # ==========================================================================
+  # ---- 队列/缓存（Valkey，任务排队与状态）----
   valkey:
-    image: valkey/valkey:8.0-alpine         # 队列/缓存镜像（Docker Hub 可直接拉取，无需 docker load）
+    image: valkey/valkey:8.0-alpine
     container_name: panomint-valkey
     restart: unless-stopped
     command: ["valkey-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
-                                            # appendonly=yes：开启 AOF 持久化（重启不丢队列）
-                                            # noeviction：内存不足时拒绝写入而非悄悄丢任务
     environment:
       TZ: Asia/Shanghai
     volumes:
-      # ★★★ ② 数据库文件路径（Valkey 部分）★★★ 作用同上：队列持久化，重建不丢
-      - /volume1/docker/panomint/valkey:/data
+      - /volume1/docker/panomint/valkey:/data         # 队列持久化
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 12
 
-  # ==========================================================================
-  # API 主服务（Go）：REST 接口 + 上传管线 + 启动自动建库迁移（AUTO_MIGRATE）
-  # 作用：相册大脑；对外不直接暴露端口，统一由 web（nginx）反代
-  # ==========================================================================
+  # ---- API 主服务（启动自动建库迁移；仅经 web 反代访问，不直接映射端口）----
   api:
-    image: warlocks/panomint-app:1.0.0      # 应用主镜像（含 api/AI 工具二进制与模型资产）
+    image: warlocks/panomint-app:1.0.0
     container_name: panomint-api
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】权限收紧：取消注释前必读文件头 PUID/PGID 说明
     environment:
-      TZ: Asia/Shanghai                     # 对本服务真实生效（镜像内已装时区数据库）：
-                                            # 影响日志时间、任务调度时间
-      API_PORT: "8080"                      # 容器内监听端口（仅容器网络内部，勿直接映射到宿主机）
-      APP_ENV: prod                         # 生产模式：启用强校验（数据库/缓存/媒体路径缺省值将拒绝启动）
-      # 【连接串】组成：postgres://用户名:口令@数据库服务名:5432/库名
-      # 与上方 db 服务的 POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB 三处保持一致
-      PG_DSN: postgres://pano:【必填】改成强随机口令@db:5432/pano_album
-      VALKEY_ADDR: valkey:6379              # 队列地址（服务名:端口，容器网络内 DNS 解析，不改）
-      JWT_SECRET: "【必填】改成强随机值"     # 【必填】登录令牌签名密钥，泄露=任何人可伪造登录态；
-                                            # 生成方法：SSH 执行 openssl rand -hex 32（64 位十六进制）
-      MEDIA_ROOT: /data/media               # 媒体根路径：即照片目录在容器内的挂载点（与下方 volumes 对应）
-      UPLOAD_DIR: /data/media               # 新上传照片的落盘位置（与 MEDIA_ROOT 一致）
-      UPLOAD_TMP: /data/uploads             # 分块上传临时区（/data 已持久化，勿改）
-      HLS_DIR: /data/hls                    # 视频转码 HLS 输出目录（/data 已持久化，勿改）
-      THUMB_DIR: /data/thumbnails           # 缩略图输出目录（/data 已持久化，勿改）
-      TILE_CACHE_DIR: /tile-cache           # 地图瓦片缓存（对应下方 tile-cache 卷）
-      CORS_ORIGINS: ""                      # 跨域来源：同源部署（默认）留空；前后端分离才填如 https://x.example.com
-      TRUSTED_PROXIES: 172.16.0.0/12        # 信任反代网段（Docker 桥接默认段，一般不改；
-                                            # 若再加外部反向代理，用英文逗号追加其 IP 段）
-      AMAP_KEY: ""                          # 高德地图 Web 服务 Key（可选）：填后地图支持中文地名搜索；
-                                            # 留空=地名搜索降级，其余地图/定位功能不受影响
-      AMAP_SECRET: ""                       # 高德 Web 服务 paired Secret（与 AMAP_KEY 配套，无 Key 则留空）
-      EMBED_DEVICE: auto                    # 语义向量计算设备：auto（自动）| cpu | cuda；
-                                            # 群晖无 NVIDIA GPU，保持 auto 即自动走 CPU
+      TZ: Asia/Shanghai
+      API_PORT: "8080"
+      APP_ENV: prod
+      PG_DSN: postgres://pano:请改成强随机口令@db:5432/pano_album   # 【必填】口令与 db.POSTGRES_PASSWORD 同值
+      VALKEY_ADDR: valkey:6379
+      JWT_SECRET: "请用 openssl rand -hex 32 生成"    # 【必填】登录令牌签名密钥
+      MEDIA_ROOT: /data/media
+      UPLOAD_DIR: /data/media
+      UPLOAD_TMP: /data/uploads
+      HLS_DIR: /data/hls
+      THUMB_DIR: /data/thumbnails
+      TILE_CACHE_DIR: /tile-cache
+      CORS_ORIGINS: ""                                # 同源部署留空
+      TRUSTED_PROXIES: 172.16.0.0/12                  # Docker 桥接默认段，一般不改
+      AMAP_KEY: ""                                    # 高德 Web 服务 Key（可选，空=地名搜索降级）
+      AMAP_SECRET: ""
+      EMBED_DEVICE: auto                              # NAS 无 GPU 保持 auto（走 CPU）
     volumes:
-      # ★★★ ② 应用数据根（持久化）★★★
-      # 缩略图 / 上传临时区 / HLS 转码件都落在 /data 下，挂到宿主机后重建容器不丢
-      - /volume1/docker/panomint/data:/data
-      # ★★★ ① 媒体照片目录（核心映射）★★★
-      # 左=NAS 上现有照片共享文件夹（DSM 默认 /volume1/photo；在别的共享文件夹请改实际路径，
-      #   多存储池可能是 /volume2/...）；
-      # 右=容器内媒体路径 /data/media，【不可改】——应用按此路径索引与管理照片；
-      # 这是一条"嵌套挂载"：盖在 /data 之上，使 /data/media 显示的是你的照片库，
-      # 而 /data 下其余目录（thumbnails/uploads/hls）仍落在左侧 data 目录里。
-      # 效果：① 相册直接显示 NAS 已有照片；② 网页/手机新上传的照片也会出现在该共享文件夹，
-      #   可用 File Station / SMB / Synology Photos 直接浏览到同一批文件。
+      - /volume1/docker/panomint/data:/data           # 应用数据根（缩略图/HLS/上传临时区，持久化）
+      # ★媒体照片目录：左侧改成 NAS 上实际的照片文件夹（全部 7 处保持一致）
       - /volume1/photo:/data/media
-      # 地图瓦片缓存（非媒体、非数据库；可删，删后地图首次加载变慢重抓）
       - /volume1/docker/panomint/tile-cache:/tile-cache
     depends_on:
       db:
-        condition: service_healthy          # 等数据库就绪再启动（防启动竞态）
+        condition: service_healthy
       valkey:
         condition: service_healthy
 
-  # ==========================================================================
-  # AI 工作器×4：语义向量 / 自动打标 / 感知哈希去重 / 人脸检测分组
-  # 作用：后台持续消费任务队列，完成照片的 AI 分析（对应相册的语义搜索、
-  #       标签建议、重复照片清理、人物页签四个功能）
-  # 资源说明：四者常驻内存约 1~2GB（模型常驻）；内存紧张（≤4GB）的机型
-  #           可整段删除不需要的服务（如不用人脸识别删 faces-worker），
-  #           对应功能自动隐藏，不影响其余功能
-  # ==========================================================================
+  # ---- AI 工作器×4（语义搜索/自动打标/重复清理/人物识别；内存紧张可整段删除）----
   embed-worker:
     image: warlocks/panomint-app:1.0.0
     container_name: panomint-embed-worker
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】权限收紧（同 api 说明）
     entrypoint: ["/usr/local/bin/embedgen", "-mode", "watch", "-interval", "30"]
-                                            # 语义向量生成器：watch 模式每 30 秒扫一次新照片
     environment:
       TZ: Asia/Shanghai
-      PG_DSN: postgres://pano:【必填】改成强随机口令@db:5432/pano_album
+      PG_DSN: postgres://pano:请改成强随机口令@db:5432/pano_album
       THUMB_DIR: /data/thumbnails
-      EMBED_FAMILY: chinese-clip            # 中文语义搜索模型族（默认）；改 clip=英文更强，
-                                            # 但切换须全库重算向量，勿随意改
-      EMBED_MODEL_DIR: /opt/models/chinese-clip    # 镜像内模型路径（已打包，勿改）
-      EMBED_DEVICE: auto                    # 同 api 的 EMBED_DEVICE 说明；群晖保持 auto 走 CPU
+      EMBED_FAMILY: chinese-clip                      # 改 clip 须全库重算向量
+      EMBED_MODEL_DIR: /opt/models/chinese-clip
+      EMBED_DEVICE: auto
     volumes:
-      # 与 api 相同的两条挂载：数据根 + 媒体照片目录（worker 需读原图/写缩略图）
       - /volume1/docker/panomint/data:/data
       - /volume1/photo:/data/media
     depends_on:
@@ -200,12 +104,10 @@ services:
     image: warlocks/panomint-app:1.0.0
     container_name: panomint-tag-worker
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】
     entrypoint: ["/usr/local/bin/taggen", "-mode", "watch", "-interval", "60"]
-                                            # 零样本 AI 打标：每 60 秒扫一次，产出标签建议（人工确认后入库）
     environment:
       TZ: Asia/Shanghai
-      PG_DSN: postgres://pano:【必填】改成强随机口令@db:5432/pano_album
+      PG_DSN: postgres://pano:请改成强随机口令@db:5432/pano_album
       THUMB_DIR: /data/thumbnails
       EMBED_FAMILY: chinese-clip
       EMBED_MODEL_DIR: /opt/models/chinese-clip
@@ -221,12 +123,10 @@ services:
     image: warlocks/panomint-app:1.0.0
     container_name: panomint-phash-worker
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】
     entrypoint: ["/usr/local/bin/phashgen", "-mode", "watch", "-interval", "30"]
-                                            # 感知哈希：识别重复照片（工具箱"重复项目清理"的数据来源）
     environment:
       TZ: Asia/Shanghai
-      PG_DSN: postgres://pano:【必填】改成强随机口令@db:5432/pano_album
+      PG_DSN: postgres://pano:请改成强随机口令@db:5432/pano_album
       THUMB_DIR: /data/thumbnails
     volumes:
       - /volume1/docker/panomint/data:/data
@@ -239,19 +139,16 @@ services:
     image: warlocks/panomint-app:1.0.0
     container_name: panomint-faces-worker
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】
     entrypoint: ["/usr/local/bin/facesgen", "-mode", "watch", "-interval", "30"]
-                                            # 人脸检测与分组（YuNet+SFace，本地运行不外传）
     environment:
       TZ: Asia/Shanghai
-      PG_DSN: postgres://pano:【必填】改成强随机口令@db:5432/pano_album
+      PG_DSN: postgres://pano:请改成强随机口令@db:5432/pano_album
       THUMB_DIR: /data/thumbnails
-      MEDIA_ROOT: /data/media               # 人脸分析需读原图（与媒体挂载对应）
-      FACE_MODEL_DIR: /opt/models/faces     # 镜像内模型路径（勿改）
-      FACE_DEVICE: ""                       # 人脸计算设备：留空=CPU（群晖无 GPU，保持留空）；
-                                            # 有 NVIDIA GPU 可填 cuda
+      MEDIA_ROOT: /data/media
+      FACE_MODEL_DIR: /opt/models/faces
+      FACE_DEVICE: ""                                 # 留空=CPU；有 NVIDIA GPU 可填 cuda
       EMBED_DEVICE: auto
-      FACE_MERGE_SIM: "0.40"                # 人脸聚类合并阈值（0~1，越小越严格）；默认值即可
+      FACE_MERGE_SIM: "0.40"
     volumes:
       - /volume1/docker/panomint/data:/data
       - /volume1/photo:/data/media
@@ -259,28 +156,22 @@ services:
       db:
         condition: service_healthy
 
-  # ==========================================================================
-  # 重活工作器×2：媒体索引（缩略图生成）+ 视频转码（HLS 自适应多档）
-  # 作用：上传/入库后生成缩略图；把普通视频转 HLS 供网页/微信流畅播放
-  # 资源说明：转码是 CPU 密集型任务，x86 群晖软编为默认路径（设计如此）；
-  #           只存照片不用播放视频可整段删除 transcode-worker
-  # ==========================================================================
+  # ---- 重活工作器×2（缩略图索引 + 视频转 HLS；只存照片可删 transcode-worker）----
   index-worker:
-    image: warlocks/panomint-worker:1.0.0            # 专用 worker 镜像（含 ffmpeg/rclone 运行时）
+    image: warlocks/panomint-worker:1.0.0
     container_name: panomint-index-worker
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】
     environment:
       TZ: Asia/Shanghai
-      WORKER_KIND: index                    # 本容器角色：媒体索引（缩略图/元数据）
-      PG_DSN: postgres://pano:【必填】改成强随机口令@db:5432/pano_album
+      WORKER_KIND: index
+      PG_DSN: postgres://pano:请改成强随机口令@db:5432/pano_album
       VALKEY_ADDR: valkey:6379
-      FFMPEG_PATH: /usr/bin                 # 镜像内 ffmpeg 路径（勿改；本环境走 CPU 软编，无需显卡）
+      FFMPEG_PATH: /usr/bin
       THUMB_DIR: /data/thumbnails
       UPLOAD_DIR: /data/media
       HLS_DIR: /data/hls
       MEDIA_ROOT: /data/media
-      AMAP_KEY: ""                          # 与 api 同；留空=逆地理地名留空，坐标仍正常记录
+      AMAP_KEY: ""
       AMAP_SECRET: ""
     volumes:
       - /volume1/docker/panomint/data:/data
@@ -295,11 +186,10 @@ services:
     image: warlocks/panomint-worker:1.0.0
     container_name: panomint-transcode-worker
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】
     environment:
       TZ: Asia/Shanghai
-      WORKER_KIND: transcode                # 本容器角色：视频转 HLS 自适应多档
-      PG_DSN: postgres://pano:【必填】改成强随机口令@db:5432/pano_album
+      WORKER_KIND: transcode
+      PG_DSN: postgres://pano:请改成强随机口令@db:5432/pano_album
       VALKEY_ADDR: valkey:6379
       FFMPEG_PATH: /usr/bin
       THUMB_DIR: /data/thumbnails
@@ -315,21 +205,13 @@ services:
       valkey:
         condition: service_healthy
 
-  # ==========================================================================
-  # Web 入口（nginx）：托管前端页面 + 按规则反代 API（含微信 OG 卡片/HLS 等全部路由）
-  # 作用：整个相册对外的唯一入口
-  # ==========================================================================
+  # ---- Web 入口（nginx 前端 + API 反代；对外唯一端口）----
   web:
     image: warlocks/panomint-web:1.0.0
     container_name: panomint-web
     restart: unless-stopped
-    # user: "1026:100"                      # 【可选】（web 只读自身文件，一般不涉及权限问题）
     ports:
-      # ★★★ 端口映射 ★★★
-      # 左=宿主机端口（对外访问用，可改）；右=容器端口（nginx 固定监听 80，【不可改】）
-      # 默认 8088：浏览器访问 http://群晖IP:8088
-      # 若 8088 被占用（DSM 自身占 5000/5001，Web Station/反代可能占 80/443），
-      # 把左侧改成空闲端口即可，如 "8920:80"
+      # 左=宿主机端口（冲突可改，如 "8920:80"）；右=容器端口固定 80
       - "8088:80"
     depends_on:
       - api
