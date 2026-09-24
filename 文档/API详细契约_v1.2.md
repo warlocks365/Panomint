@@ -735,6 +735,18 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 
 索引/转码任务列表与进度（查 `index_jobs`/`transcode_jobs`）。
 
+### POST /admin/scan  （Job000113 / R1-b，需 `admin:system`）
+
+管理端扫描导入：把已在媒体库挂载目录里的照片/视频入库，**归属真实调用者**（告别种子 owner 语义）。
+
+请求：`{ "dir": "相对 MEDIA_ROOT 的子目录" }`（`""`/`"."` = 整个媒体根；也接受绝对路径，但解析后必须仍位于 MEDIA_ROOT 之内，越界即路径穿越拒绝）。
+
+响应：`202 Accepted { "job_id","status":"running","root","dir" }`——异步受理：先建 `index_jobs` 行立即返回，扫描本体后台 goroutine 执行。进度/终态轮询 `GET /admin/jobs/:id`（`status`：`running`→`done`|`failed`；`processed`/`total` 看进度）。
+
+错误：`400 INVALID_INPUT`（请求体非 JSON / dir 越界 / 目录不存在 / 非目录）、`401 UNAUTHORIZED`、`409 SCAN_RUNNING`（已有扫描进行中）、`500 INTERNAL`。
+
+> 面向场景：NAS bind mount 下照片已进挂载目录但系统"不识别"——此前唯一入库路径是 worker 镜像内的 `indexctl` CLI，api 无入口、启动也不扫 MEDIA_ROOT。配套 R1-c：`MEDIA_SCAN_ON_BOOT=1` 时 api 迁移完成即后台自扫 MEDIA_ROOT（归属种子 owner，哈希幂等）。两者都依赖 api 镜像内置 ffmpeg（视频元数据经 ffprobe 提取）。
+
 ---
 
 

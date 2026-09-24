@@ -144,3 +144,40 @@ func TestLoadParsesOriginsFromEnv(t *testing.T) {
 		t.Errorf("CORSOrigins 解析错误：%v（期望恰好 [http://a.test]）", c.CORSOrigins)
 	}
 }
+
+// TestScanOnBoot 启动自扫开关（R1-c）：默认关；显式 on/1 开；显式 off/0 关。
+// 语义与 envOn 一致——"显式关闭才关"，排障传 1/yes 也生效。
+func TestScanOnBoot(t *testing.T) {
+	load := func() Config {
+		t.Helper()
+		// 触发 prod 门禁的非关键因素都无关紧要（dev 环境）；只隔离被测变量。
+		t.Setenv("APP_ENV", "dev")
+		c, err := Load()
+		if err != nil {
+			t.Fatalf("Load 失败：%v", err)
+		}
+		return c
+	}
+
+	t.Run("默认关", func(t *testing.T) {
+		if c := load(); c.ScanOnBoot {
+			t.Errorf("未设 MEDIA_SCAN_ON_BOOT 时应默认关闭")
+		}
+	})
+	t.Run("显式开", func(t *testing.T) {
+		for _, v := range []string{"1", "on", "true", "yes"} {
+			t.Setenv("MEDIA_SCAN_ON_BOOT", v)
+			if c := load(); !c.ScanOnBoot {
+				t.Errorf("MEDIA_SCAN_ON_BOOT=%s 应开启", v)
+			}
+		}
+	})
+	t.Run("显式关", func(t *testing.T) {
+		for _, v := range []string{"0", "off", "false", "no"} {
+			t.Setenv("MEDIA_SCAN_ON_BOOT", v)
+			if c := load(); c.ScanOnBoot {
+				t.Errorf("MEDIA_SCAN_ON_BOOT=%s 应关闭", v)
+			}
+		}
+	})
+}

@@ -163,13 +163,50 @@ func (x *Indexer) ScanAs(ctx context.Context, root, ownerID string) (*ScanStats,
 // MEDIA_ROOT，否则按 folder_path 浏览/拼路径时全链错位（文件在 _imports/<id8>/x，
 // 库里记成 x——浏览按 /data/media/x 找文件找不到）。prefix 形态如 "_imports/<id8>"。
 func (x *Indexer) ScanAsPrefixed(ctx context.Context, root, ownerID, prefix string) (*ScanStats, error) {
-	// 建任务行（先 running，拿到总数后更新 total）
+	jobID, err := x.createScanJob(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	return x.scanWithJob(ctx, root, ownerID, prefix, jobID)
+}
+
+// ScanAsync 异步扫描（Job000113 管理端扫描导入 / R1-c 启动自扫共用）：先同步建
+// index_jobs 任务行并返回 jobID（调用方据此立即响应/记日志），扫描本体在后台
+// goroutine 执行，完成（含失败）经 onDone 回调通知（可为 nil）。入库归属 ownerID。
+//
+// 后台刻意改用 context.Background()：扫描是长任务，不得随触发它的 HTTP 请求取消
+// 而中断半截（进度/终态由 scanWithJob 写回 index_jobs，可断点观察）。
+func (x *Indexer) ScanAsync(ctx context.Context, root, ownerID string, onDone func(error)) (string, error) {
+	jobID, err := x.createScanJob(ctx, ownerID)
+	if err != nil {
+		return "", err
+	}
+	go func() {
+		_, serr := x.scanWithJob(context.Background(), root, ownerID, "", jobID)
+		if serr != nil {
+			log.Printf("异步扫描失败 job=%s root=%s: %v", jobID, root, serr)
+		}
+		if onDone != nil {
+			onDone(serr)
+		}
+	}()
+	return jobID, nil
+}
+
+// createScanJob 建 index_jobs 任务行（running），返回任务 id（建行的同步/异步路径共用）。
+func (x *Indexer) createScanJob(ctx context.Context, ownerID string) (string, error) {
 	var jobID string
 	if err := x.db.QueryRow(ctx,
 		`INSERT INTO index_jobs (kind, user_id, status, started_at)
 		 VALUES ('full', $1, 'running', now()) RETURNING id`, ownerID).Scan(&jobID); err != nil {
-		return nil, fmt.Errorf("建 index_jobs: %w", err)
+		return "", fmt.Errorf("建 index_jobs: %w", err)
 	}
+	return jobID, nil
+}
+
+// scanWithJob 在既有任务行上执行扫描：逐文件提取元数据、hash 去重入库、派发缩略图任务，
+// 并把 total/processed/终态写回 index_jobs。失败会把任务行置 failed（fail 闭包）。
+func (x *Indexer) scanWithJob(ctx context.Context, root, ownerID, prefix, jobID string) (*ScanStats, error) {
 	st := &ScanStats{JobID: jobID}
 
 	fail := func(err error) (*ScanStats, error) {

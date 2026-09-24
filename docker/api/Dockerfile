@@ -127,12 +127,16 @@ RUN --mount=type=bind,target=/ctx,ro \
 # ---- 阶段 3：运行时 ----
 # 工作目录保持 /：config 默认 ./data/* 解析到挂载卷 /data（健康检查 DiskCheckDir=./data）
 FROM debian:bookworm-slim
+# ffmpeg 供「管理端扫描导入 / 启动自扫」（Job000113 / R1-c）提取视频元数据用：
+# ExtractVideoMeta 经 ffprobe 读时长/编码/帧率/creation_time。纯 Go 的照片通道（goexif）
+# 不依赖它，但扫视频库（NAS 场景主体）必须有——缺了视频会被计为 failed 静默漏导。
+# 只有 subprocess 调用，无 GPL 链接污染（许可红线：ffmpeg 仅 subprocess）。
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
       sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources; \
     fi; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates tzdata; \
+    apt-get install -y --no-install-recommends ca-certificates tzdata ffmpeg; \
     rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/api /usr/local/bin/api
 COPY --from=build /out/embedgen /usr/local/bin/embedgen

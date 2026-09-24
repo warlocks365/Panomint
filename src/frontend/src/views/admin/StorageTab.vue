@@ -1,45 +1,53 @@
 <template>
-  <section class="card">
-    <div class="card-head">
-      <h2 class="card-title">网络挂载</h2>
-      <div class="head-actions">
-        <button class="btn btn--ghost" type="button" :disabled="loading" data-testid="storage-reload" @click="load()">
-          {{ loading ? '加载中…' : '刷新' }}
-        </button>
-        <button class="btn btn--primary" type="button" data-testid="storage-create" @click="openDialog('create')">
-          新建挂载
-        </button>
+  <!-- 单一根节点是硬约束：AdminView 用 v-show 切换页签，Vue3 的 v-show 落在多根
+       fragment 上会失效（指令无法挂到任何单一根），导致本页签内容穿透到所有页签
+       （2026-09-25 实测踩坑：存储页签在任意页签下都渲染）。所有子面板必须包在这一层里。 -->
+  <div class="storage-tab">
+    <!-- Job000113 / R1-b 扫描导入：把挂载目录里已有的照片/视频入库（归当前账号） -->
+    <StorageScanPanel />
+
+    <section class="card">
+      <div class="card-head">
+        <h2 class="card-title">网络挂载</h2>
+        <div class="head-actions">
+          <button class="btn btn--ghost" type="button" :disabled="loading" data-testid="storage-reload" @click="load()">
+            {{ loading ? '加载中…' : '刷新' }}
+          </button>
+          <button class="btn btn--primary" type="button" data-testid="storage-create" @click="openDialog('create')">
+            新建挂载
+          </button>
+        </div>
       </div>
-    </div>
 
-    <p class="hint">
-      挂载远程存储（WebDAV / SMB / NFS）并增量导入媒体库：worker 侧执行器自动对账，
-      导入文件落在媒体库 <code>_imports/&lt;挂载ID前8位&gt;/</code> 前缀下，哈希去重可反复同步。
-      凭据经服务端 AES-256-GCM 加密存储，界面不回显。
-    </p>
+      <p class="hint">
+        挂载远程存储（WebDAV / SMB / NFS）并增量导入媒体库：worker 侧执行器自动对账，
+        导入文件落在媒体库 <code>_imports/&lt;挂载ID前8位&gt;/</code> 前缀下，哈希去重可反复同步。
+        凭据经服务端 AES-256-GCM 加密存储，界面不回显。
+      </p>
 
-    <p v-if="err" class="msg msg--error" data-testid="storage-error">{{ err }}</p>
-    <p v-if="msg" class="msg msg--ok" data-testid="storage-msg">{{ msg }}</p>
-    <p v-if="forbidden" class="msg msg--error">当前账号缺少管理权限，无法管理挂载。</p>
+      <p v-if="err" class="msg msg--error" data-testid="storage-error">{{ err }}</p>
+      <p v-if="msg" class="msg msg--ok" data-testid="storage-msg">{{ msg }}</p>
+      <p v-if="forbidden" class="msg msg--error">当前账号缺少管理权限，无法管理挂载。</p>
 
-    <p v-if="!loading && !err && mounts.length === 0" class="muted-empty" data-testid="storage-empty">
-      暂无挂载
-    </p>
+      <p v-if="!loading && !err && mounts.length === 0" class="muted-empty" data-testid="storage-empty">
+        暂无挂载
+      </p>
 
-    <StorageMountList :mounts="mounts" @edit="openDialog('edit', $event)" @delete="remove" />
+      <StorageMountList :mounts="mounts" @edit="openDialog('edit', $event)" @delete="remove" />
 
-    <!-- 新建 / 编辑对话框（表单自持，提交成功上报 saved） -->
-    <StorageMountDialog
-      v-if="dialogMode"
-      :mode="dialogMode"
-      :editing="editing"
-      @close="closeDialog"
-      @saved="onSaved"
-    />
-  </section>
+      <!-- 新建 / 编辑对话框（表单自持，提交成功上报 saved） -->
+      <StorageMountDialog
+        v-if="dialogMode"
+        :mode="dialogMode"
+        :editing="editing"
+        @close="closeDialog"
+        @saved="onSaved"
+      />
+    </section>
 
-  <!-- Job000103 存储位置（命名物理存储根）管理：自持加载与 CRUD，面板内聚 -->
-  <StorageLocationPanel />
+    <!-- Job000103 存储位置（命名物理存储根）管理：自持加载与 CRUD，面板内聚 -->
+    <StorageLocationPanel />
+  </div>
 </template>
 
 <script setup>
@@ -55,6 +63,7 @@ import { deleteMount, listMounts } from '../../api/storage'
 import StorageMountList from './StorageMountList.vue'
 import StorageMountDialog from './StorageMountDialog.vue'
 import StorageLocationPanel from './StorageLocationPanel.vue'
+import StorageScanPanel from './StorageScanPanel.vue'
 
 const mounts = ref([])
 const loading = ref(false)
@@ -125,6 +134,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 页签根：三块面板（扫描导入/网络挂载/存储位置）纵向排布留缝 */
+.storage-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);

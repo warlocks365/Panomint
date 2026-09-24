@@ -31,6 +31,7 @@ import (
 	"panoalbum/internal/storage"
 	"panoalbum/internal/geo"
 	"panoalbum/internal/health"
+	"panoalbum/internal/index"
 	"panoalbum/internal/media"
 	"panoalbum/internal/middleware"
 	"panoalbum/internal/queue"
@@ -495,6 +496,32 @@ func main() {
 	// 契约 §12 的 `GET /admin/jobs/:id`（此前只是契约里的悬空引用，本轮补上实现）
 	authed.GET("/admin/jobs/:id", auth.RequirePerm(authStore, "admin:system"), auditH.GetJob)
 
+	// ===== Job000113 / R1-b 管理端扫描导入：POST /admin/scan =====
+	// NAS bind mount 场景"照片放进挂载目录却不识别"的产品级修复：管理员在界面上直接触发
+	// 扫描 MEDIA_ROOT 内的目录，入库归属**真实调用者**（彻底告别种子 owner 语义）。
+	// 异步执行——先建 index_jobs 行立即 202，后台 goroutine 扫；进度/终态轮询复用上方
+	// 既有 GET /admin/jobs/:id，不另起查询。权限 admin:system（系统级运维面，与 /admin/jobs
+	// 同级）；nginx 无需改动：/admin 已在 docker/web/Dockerfile 的「纯 API 组」正则内。
+	indexer := newIndexer(cfg, pool, mediaQ)
+	indexH := &index.Handler{Indexer: indexer, MediaRoot: cfg.MediaRoot}
+	authed.POST("/admin/scan", auth.RequirePerm(authStore, "admin:system"), indexH.Scan)
+
+	// ===== R1-c 启动可选自动扫描：MEDIA_SCAN_ON_BOOT（默认关）=====
+	// 面向"群晖/NAS 里已有大量历史照片、装完即想全量入库"的场景：api 迁移一完成就在
+	// 后台异步扫 MEDIA_ROOT（归属种子 owner，与历史目录导入语义一致；hash 幂等去重，
+	// 重复启动/与手动扫描重叠都不会脏库）。刻意不阻塞 /ready——扫库是长任务，
+	// 就绪探针只该反映"服务能不能接流量"。失败只记日志，绝不让进程退出。
+	if cfg.ScanOnBoot {
+		ownerID, err := index.EnsureSeedUser(context.Background(), pool)
+		if err != nil {
+			log.Warn("启动自扫：种子用户准备失败，跳过本次扫描", zap.Error(err))
+		} else if jobID, err := indexer.ScanAsync(context.Background(), cfg.MediaRoot, ownerID, nil); err != nil {
+			log.Warn("启动自扫：创建扫描任务失败", zap.Error(err))
+		} else {
+			log.Info("启动自动扫描已触发", zap.String("job_id", jobID), zap.String("media_root", cfg.MediaRoot))
+		}
+	}
+
 	h := &health.Handler{Pool: pool, Queue: q, DiskCheckDir: "./data"}
 	r.GET("/health", h.Live)
 	r.GET("/ready", h.Ready)
@@ -557,6 +584,15 @@ func runMigrations(dsn string) error {
 	}
 	goose.SetBaseFS(migrations.FS)
 	return goose.Up(db, ".")
+}
+
+// newIndexer 构造媒体索引器：配置 AMAP_KEY 时启用高德逆地理编码（入库自动填 place），
+// 否则降级不填。Geocoder 内部失败不阻塞入库，仅记日志（与 cmd/indexctl 同语义）。
+func newIndexer(cfg config.Config, db *pgxpool.Pool, q *queue.Queue) *index.Indexer {
+	if cfg.AmapKey == "" {
+		return index.New(db, q)
+	}
+	return index.NewWithGeocoder(db, q, &geo.AmapGeocoder{Key: cfg.AmapKey, Secret: cfg.AmapSecret, Pool: db})
 }
 
 // buildRecaller 构造 Stage 4 语义召回器，并顺带构造 Phase 4 零样本打标器。

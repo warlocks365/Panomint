@@ -52,6 +52,10 @@ type Config struct {
 	AmapKey        string // 高德逆地理编码 Key（空=不启用，入库时不自动填 place）
 	AmapSecret     string // 高德安全密钥（空=不带 sig 签名；Key 绑定安全密钥后必填）
 	TileCacheDir   string // 瓦片磁盘缓存目录（Job000009；空=不缓存，高频率拖动易触发高德 429 限流）
+	// ScanOnBoot 启动后异步扫描 MEDIA_ROOT（R1-c，默认关，MEDIA_SCAN_ON_BOOT=1/on 开启）。
+	// 面向 NAS bind mount 场景：照片已放进挂载目录却因"无任何入口触发扫描"而不识别。
+	// 开启后 api 迁移完成即后台扫描（归属种子 owner，hash 幂等），不阻塞 /ready。
+	ScanOnBoot bool
 }
 
 func env(key, def string) string {
@@ -112,6 +116,7 @@ func Load() (Config, error) {
 		AmapKey:        env("AMAP_KEY", ""),       // 空=不启用逆地理编码，入库时 place 留空
 		AmapSecret:     env("AMAP_SECRET", ""),    // 空=请求不带 sig 签名
 		TileCacheDir:   env("TILE_CACHE_DIR", ""), // 空=瓦片不缓存
+		ScanOnBoot:     envOn("MEDIA_SCAN_ON_BOOT", false), // 默认关：显式开启才启动自扫（R1-c）
 	}
 	if err := c.validate(); err != nil {
 		return Config{}, err

@@ -60,6 +60,14 @@ export function getJob(id) {
   return http.get(`/admin/jobs/${id}`).then((r) => r.data)
 }
 
+// ---- 扫描导入（admin:system，Job000113 / R1-b）----
+// POST /admin/scan ← {dir}（相对 MEDIA_ROOT；空=整个媒体根）→ 202 {job_id,status,root,dir}
+// 异步执行：先建 index_jobs 行立即受理，后台 goroutine 扫；进度/终态用上方 getJob(job_id) 轮询。
+// 入参越界（路径穿越）/目录不存在 → 400；已有扫描在跑 → 409 SCAN_RUNNING。
+export function scanImport(dir = '') {
+  return http.post('/admin/scan', { dir }).then((r) => r.data)
+}
+
 // ---- 地图配置（admin:system）----
 // GET /admin/map-config → {china_provider,china_tile_url,intl_provider,intl_tile_url,
 //                          china_api_key_state,china_api_key_source,updated_at}
