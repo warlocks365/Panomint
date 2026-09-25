@@ -4,9 +4,10 @@
 # 因此本工作流**不使用任何 secrets**（只需默认 GITHUB_TOKEN）。
 #
 # Job 一览：
-#   backend        —— go vet + CGO_ENABLED=0 go test ./...（全部单测；无需 ORT/模型，实测约 22s）
-#   backend-cgo    —— 取 ONNX Runtime 原生库后 CGO_ENABLED=1 go build ./cmd/api（验证 CGO 链路）
-#   frontend       —— npm ci && npm run build + scan_undef 未定义引用扫描
+#   backend           —— go vet + CGO_ENABLED=0 go test ./...（全部单测；无需 ORT/模型，实测约 22s）
+#   backend-cgo       —— 取 ONNX Runtime 原生库后 CGO_ENABLED=1 go build ./cmd/api（验证 CGO 链路）
+#   frontend          —— npm ci && npm run build + scan_undef 未定义引用扫描
+#   quality-gates     —— 四道仓库级守卫（P0 规则/前端组织/反代前缀/未定义标识符）
 #   nodeagent-matrix  —— 算力节点 agent 三平台交叉编译 smoke（Job000057）
 #   debugctl-matrix   —— 调试通道参考 agent 三平台交叉编译 smoke（Job000121）
 #
@@ -19,6 +20,14 @@ name: CI
 on:
   push:
     branches: [main]
+    # Job000122 治本：纯文档/记忆类推送不烧 CI（go vet/test、npm build 与文档零交互；
+    # 质量门含反代前缀等结构性守卫，故仍保留 scripts/ 变更触发——只豁免内容型路径）。
+    paths-ignore:
+      - 'README.md'
+      - 'overview.md'
+      - 'licenses.csv'
+      - '文档/**'
+      - '工作日志/**'
   pull_request:
   workflow_dispatch:
 
