@@ -1,9 +1,20 @@
-# API 详细契约 (v1.11)
+# API 详细契约 (v1.12)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.11 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.12 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.12 变更说明（2026-09-25，Job000123「账号扫描根目录分配 + 成员自助扫描」）
+
+背景：管理端扫描（`POST /admin/scan`）此前仅 `admin:system` 可用，普通成员想把挂载目录里已有的照片导入自己库无任何入口。本版把扫描能力开放给普通账号，但**边界不再是整个 MEDIA_ROOT**，而是管理员按账号分配的 `users.scan_root`（迁移 `00039`，`VARCHAR(512)` 可空）：
+
+1. **三态语义**：`NULL` = 未分配（成员侧 `POST /scan`、`GET /fs/tree`、`GET /jobs/:id` 一律 **403 `SCAN_ROOT_REQUIRED`**，fail-closed——「没有根目录」与「根目录就是媒体根」必须区分）；`""` = 已分配、根 = MEDIA_ROOT 本身；`"photos/trip"` = 已分配子目录
+2. 新增 `PUT /admin/users/:id/scan-root`（需 `admin:users`）：分配/取消。请求体 `{"scan_root": "相对 MEDIA_ROOT 目录"}`；`""` = 媒体根本身；显式 `null` = 取消分配；**字段缺失 → 400**（防误清空）。写入前校验：路径穿越拒绝、必须是**真实存在的物理目录**（非虚拟目录）、`_imports` 保留段（任意层级）拒绝；存储值为归一化斜杠路径。落审计 `admin.user.update`，`detail.scan_root` = 归一化路径或 `null`
+3. 新增 `GET /user/scan-root`（任意登录用户）：查自己的分配 `{assigned, scan_root}`——成员扫描面板挂载前置（`assigned=false` 直接引导，不发扫描请求）
+4. 新增成员三端点（均 authed + 读/写权限位）：`POST /scan`（同管理端异步语义，202 `{job_id,status,root,dir}`，入库归属调用者）、`GET /fs/tree`（目录树懒加载，`_imports` 不下发）、`GET /jobs/:id`（只查 `index_jobs` 且归属过滤写在 SQL——别人的任务 id 404 与「不存在」逐字节同形；`id` 非 UUID 先于 DB 查询 400）。越界/保留段一律 400 `INVALID_INPUT`
+5. 前端配套：管理后台用户页签「分配扫描根」列与目录树选择器（可选中媒体根本身、可清空=取消分配）；工具箱第 4 页签「扫描导入」成员面板（未分配引导/分配被收回回引导态，轮询 seq 守卫）
+6. nginx 第 2 组纯 API 前缀增 `scan|fs|jobs`（第 1 组导航判别前缀不变）
 
 ## v1.11 变更说明（2026-09-25，Job000120-r2「自动转码开关上收系统级」）
 
@@ -797,6 +808,42 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 错误：`400 INVALID_INPUT`（dir 越界=路径穿越 / 目录不存在 / 非目录——与 `POST /admin/scan` 同一 `resolveScanDir` 边界）、`401 UNAUTHORIZED`、`500 INTERNAL`（非权限类底层列举错误）。
 
 > 选中目录后的联动在前端完成：回填扫描输入框并自动触发 `POST /admin/scan`（扫描进行中则只回填不抢跑）。权限语义提示：进程以 root 运行时（CAP_DAC_OVERRIDE）chmod 权限位不构成无权限，锁定态只在非 root/降权部署（或 NFS root-squash）下出现——属部署形态差异，非缺陷。
+
+### PUT /admin/users/:id/scan-root  （Job000123，需 `admin:users`）
+
+为普通账号分配/取消扫描根目录（`users.scan_root`，详见文首 v1.12 变更说明三态语义）。管理端扫描入口（`POST /admin/scan`）本就不看 `scan_root`，owner/admin 不受本分配限制；本端点也不改角色/状态，不受自锁/最后 owner 守卫约束。
+
+请求：`{"scan_root": <string|null>}`——`""` = 媒体根本身；相对路径 = 该子目录；显式 `null` = 取消分配；**字段缺失 → 400**（与显式 null 区分，防误清空）。
+
+响应：`200 OK {"user": {...更新后用户全行（含 scan_root）}}`。错误：`400 INVALID_INPUT`（请求体非 JSON / 越界路径穿越 / 非真实存在物理目录 / 目录而非文件 / `_imports` 保留段）、`401 UNAUTHORIZED`、`404 USER_NOT_FOUND`、`500 INTERNAL`。审计：`admin.user.update`，`detail.scan_root` = 归一化路径或 `null`。
+
+### GET /user/scan-root  （Job000123，authed）
+
+任意登录用户查自己的扫描根分配：`200 {"assigned": bool, "scan_root": <string|null>}`——`assigned=false` 时 `scan_root` 恒 `null`；`assigned=true` 时 `""` = 媒体根本身，其余 = 相对路径。成员扫描面板挂载前先打本端点：未分配直接展示「联系管理员」引导，不发扫描请求。错误：`401 UNAUTHORIZED`、`500 INTERNAL`。
+
+### POST /scan  （Job000123，authed + 写权限）
+
+成员扫描导入：把**自己 scan_root 范围内**的目录入库，归属真实调用者。语义与 `POST /admin/scan` 同构（异步 202、同一 SCAN_RUNNING 互斥），差别仅在边界 = 调用者 `scan_root` 而非 MEDIA_ROOT。
+
+请求：`{"dir": "相对 scan_root 的子目录"}`（`""`/`"."` = 整个扫描根）。响应：`202 Accepted {"job_id","status":"running","root","dir"}`——`root` = scan_root 展示值（`"."` = 扫描根本身，与 `dir` 展示口径一致；成员响应不回显绝对路径）；`dir` = 相对 scan_root 的展示路径。进度/终态轮询 `GET /jobs/:id`。
+
+错误：`400 INVALID_INPUT`（dir 越界=路径穿越 / `_imports` 保留段任意层级 / 目录不存在 / 非目录）、`401 UNAUTHORIZED`、**`403 SCAN_ROOT_REQUIRED`（未分配扫描根）**、`409 SCAN_RUNNING`、`500 INTERNAL`。
+
+### GET /fs/tree  （Job000123，authed + 读权限）
+
+成员目录树选择器数据源：与 `GET /admin/fs/tree` 同构的懒加载单层列举，差别在边界与保留段过滤——根 = 调用者 `scan_root`；名为 `_imports` 的子目录**不下发**（保留区对成员不可见，树里不会出现）。
+
+请求：`?dir=<相对 scan_root 的目录>`（缺省/`"."` = 扫描根本身）。响应：`200 {"root","dir","unreadable","items":[{"name","rel","readable"}]}`（`root` = scan_root 展示值；`rel` 相对 scan_root）。`unreadable=true` / `readable=false` 锁定态语义与管理端一致。
+
+错误：`400 INVALID_INPUT`（dir 越界 / `_imports` 保留段——**先于存在性检查** / 目录不存在 / 非目录）、`401 UNAUTHORIZED`、**`403 SCAN_ROOT_REQUIRED`**、`500 INTERNAL`。
+
+### GET /jobs/:id  （Job000123，authed + 读权限）
+
+成员查**自己触发**的扫描任务进度/终态。只覆盖 `index_jobs`（成员触发的扫描只进这张表；`transcode_jobs` 是系统任务，成员无权按 id 窥探）。
+
+响应：`200 {"id","kind","status","total","processed","progress","started_at","finished_at","created_at"}`——`kind` = `full`（扫描任务）；`progress` = `processed/total`，`total` 缺失或为 0 时 `null`（「未知」≠「0%」）；`status`：`running`→`done`|`failed`。
+
+错误：`400 INVALID_INPUT`（id 非 UUID——格式校验**先于** DB 查询，防 PG 类型错误伪装成 500）、`401 UNAUTHORIZED`、**`403 SCAN_ROOT_REQUIRED`**、`404 JOB_NOT_FOUND`（任务不存在或不属于你——归属过滤 `user_id = 调用者` 写在 SQL 里，别人的 id 与「不存在」逐字节同形，不做存在性预言）。
 
 ---
 
