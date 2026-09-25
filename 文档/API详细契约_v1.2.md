@@ -1,9 +1,22 @@
-# API 详细契约 (v1.13)
+# API 详细契约 (v1.14)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.13 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.14 ｜ 日期：2026-09-26\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.14 变更说明（2026-09-26，Job000121「转码远程调试通道」全量落地 + Job000122 CI paths-ignore）
+
+背景：一次性、短寿命、全审计的远程排障通道。管理员在设置页开启 → 系统签发 WSS URL+密钥 → 参考 agent（`cmd/debugctl`）经白名单结构化命令操作转码控制面，**不提供任意 shell**。设计方案《转码远程调试功能设计方案_v1.0.md》（附录 A 六裁决全采纳）。e2e 全矩阵 69/69 ALL GREEN 后随 v1.4.0 发布。
+
+1. 新增 **§20 转码远程调试通道**：管理端点 4（status/enable/rotate/disable，全部 `admin:system`）+ WS 接入端点 1（无 JWT，Bearer 密钥认证，upgrade 前 9 步前置矩阵）+ 命令面白名单 10 命令。凭证明文仅在 enable/rotate 响应出现一次，库中只存 sha256 摘要；接入 URL 恒 `wss://`（明文 ws 被 426 拒绝，回退拼 ws:// 给的是必死链）
+2. 新表 `debug_channel`（迁移 `00041`，BOOLEAN PK 单行表惯用法）：`channel_id`(24 hex 公开标识)/`key_digest`(sha256 hex)/`created_by`/`expires_at`/`last_connect_at`/`last_connect_ip`（可空，查询列 COALESCE 兜空串）
+3. 失效四路并行：TTL 默认 24h（1/8/24/72 四档）+ 手动关闭 + rotate 旧钥即刻作废踢连（4004）+ 认证失败锁定（5 次/10 分钟锁 15 分钟）；到期由 reaper 巡检（`DEBUG_REAPER_INTERVAL` 秒，默认 300，compose 已透传 api 服务）踢连 4001 + 审计 `reason=expired`（审计主路径）；status 与握手第③步均过滤到期行（不可探测语义：未开启/已关闭/已过期一律 404 同形）
+4. 命令面 v1 三处收窄：`subscribe` 仅支持 `jobs:"*"`（任务 id 数组留 v2）；`job.cancel` 不覆盖 running（INVALID_STATE，终态后处置）；`job.log.tail` 返回**结构化档案**（任务行 + `detail->>'job_id'` 命中的最近审计事件 ≤500 条，无 follow）——产品无 per-job 日志文件，worker 输出在容器 stdout
+5. 失败锁定计数/锁键 `debug:fail:<ip>`/`debug:lock:<ip>`（**无前缀**）与握手桶 `rl:debug:hs:<ip>`（RateLimiter 自带 `rl:` 前缀）三形态并存，均与全站 60 令牌桶隔离；运维清理须 `*debug:*` 模式全量扫
+6. 审计八动作全落 `audit` 表（`target_type=debug_channel` 单查询收齐）：enable/disable(manual|expired)/rotate/connect/disconnect/cmd（每条命令）/auth_fail/locked；前端审计摘要复用既有 `GET /admin/audit?target_type=debug_channel&limit=8`，**零新增审计端点**
+7. nginx：docker/web 内嵌 conf 独立 `^/debug/` location（Upgrade/Connection 头 + 长读超时），第 2 组纯 API 正则增 `debug`——**不并入**第 1 组导航判别前缀（WS 与 SPA 回退语义冲突）
+8. 前端：设置页 `DebugSettingsCard`（权限门 `admin:system`，无权限不渲染整卡）+ 拆出 `DebugCredsPanel`（一次性凭据回显）/`DebugAuditList`（最近 8 条）；testid 系 `debug-toggle/debug-ttl/debug-url/debug-key/debug-copy/debug-status/debug-rotate/debug-off/debug-audit`
 
 ## v1.13 变更说明（2026-09-25，Job000124「播放时自动转码（实时转码）」+ 管理概览索引状态中文化）
 
@@ -1004,4 +1017,96 @@ v1.13 增 `auto: true` 自动触发分支（Job000124，归属/闸门/错误口�
 
 ---
 
-文档结束（API v1.8）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。
+## 20. 转码远程调试通道（v1.14，Job000121）
+
+**定位**：一次性、短寿命、全审计的远程排障通道——管理员开启 → 系统签发 URL+密钥 → agent 经 WSS 接入，对转码控制面执行白名单内结构化命令，**不提供任意 shell**。全局单通道单行表（第二个连接 409，换人走 rotate）。参考 agent：`cmd/debugctl`。
+
+### 数据模型（迁移 `00041_debug_channel.sql`）
+
+| 列 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | BOOLEAN PK DEFAULT true CHECK(id) | 单行表惯用法 |
+| `enabled` | BOOLEAN NOT NULL DEFAULT false | 开关态；disable=置 false 保留行（幂等 204） |
+| `channel_id` | TEXT NOT NULL UNIQUE | 24 hex 公开标识（入 URL） |
+| `key_digest` | TEXT NOT NULL UNIQUE | sha256(access_key) hex；明文永不入库 |
+| `created_by` | UUID → users(id) | 开启者 |
+| `created_at`/`expires_at` | TIMESTAMPTZ | TTL 跨度=档位 |
+| `last_connect_at`/`last_connect_ip` | TIMESTAMPTZ / TEXT 可空 | 最近接入信息；查询列 `COALESCE(last_connect_ip,'')` 兜空串 |
+
+### 管理端点（全部 `RequirePerm("admin:system")`，JWT 面）
+
+#### GET /admin/debug/status
+
+- 未开启（或已过期）：200 `{enabled:false, connected:false}`
+- 已开启：200 `{enabled:true, connected, channel_id, created_at, expires_at, last_connect_at?, last_connect_ip?}`——**无明钥**（密钥只在 enable/rotate 响应出现一次）
+
+#### POST /admin/debug/enable `{ttl_hours?}`
+
+- `ttl_hours ∈ {1,8,24,72}`，缺省 24；非法 → 400 `BAD_TTL`
+- 成功 201 `{url, key, expires_at}`（**key 唯一出口**）；`url` 恒 `wss://<host>/debug/channel/<channel_id>`
+- 已开启 → 409 `DEBUG_ALREADY_ENABLED`（不轮换在用密钥；防误轮换，换钥走 rotate）
+
+#### POST /admin/debug/rotate `{ttl_hours?}`
+
+- 未开启 → 409 `DEBUG_NOT_ENABLED`
+- 成功 200 `{url, key, expires_at}`；旧连接即刻被踢（关闭码 4004，reason「密钥已轮换」）
+- `ttl_hours` 缺省沿用原档位 span（created_at→expires_at），显式传则按新档位
+
+#### POST /admin/debug/disable → 204
+
+- 幂等：未开启也 204。由开启转关闭时踢活动连接（关闭码 4003）+ 审计 `reason=manual`
+
+### WS 接入端点（无 JWT，Bearer 密钥认证）
+
+`GET /debug/channel/:channel_id` → 升级 WSS。握手前置矩阵（按序，全部在 upgrade 前完成）：
+
+| 步 | 判定 | 响应 |
+| --- | --- | --- |
+| ① | channel_id 非 24 hex | 400 |
+| ② | 握手专用限流桶超限（fail-open） | 429 `DEBUG_RATE_LIMITED` |
+| ③ | 未开启 / 已关闭 / 已过期 | 404（三态同形，**不可探测**） |
+| ④ | 进程内 Hub 槽已占（单连接策略 Q3） | 409 `DEBUG_ALREADY_CONNECTED` |
+| ⑤ | 缺 `Authorization: Bearer <key>` | 401 `DEBUG_AUTH_REQUIRED` |
+| ⑥ | 失败锁定中（fail-open） | 429 `DEBUG_LOCKED` + 审计 `debug.locked` |
+| ⑦ | 密钥摘要比对失败 | 401 `DEBUG_AUTH_FAILED` + 失败计数；未开启/过期走 404 同形 |
+| ⑧ | 非 WSS（`DEBUG_ALLOW_INSECURE_WS` 未开且 `X-Forwarded-Proto`≠https；反代终结 TLS 后 `c.Request.TLS` 恒 nil，只看后者会误杀 WSS——须兼看前者） | 426 `DEBUG_TLS_REQUIRED` |
+| ⑨ | 通过 → upgrade + 登记槽位 + 审计 `debug.connect` | 101 |
+
+- 失败锁定：5 次 / 10 分钟（固定窗口，非滑动）→ 锁 15 分钟。计数/锁键 `debug:fail:<ip>`、`debug:lock:<ip>`（**无前缀**），握手桶键 `rl:debug:hs:<ip>`（RateLimiter 自带 `rl:` 前缀）——三形态并存，均与全站 60 令牌桶隔离；运维清理 valkey 调试残留须 `--pattern '*debug:*'` 全量扫并复扫核验
+- 关闭码：`4001`=通道到期（reaper）/ `4003`=管理员关闭 / `4004`=密钥轮换；正常关断与心跳（`DEBUG_WS_PING_INTERVAL` 秒，默认 30）由协议层承担
+
+**协议帧**（JSON 文本帧）：请求 `{"seq":N,"type":T,"data":{...}}`；应答 `{"seq":N,"type":"result"|"event"|"error","data":{...}}`。首消息必须 `hello`（否则 1003 断开）；`hello` 应答 `{"server":版本串,"proto_ver":1,"server_time":RFC3339}`。
+
+### 命令面（白名单 10 命令，v1 收窄三处）
+
+| 命令 | 载荷 | 应答 |
+| --- | --- | --- |
+| `ping` | — | `{server_time}` |
+| `snapshot` | — | `{jobs,queue,server_time}` 活动任务 + 队列深度（worker 心跳以 processing 深度代替说明） |
+| `queue.stats` | — | 队列统计 |
+| `subscribe` | `{"jobs":"*"}`（**v1 仅支持 "*"**，任务 id 数组留 v2，其他值 400 `INVALID_PARAMS`） | `{subscribed:"jobs"}` |
+| `unsubscribe` | — | `{unsubscribed:"jobs"}` |
+| `job.pause` / `job.resume` / `job.cancel` | `{"job_id":"<UUID>"}`（正则强校验，非 UUID 400 `INVALID_PARAMS`——防 PG 22P02 原文路径） | `{job_id,status}`；订阅中推送 `job.state` 事件 |
+| `job.log.tail` | `{"job_id":"<UUID>","lines"?}`（≤500，缺省 100） | `{job,audit_tail}` 结构化档案 |
+
+- `job.*` 错误口径：`JOB_NOT_FOUND`（不存在）/ `INVALID_STATE`（当前状态不允许；**cancel v1 不含 running**，请在终态后处置）/ `INTERNAL`（底层故障不回显原文）
+- `job.log.tail` 返回**结构化档案**而非日志流：任务行（`status/profile?/result_path?/created_at`）+ 该任务相关最近审计事件（`audit_log WHERE detail->>'job_id'=$1` 倒序 ≤500 条）——产品无 per-job 日志文件（worker 输出在容器 stdout）；不提供 follow
+- 每条命令落审计 `debug.cmd`（含 `cmd`/`job_id` 等白名单键）；未知命令 → `UNKNOWN_COMMAND`
+
+### 审计八动作（`target_type=debug_channel` 单查询收齐）
+
+`debug.enable` / `debug.disable`（detail `reason=manual|expired`）/ `debug.rotate`（`old_channel_fp`+`new_channel_fp`）/ `debug.connect` / `debug.disconnect` / `debug.cmd`（每条命令）/ `debug.auth_fail` / `debug.locked`。前端摘要：既有 `GET /admin/audit?target_type=debug_channel&limit=8`，**零新增审计端点**。detail 键名全走白名单（避开 `RedactDetail` 敏感子串）。
+
+### env 与部署集成
+
+| env | 默认 | 语义 |
+| --- | --- | --- |
+| `DEBUG_ALLOW_INSECURE_WS` | 关 | 仅开发：放行 ws:// 且仍限 127.0.0.1 回环来源 |
+| `DEBUG_REAPER_INTERVAL` | 300s | 到期巡检周期（compose 已透传 api 服务） |
+| `DEBUG_WS_PING_INTERVAL` | 30s | WS 心跳 |
+
+nginx：docker/web 内嵌 conf 独立 `^/debug/` location（Upgrade/Connection 头 + 长读超时），第 2 组纯 API 正则增 `debug`——**不并入**第 1 组（WS 与 SPA 回退语义冲突）。
+
+---
+
+文档结束（API v1.14）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。
