@@ -89,6 +89,17 @@ export function putMapConfig(patch) {
   return http.put('/admin/map-config', patch).then((r) => r.data)
 }
 
+// ---- 转码设置（admin:system，Job000120-r2：系统级自动 HLS 转码开关）----
+// GET /admin/transcode-config → {auto_transcode, updated_at?}（无配置行时缺省=开启）
+export function getTranscodeConfig() {
+  return http.get('/admin/transcode-config').then((r) => r.data)
+}
+
+// PUT /admin/transcode-config ← {auto_transcode: true|false} → 同 GET 视图（写审计）
+export function putTranscodeConfig(autoTranscode) {
+  return http.put('/admin/transcode-config', { auto_transcode: autoTranscode }).then((r) => r.data)
+}
+
 // ---- 权限体系增强（Job000067 / F1）----
 // GET /admin/perms → {perms:[{perm,label,category,description,orphan}]}
 export function listPermMeta() {

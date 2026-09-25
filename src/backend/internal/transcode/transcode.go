@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"panoalbum/internal/audit"
 	"panoalbum/internal/ffmpeg"
 	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
@@ -23,8 +24,9 @@ import (
 // Handler 转码端点。
 type Handler struct {
 	Pool   *pgxpool.Pool
-	Q      *queue.Queue // 转码队列（"transcode"，transcodectl worker 消费）
-	HLSDir string       // HLS 输出根目录（./data/hls）
+	Q      *queue.Queue    // 转码队列（"transcode"，transcodectl worker 消费）
+	HLSDir string          // HLS 输出根目录（./data/hls）
+	Audit  *audit.Recorder // 系统配置变更审计（PutConfig 用）；可为 nil（测试跳过）
 }
 
 // LadderForProfile 按档位名选 HLS 码率阶梯（1080p|2k|4k）。
@@ -146,19 +148,19 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		return
 	}
 
-	// Job000120 用户级「自动 HLS 转码」闸门：设置页关闭后，本账号经 API 发起的转码一律拒绝
-	// （播放器此时直接播放原始文件）。CLI 批量补排（transcodectl enqueue-videos）是管理员工具，
-	// 不走本端点、不受此开关约束——开关管的是「使用侧的自动/随手触发」，不是「管理侧的批量运维」。
-	// 缺行 = 默认开启（与 DDL DEFAULT true 一致），老账号行为不变。
-	var autoTC bool
-	if err := h.Pool.QueryRow(ctx,
-		`SELECT auto_transcode FROM user_ui_prefs WHERE user_id = $1`, c.GetString("user_id")).
-		Scan(&autoTC); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	// Job000120-r2 系统级「自动 HLS 转码」闸门（管理后台「转码」页签维护，全站生效）：
+	// 关闭后经 API 发起的转码一律拒绝（播放器此时直接播放原始文件）。
+	// CLI 批量补排（transcodectl enqueue-videos）是管理员工具，不走本端点、不受此开关约束——
+	// 开关管的是「使用侧的自动/随手触发」，不是「管理侧的批量运维」。
+	// 无配置行 = 默认开启（GetSystemAutoTranscode 的 DefaultAutoTranscode），存量部署行为不变；
+	// 查询出错 fail-closed 500——拒绝服务也不在无把握时放行转码。
+	autoTC, err := GetSystemAutoTranscode(ctx, h.Pool)
+	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
 		return
 	}
 	if !autoTC {
-		errJSON(c, http.StatusConflict, "TRANSCODE_DISABLED", "已关闭自动转码，可在设置页重新开启")
+		errJSON(c, http.StatusConflict, "TRANSCODE_DISABLED", "管理员已关闭自动转码，请联系管理员开启")
 		return
 	}
 
@@ -170,6 +172,56 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID})
+}
+
+// GetConfig GET /transcode/config：系统级转码开关的**只读**视图。
+//
+// 任何登录用户可读（挂在 authed 组）：播放器加载视频前要预判开关姿态
+// （关闭时如实提示、不发起注定 409 的转码请求）。该值不是机密——行为影响全站 UX，
+// 保密没有意义；写权限由 /admin/transcode-config 的 admin:system 单独把守。
+func (h *Handler) GetConfig(c *gin.Context) {
+	v, err := GetSystemConfig(c.Request.Context(), h.Pool)
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	c.JSON(http.StatusOK, v)
+}
+
+// PutConfig PUT /admin/transcode-config：系统级开关写入（admin:system，路由层校验）。
+// 与地图配置（ActionSettingsPatch/"map-config"）同一审计动作与目标类型，target 区分实例。
+func (h *Handler) PutConfig(c *gin.Context) {
+	var body struct {
+		AutoTranscode *bool `json:"auto_transcode"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.AutoTranscode == nil {
+		errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需含 auto_transcode（true|false）")
+		return
+	}
+	if err := PutSystemAutoTranscode(c.Request.Context(), h.Pool, *body.AutoTranscode); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "保存失败", err)
+		return
+	}
+	h.record(c, map[string]any{"auto_transcode": *body.AutoTranscode})
+	v, err := GetSystemConfig(c.Request.Context(), h.Pool)
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	c.JSON(http.StatusOK, v)
+}
+
+// record 写一条系统配置审计（尽力而为；Audit 为 nil 时跳过——与 geo.Handler.record 同语义）。
+func (h *Handler) record(c *gin.Context, detail map[string]any) {
+	if h.Audit == nil {
+		return
+	}
+	e := audit.FromGin(c)
+	e.Action = audit.ActionSettingsPatch
+	e.TargetType = audit.TargetSetting
+	e.TargetID = "transcode-config"
+	e.Detail = detail
+	h.Audit.Record(c.Request.Context(), e)
 }
 
 // writeJobLookupError 把 JobStatus 的查询失败映射为响应。

@@ -261,10 +261,11 @@ func main() {
 	authed.PATCH("/storage/mounts/:id", permWrite, storageH.Patch)
 	authed.DELETE("/storage/mounts/:id", permWrite, storageH.Delete)
 	authed.POST("/storage/mounts/:id/test", permWrite, storageH.Test)
-	transH := &transcode.Handler{Pool: pool, Q: transQ, HLSDir: cfg.HLSDir}
+	transH := &transcode.Handler{Pool: pool, Q: transQ, HLSDir: cfg.HLSDir, Audit: auditRec}
 	authed.POST("/transcode/job", permWrite, transH.CreateJob)
 	authed.GET("/transcode/job/:id", permRead, transH.JobStatus)
 	authed.GET("/transcode/hls/:id/*file", permRead, transH.ServeHLS)
+	authed.GET("/transcode/config", permRead, transH.GetConfig) // 系统级开关只读视图（播放器预判用，Job000120-r2）
 
 	// Stage 1 相册 + 评论（读 media:read；写 album:write，归属校验在 handler 内）
 	albumsH := &albums.Handler{Store: &albums.Store{Pool: pool}}
@@ -346,6 +347,8 @@ func main() {
 	authed.POST("/user/app-password/clear", authH.AppPasswordClear)
 	authed.GET("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.GetMapConfig)
 	authed.PUT("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.PutMapConfig)
+	authed.GET("/admin/transcode-config", auth.RequirePerm(authStore, "admin:system"), transH.GetConfig)
+	authed.PUT("/admin/transcode-config", auth.RequirePerm(authStore, "admin:system"), transH.PutConfig)
 
 	// 契约 §7：模糊地理搜索 + 可用底图（读 media:read）。
 	// ⚠️ 该端点会打上游（中国走高德 / 国际走 Nominatim）并按 q 落 geo_cache ——

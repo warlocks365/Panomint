@@ -58,16 +58,17 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
     pollFailCount = 0
 
     try {
-      const [d, p, prefs] = await Promise.all([
+      const [d, p, cfg] = await Promise.all([
         http.get(`/media/${mediaId.value}`),
         http.get(`/media/${mediaId.value}/360`),
-        // 开关每次播放现取（设置页改完回来即生效；失败按开启处理，宁可提示转码也不误锁播放）
-        http.get('/user/ui-prefs').catch(() => null)
+        // 系统级开关每次播放现取（管理后台改完全站即生效；失败按开启处理，
+        // 宁可提示转码也不误锁播放）。Job000120-r2：从 /user/ui-prefs 上收为 /transcode/config。
+        http.get('/transcode/config').catch(() => null)
       ])
       if (seq !== loadSeq) return // 已切到新媒体：旧响应不得落地（其 blob 可能已被 cleanup revoke）
       detail.value = d.data
       pano.value = p.data
-      transcodeDisabled.value = !!prefs && prefs.data && prefs.data.auto_transcode === false
+      transcodeDisabled.value = !!cfg && cfg.data && cfg.data.auto_transcode === false
 
       if (p.data.is_360) {
         // 360 媒体：直接全景播放（照片贴球面 / 视频走 HLS），无「普通播放器 → 点按钮」两步

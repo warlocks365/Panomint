@@ -61,13 +61,10 @@ type UIPrefs struct {
 	MapMarkerMode      string `json:"map_marker_mode"`
 	// Job000101：空间页视图模式——false=时间轴平铺（默认）/true=按相册分组。
 	SpacesGroupByAlbum bool `json:"spaces_group_by_album"`
-	// Job000120：自动 HLS 转码开关——nil（PUT 缺省）= 保留现值（keep-on-absent，
-	// 旧客户端不带此字段不致被清回默认）；显式 true/false 才写入。
-	// GET 恒返回非 nil（默认 true = 保持存量行为）。
-	AutoTranscode *bool `json:"auto_transcode"`
+	// 注：「自动 HLS 转码」曾是用户级偏好（Job000120），用户裁决（2026-09-25）上收为
+	// 系统级开关（system_transcode_config，internal/transcode/sysconfig.go），
+	// 本结构不再承载该键——旧客户端 PUT 仍带它时按未知字段丢弃，不会报错。
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 // DefaultUIPrefs 未设置时返回的默认值（与 DDL 默认值一致）。
 func DefaultUIPrefs() UIPrefs {
@@ -76,7 +73,6 @@ func DefaultUIPrefs() UIPrefs {
 		MapFilterSide:      filterLeft,
 		MapDefaultProvider: providerAuto,
 		MapMarkerMode:      markerIcon,
-		AutoTranscode:      boolPtr(true),
 	}
 }
 
@@ -108,11 +104,6 @@ func NormalizeUIPrefs(in UIPrefs) (UIPrefs, error) {
 	out.MapFilterCollapsed = in.MapFilterCollapsed
 	// 布尔无非法值空间（缺失= false = 默认平铺），原样透传即可。
 	out.SpacesGroupByAlbum = in.SpacesGroupByAlbum
-	// Job000120：auto_transcode 原样透传（nil 保持 nil = keep-on-absent 交给
-	// PutUIPrefs 的 COALESCE 落库）。**不得**在此回落默认 true——Put 前 Normalize
-	// 会把 nil 洗成 *true，keep-on-absent 即失效（部署验证第一轮 8/11 逮住的本缺陷）。
-	// 「缺省=开启」只由两处负责：DefaultUIPrefs（GET 无行）与 DDL DEFAULT true（INSERT）。
-	out.AutoTranscode = in.AutoTranscode
 
 	if v := strings.ToLower(strings.TrimSpace(in.MapDefaultProvider)); v != "" {
 		if v != providerAuto && v != providerAmap && v != providerOSM {
@@ -131,11 +122,11 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 	out := DefaultUIPrefs()
 	var slider, side, provider, marker string
 	var zoom *int
-	var collapsed, spacesGroup, autoTC bool
+	var collapsed, spacesGroup bool
 	err := s.Pool.QueryRow(ctx, `
 		SELECT map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
-		       map_filter_collapsed, map_marker_mode, spaces_group_by_album, auto_transcode
-		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom, &collapsed, &marker, &spacesGroup, &autoTC)
+		       map_filter_collapsed, map_marker_mode, spaces_group_by_album
+		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom, &collapsed, &marker, &spacesGroup)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
@@ -149,7 +140,6 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 		MapDefaultProvider: provider, MapDefaultZoom: zoom,
 		MapFilterCollapsed: collapsed, MapMarkerMode: marker,
 		SpacesGroupByAlbum: spacesGroup,
-		AutoTranscode:      boolPtr(autoTC),
 	})
 	if nerr != nil {
 		return DefaultUIPrefs(), nil
@@ -158,13 +148,11 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 }
 
 // PutUIPrefs 覆盖写入（upsert）当前用户 UI 偏好。入参应已 Normalize。
-// auto_transcode 例外地采用 keep-on-absent：NULL 时 INSERT 落默认 true、
-// UPDATE 保留现值——旧客户端（不带此字段）整行 PUT 不会把用户已关的开关清回默认。
 func (s *MediaStore) PutUIPrefs(ctx context.Context, userID string, p UIPrefs) error {
 	_, err := s.Pool.Exec(ctx, `
 		INSERT INTO user_ui_prefs (user_id, map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
-		                           map_filter_collapsed, map_marker_mode, spaces_group_by_album, auto_transcode, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, true), now())
+		                           map_filter_collapsed, map_marker_mode, spaces_group_by_album, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			map_slider_pos       = EXCLUDED.map_slider_pos,
 			map_filter_side      = EXCLUDED.map_filter_side,
@@ -173,9 +161,8 @@ func (s *MediaStore) PutUIPrefs(ctx context.Context, userID string, p UIPrefs) e
 			map_filter_collapsed = EXCLUDED.map_filter_collapsed,
 			map_marker_mode      = EXCLUDED.map_marker_mode,
 			spaces_group_by_album = EXCLUDED.spaces_group_by_album,
-			auto_transcode       = COALESCE($9, user_ui_prefs.auto_transcode),
 			updated_at           = now()`,
 		userID, p.MapSliderPos, p.MapFilterSide, p.MapDefaultProvider, p.MapDefaultZoom,
-		p.MapFilterCollapsed, p.MapMarkerMode, p.SpacesGroupByAlbum, p.AutoTranscode)
+		p.MapFilterCollapsed, p.MapMarkerMode, p.SpacesGroupByAlbum)
 	return err
 }
