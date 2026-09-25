@@ -63,6 +63,9 @@
     <!-- 版本信息（Job000117）：当前版本 + 历史更新说明 -->
     <VersionCard />
 
+    <!-- 转码远程调试（Job000121）：无 admin:system 权限时整卡不渲染（与服务端同一把锁） -->
+    <DebugSettingsCard />
+
     <!-- 操作手册（Job000119）：应用内帮助，使用方法 + 原理深入 -->
     <section class="card">
       <h2 class="card-title">帮助与操作手册</h2>
@@ -84,6 +87,7 @@ import { useAuthStore, errMessage, errCode } from '../stores/auth'
 import MfaSettingsCard from './settings/MfaSettingsCard.vue'
 import AppPasswordCard from './settings/AppPasswordCard.vue'
 import VersionCard from './settings/VersionCard.vue'
+import DebugSettingsCard from './settings/DebugSettingsCard.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
