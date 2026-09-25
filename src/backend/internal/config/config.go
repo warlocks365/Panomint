@@ -56,6 +56,12 @@ type Config struct {
 	// 面向 NAS bind mount 场景：照片已放进挂载目录却因"无任何入口触发扫描"而不识别。
 	// 开启后 api 迁移完成即后台扫描（归属种子 owner，hash 幂等），不阻塞 /ready。
 	ScanOnBoot bool
+	// DebugAllowInsecureWS 允许调试通道的 WS 握手在**非 TLS** 回环来源下进行（Job000121，
+	// DEBUG_ALLOW_INSECURE_WS=1/on 开启，默认关）。WS 握手前置矩阵第 8 步的 TLS 闸门
+	// 仅放行 wss://；开启后放行 ws://，但**仍限回环来源**（127.0.0.1/::1），
+	// 仅供本机/容器内 curl 级排障，绝不面向任何网络来源放开。
+	// ⚠️ 属开发期逃生口：compose 默认不注入此 env（见设计 §10.4）。
+	DebugAllowInsecureWS bool
 }
 
 func env(key, def string) string {
@@ -117,6 +123,7 @@ func Load() (Config, error) {
 		AmapSecret:     env("AMAP_SECRET", ""),    // 空=请求不带 sig 签名
 		TileCacheDir:   env("TILE_CACHE_DIR", ""), // 空=瓦片不缓存
 		ScanOnBoot:     envOn("MEDIA_SCAN_ON_BOOT", false), // 默认关：显式开启才启动自扫（R1-c）
+		DebugAllowInsecureWS: envOn("DEBUG_ALLOW_INSECURE_WS", false), // Job000121：默认关，仍限回环来源
 	}
 	if err := c.validate(); err != nil {
 		return Config{}, err

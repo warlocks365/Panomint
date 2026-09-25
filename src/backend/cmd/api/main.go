@@ -25,6 +25,7 @@ import (
 	"panoalbum/internal/auth"
 	"panoalbum/internal/compute"
 	"panoalbum/internal/config"
+	"panoalbum/internal/debug"
 	"panoalbum/internal/embed"
 	"panoalbum/internal/faces"
 	"panoalbum/internal/folders"
@@ -349,6 +350,31 @@ func main() {
 	authed.PUT("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.PutMapConfig)
 	authed.GET("/admin/transcode-config", auth.RequirePerm(authStore, "admin:system"), transH.GetConfig)
 	authed.PUT("/admin/transcode-config", auth.RequirePerm(authStore, "admin:system"), transH.PutConfig)
+
+	// ===== Job000121 转码远程调试通道（一次性、短寿命、全审计的远程排障通道）=====
+	// 管理面四端点（admin:system，与 /admin/transcode-config 同权限位）；
+	// 接入面 /debug/channel/:channel_id 无 JWT——密钥认证在 upgrade 前置矩阵内
+	// （设计 §5.2：400 限流 404 槽占 409 无钥 401 锁定 429 认证 401 TLS 426）。
+	// ⚠️ nginx 同步：`debug` 须加入 docker/web/Dockerfile 第 2 组纯 API 正则
+	// + Upgrade/Connection 头 + proxy_read_timeout（D1 部署步，坑位 20 同款）。
+	// 凭据模型：channel_id 不敏感 + access_key 仅 enable/rotate 响应一次；
+	// 库中只存 sha256 摘要；WS 命令面 = 8 类白名单，无 shell/文件/SQL 通路。
+	debugH := &debug.Handler{
+		Pool:            pool,
+		Store:           &debug.Store{Pool: pool},
+		Audit:           auditRec,
+		Hub:             debug.NewHub(),
+		Locker:          &debug.FailLocker{Q: q},
+		RL:              q.NewRateLimiter(),
+		TransQ:          transQ,
+		AllowInsecureWS: cfg.DebugAllowInsecureWS, // 默认关；仅开发，且仍限回环来源
+	}
+	authed.GET("/admin/debug/status", auth.RequirePerm(authStore, "admin:system"), debugH.Status)
+	authed.POST("/admin/debug/enable", auth.RequirePerm(authStore, "admin:system"), debugH.Enable)
+	authed.POST("/admin/debug/rotate", auth.RequirePerm(authStore, "admin:system"), debugH.Rotate)
+	authed.POST("/admin/debug/disable", auth.RequirePerm(authStore, "admin:system"), debugH.Disable)
+	r.GET("/debug/channel/:channel_id", debugH.Channel) // 无 JWT：Bearer 密钥认证
+	go debugH.StartReaper(ctx)                          // 到期巡检：踢连 4001 + 审计
 
 	// 契约 §7：模糊地理搜索 + 可用底图（读 media:read）。
 	// ⚠️ 该端点会打上游（中国走高德 / 国际走 Nominatim）并按 q 落 geo_cache ——

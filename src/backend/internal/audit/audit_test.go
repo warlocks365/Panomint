@@ -305,6 +305,16 @@ func TestActionRegistryIsValid(t *testing.T) {
 		"ActionMediaRestore":  ActionMediaRestore,
 		"ActionSettingsPatch": ActionSettingsPatch,
 		"ActionIndexRebuild":  ActionIndexRebuild,
+
+		// Job000121 调试通道八事件
+		"ActionDebugEnable":         ActionDebugEnable,
+		"ActionDebugDisable":        ActionDebugDisable,
+		"ActionDebugRotate":         ActionDebugRotate,
+		"ActionDebugAgentConnect":   ActionDebugAgentConnect,
+		"ActionDebugAgentDisconnect": ActionDebugAgentDisconnect,
+		"ActionDebugCmd":            ActionDebugCmd,
+		"ActionDebugAuthFail":       ActionDebugAuthFail,
+		"ActionDebugLocked":         ActionDebugLocked,
 	}
 	seen := map[string]string{}
 	for name, v := range registry {
@@ -323,7 +333,7 @@ func TestActionRegistryIsValid(t *testing.T) {
 }
 
 func TestTargetRegistryIsValid(t *testing.T) {
-	for _, tt := range []string{TargetUser, TargetRole, TargetShare, TargetMedia, TargetSetting, TargetComputeNode, TargetAuditLog} {
+	for _, tt := range []string{TargetUser, TargetRole, TargetShare, TargetMedia, TargetSetting, TargetComputeNode, TargetAuditLog, TargetDebugChannel} {
 		got, err := NormalizeTargetType(tt)
 		if err != nil || got != tt {
 			t.Fatalf("目标类型常量 %q 不合法（归一化得 %q，err=%v）", tt, got, err)

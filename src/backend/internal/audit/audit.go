@@ -123,17 +123,39 @@ const (
 	ActionSettingsPatch = "admin.settings.patch"
 	// ActionIndexRebuild 索引重建。
 	ActionIndexRebuild = "admin.index.rebuild"
+
+	// ===== Job000121 转码远程调试通道（设计 §7.1 八事件）=====
+	// detail 键名红线见设计 §7.3：统一用 channel_fp（通道指纹，非密钥摘要），
+	// 密钥明文/摘要永不进审计。
+	//
+	// ActionDebugEnable 开启远程调试通道（签发新凭据）。
+	ActionDebugEnable = "debug.enable"
+	// ActionDebugDisable 关闭通道（手动 reason=manual / 到期 reason=expired）。
+	ActionDebugDisable = "debug.disable"
+	// ActionDebugRotate 重置调试密钥（旧连接即刻作废）。
+	ActionDebugRotate = "debug.rotate"
+	// ActionDebugAgentConnect agent 握手通过。
+	ActionDebugAgentConnect = "debug.agent_connect"
+	// ActionDebugAgentDisconnect 调试连接结束。
+	ActionDebugAgentDisconnect = "debug.agent_disconnect"
+	// ActionDebugCmd 每条调试命令（命令级留痕）。
+	ActionDebugCmd = "debug.cmd"
+	// ActionDebugAuthFail 握手认证失败。
+	ActionDebugAuthFail = "debug.auth_fail"
+	// ActionDebugLocked 认证失败锁定触发。
+	ActionDebugLocked = "debug.locked"
 )
 
 // 目标类型登记表（写入 target_type 的推荐取值；空表示无特定对象）。
 const (
-	TargetUser        = "user"
-	TargetRole        = "role"
-	TargetShare       = "share"
-	TargetMedia       = "media"
-	TargetSetting     = "setting"
-	TargetComputeNode = "compute_node"
-	TargetAuditLog    = "audit_log"
+	TargetUser         = "user"
+	TargetRole         = "role"
+	TargetShare        = "share"
+	TargetMedia        = "media"
+	TargetSetting      = "setting"
+	TargetComputeNode  = "compute_node"
+	TargetAuditLog     = "audit_log"
+	TargetDebugChannel = "debug_channel" // Job000121 调试通道（target_id=channel_fp）
 )
 
 // ---------------------------------------------------------------------------
