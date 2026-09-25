@@ -112,6 +112,9 @@ services:
       # /map/search 恒降级（X-Map-Search-Degraded: amap_absent）、瓦片也只能吃磁盘缓存。
       # AMAP_KEY 必须是「Web 服务」类型的 Key；AMAP_SECRET 为数字签名密钥（留空则不签名）。
       AMAP_KEY: ${AMAP_KEY:-}
+      # Job000121 调试通道到期 reaper 巡检周期（秒，默认 300）。e2e 可临时调短触发到期审计；
+      # 接线前该 env 只在代码默认值生效——这是「读环境变量必须核对 compose」的补漏。
+      DEBUG_REAPER_INTERVAL: ${DEBUG_REAPER_INTERVAL:-300}
       AMAP_SECRET: ${AMAP_SECRET:-}
       # Job000070 F4 挂载凭据加密密钥（32 字节 hex）：api 加密/校验，worker 解密执行挂载。
       # 只经 .env 注入，绝不入库；未配置时带凭据的挂载写操作 400 CIPHER_KEY_MISSING。
