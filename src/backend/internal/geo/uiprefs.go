@@ -61,7 +61,13 @@ type UIPrefs struct {
 	MapMarkerMode      string `json:"map_marker_mode"`
 	// Job000101：空间页视图模式——false=时间轴平铺（默认）/true=按相册分组。
 	SpacesGroupByAlbum bool `json:"spaces_group_by_album"`
+	// Job000120：自动 HLS 转码开关——nil（PUT 缺省）= 保留现值（keep-on-absent，
+	// 旧客户端不带此字段不致被清回默认）；显式 true/false 才写入。
+	// GET 恒返回非 nil（默认 true = 保持存量行为）。
+	AutoTranscode *bool `json:"auto_transcode"`
 }
+
+func boolPtr(b bool) *bool { return &b }
 
 // DefaultUIPrefs 未设置时返回的默认值（与 DDL 默认值一致）。
 func DefaultUIPrefs() UIPrefs {
@@ -70,6 +76,7 @@ func DefaultUIPrefs() UIPrefs {
 		MapFilterSide:      filterLeft,
 		MapDefaultProvider: providerAuto,
 		MapMarkerMode:      markerIcon,
+		AutoTranscode:      boolPtr(true),
 	}
 }
 
@@ -101,6 +108,11 @@ func NormalizeUIPrefs(in UIPrefs) (UIPrefs, error) {
 	out.MapFilterCollapsed = in.MapFilterCollapsed
 	// 布尔无非法值空间（缺失= false = 默认平铺），原样透传即可。
 	out.SpacesGroupByAlbum = in.SpacesGroupByAlbum
+	// Job000120：auto_transcode 的「缺失」语义是 keep-on-absent（nil 原样透传），
+	// 由 PutUIPrefs 的 COALESCE 落库；这里 nil → 默认 true 仅供 GET 缺行场景。
+	if in.AutoTranscode != nil {
+		out.AutoTranscode = in.AutoTranscode
+	}
 
 	if v := strings.ToLower(strings.TrimSpace(in.MapDefaultProvider)); v != "" {
 		if v != providerAuto && v != providerAmap && v != providerOSM {
@@ -119,11 +131,11 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 	out := DefaultUIPrefs()
 	var slider, side, provider, marker string
 	var zoom *int
-	var collapsed, spacesGroup bool
+	var collapsed, spacesGroup, autoTC bool
 	err := s.Pool.QueryRow(ctx, `
 		SELECT map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
-		       map_filter_collapsed, map_marker_mode, spaces_group_by_album
-		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom, &collapsed, &marker, &spacesGroup)
+		       map_filter_collapsed, map_marker_mode, spaces_group_by_album, auto_transcode
+		FROM user_ui_prefs WHERE user_id = $1`, userID).Scan(&slider, &side, &provider, &zoom, &collapsed, &marker, &spacesGroup, &autoTC)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
 	}
@@ -137,6 +149,7 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 		MapDefaultProvider: provider, MapDefaultZoom: zoom,
 		MapFilterCollapsed: collapsed, MapMarkerMode: marker,
 		SpacesGroupByAlbum: spacesGroup,
+		AutoTranscode:      boolPtr(autoTC),
 	})
 	if nerr != nil {
 		return DefaultUIPrefs(), nil
@@ -145,11 +158,13 @@ func (s *MediaStore) GetUIPrefs(ctx context.Context, userID string) (UIPrefs, er
 }
 
 // PutUIPrefs 覆盖写入（upsert）当前用户 UI 偏好。入参应已 Normalize。
+// auto_transcode 例外地采用 keep-on-absent：NULL 时 INSERT 落默认 true、
+// UPDATE 保留现值——旧客户端（不带此字段）整行 PUT 不会把用户已关的开关清回默认。
 func (s *MediaStore) PutUIPrefs(ctx context.Context, userID string, p UIPrefs) error {
 	_, err := s.Pool.Exec(ctx, `
 		INSERT INTO user_ui_prefs (user_id, map_slider_pos, map_filter_side, map_default_provider, map_default_zoom,
-		                           map_filter_collapsed, map_marker_mode, spaces_group_by_album, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+		                           map_filter_collapsed, map_marker_mode, spaces_group_by_album, auto_transcode, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, true), now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			map_slider_pos       = EXCLUDED.map_slider_pos,
 			map_filter_side      = EXCLUDED.map_filter_side,
@@ -158,8 +173,9 @@ func (s *MediaStore) PutUIPrefs(ctx context.Context, userID string, p UIPrefs) e
 			map_filter_collapsed = EXCLUDED.map_filter_collapsed,
 			map_marker_mode      = EXCLUDED.map_marker_mode,
 			spaces_group_by_album = EXCLUDED.spaces_group_by_album,
+			auto_transcode       = COALESCE($9, user_ui_prefs.auto_transcode),
 			updated_at           = now()`,
 		userID, p.MapSliderPos, p.MapFilterSide, p.MapDefaultProvider, p.MapDefaultZoom,
-		p.MapFilterCollapsed, p.MapMarkerMode, p.SpacesGroupByAlbum)
+		p.MapFilterCollapsed, p.MapMarkerMode, p.SpacesGroupByAlbum, p.AutoTranscode)
 	return err
 }

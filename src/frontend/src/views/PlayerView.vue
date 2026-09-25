@@ -21,10 +21,11 @@
         class="pano"
       />
 
-      <!-- 360 视频：未转码 → 提示并发起转码（照片无需转码） -->
+      <!-- 360 视频：未转码 → 提示并发起转码（照片无需转码）；关闭自动转码时如实提示（Job000120） -->
       <TranscodePrompt
         v-else-if="media.mode.value === 'pano' && media.panoKind.value === 'video'"
         :transcode="media.transcode.value"
+        :disabled="media.transcodeDisabled.value"
         @start="media.startTranscode"
       />
 

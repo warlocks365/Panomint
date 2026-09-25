@@ -20,6 +20,8 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   const photoUrl = ref('')
   const panoPhotoUrl = ref('') // 360 照片：原图 blob URL（球面贴图）
   const transcode = ref({ jobId: '', status: '', starting: false, failed: false })
+  // Job000120：用户级「自动 HLS 转码」开关（false = 播放器不得发起转码，直接播原始文件）
+  const transcodeDisabled = ref(false)
 
   let pollTimer = 0
   let plainHls = null
@@ -52,16 +54,20 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
     detail.value = null
     pano.value = null
     transcode.value = { jobId: '', status: '', starting: false, failed: false }
+    transcodeDisabled.value = false
     pollFailCount = 0
 
     try {
-      const [d, p] = await Promise.all([
+      const [d, p, prefs] = await Promise.all([
         http.get(`/media/${mediaId.value}`),
-        http.get(`/media/${mediaId.value}/360`)
+        http.get(`/media/${mediaId.value}/360`),
+        // 开关每次播放现取（设置页改完回来即生效；失败按开启处理，宁可提示转码也不误锁播放）
+        http.get('/user/ui-prefs').catch(() => null)
       ])
       if (seq !== loadSeq) return // 已切到新媒体：旧响应不得落地（其 blob 可能已被 cleanup revoke）
       detail.value = d.data
       pano.value = p.data
+      transcodeDisabled.value = !!prefs && prefs.data && prefs.data.auto_transcode === false
 
       if (p.data.is_360) {
         // 360 媒体：直接全景播放（照片贴球面 / 视频走 HLS），无「普通播放器 → 点按钮」两步
@@ -120,6 +126,11 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   }
 
   async function startTranscode() {
+    // Job000120：开关关闭时客户端直接挡（服务端 CreateJob 同样 409 拒绝，双保险）
+    if (transcodeDisabled.value) {
+      error.value = '已关闭自动转码，可在设置页重新开启'
+      return
+    }
     transcode.value.starting = true
     transcode.value.failed = false
     try {
@@ -179,6 +190,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
 
   return {
     loading, error, detail, pano, mode, hlsUrl, photoUrl, panoPhotoUrl, transcode,
+    transcodeDisabled,
     panoKind, panoSrc, panoReady,
     load, startTranscode, cleanup
   }

@@ -1,6 +1,7 @@
 package geo
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -222,5 +223,47 @@ func TestNormalizeUIPrefsSpacesGroup(t *testing.T) {
 	}
 	if got.SpacesGroupByAlbum {
 		t.Fatalf("缺省应为 false（时间轴平铺），实际 %+v", got)
+	}
+}
+
+// ---- Job000120：auto_transcode（用户级自动 HLS 转码开关）----
+
+func TestNormalizeUIPrefsAutoTranscode(t *testing.T) {
+	// 缺省（nil）= 默认开启（存量行为不变）
+	got, err := NormalizeUIPrefs(UIPrefs{})
+	if err != nil {
+		t.Fatalf("空输入不应报错: %v", err)
+	}
+	if got.AutoTranscode == nil || *got.AutoTranscode != true {
+		t.Fatalf("auto_transcode 缺省应为 true，实际 %v", got.AutoTranscode)
+	}
+	// 显式 false / true 原样透传（PUT 由调用方明确给出）
+	off := false
+	got, err = NormalizeUIPrefs(UIPrefs{AutoTranscode: &off})
+	if err != nil {
+		t.Fatalf("显式 false 不应报错: %v", err)
+	}
+	if got.AutoTranscode == nil || *got.AutoTranscode != false {
+		t.Fatalf("显式 false 应原样透传，实际 %v", got.AutoTranscode)
+	}
+	on := true
+	got, err = NormalizeUIPrefs(UIPrefs{AutoTranscode: &on})
+	if err != nil || got.AutoTranscode == nil || *got.AutoTranscode != true {
+		t.Fatalf("显式 true 应原样透传，实际 %v err=%v", got.AutoTranscode, err)
+	}
+}
+
+// TestPutUIPrefsKeepOnAbsent：auto_transcode 的「缺省保留现值」是契约级语义
+// （旧客户端整行 PUT 不会把用户已关的开关清回默认），用源码守卫钉住 COALESCE 两处。
+func TestPutUIPrefsKeepOnAbsent(t *testing.T) {
+	b, err := os.ReadFile("uiprefs.go")
+	if err != nil {
+		t.Fatalf("读不到 uiprefs.go: %v", err)
+	}
+	if !strings.Contains(string(b), "COALESCE($9, true)") {
+		t.Fatal("INSERT 分支应为 COALESCE($9, true)（新行缺省落默认 true）")
+	}
+	if !strings.Contains(string(b), "COALESCE($9, user_ui_prefs.auto_transcode)") {
+		t.Fatal("UPDATE 分支应为 COALESCE($9, user_ui_prefs.auto_transcode)（缺省保留现值）")
 	}
 }

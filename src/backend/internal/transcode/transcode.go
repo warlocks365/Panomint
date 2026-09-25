@@ -146,6 +146,22 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		return
 	}
 
+	// Job000120 用户级「自动 HLS 转码」闸门：设置页关闭后，本账号经 API 发起的转码一律拒绝
+	// （播放器此时直接播放原始文件）。CLI 批量补排（transcodectl enqueue-videos）是管理员工具，
+	// 不走本端点、不受此开关约束——开关管的是「使用侧的自动/随手触发」，不是「管理侧的批量运维」。
+	// 缺行 = 默认开启（与 DDL DEFAULT true 一致），老账号行为不变。
+	var autoTC bool
+	if err := h.Pool.QueryRow(ctx,
+		`SELECT auto_transcode FROM user_ui_prefs WHERE user_id = $1`, c.GetString("user_id")).
+		Scan(&autoTC); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	if !autoTC {
+		errJSON(c, http.StatusConflict, "TRANSCODE_DISABLED", "已关闭自动转码，可在设置页重新开启")
+		return
+	}
+
 	// 与 CLI 批量补排共用同一份「写行+入队、失败回滚删行」语义（P1-02）：
 	// 入队失败时任务行会被回滚删除，不留下永久阻断自动补排的 pending 僵尸行。
 	jobID, err := enqueueOne(ctx, h.Pool, h.Q, req.MediaID, req.Profile)
