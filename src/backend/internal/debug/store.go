@@ -50,14 +50,17 @@ func scanChannel(row pgx.Row) (*Channel, error) {
 
 // Status 读通道行；无行返回 (nil, nil)——调用方按"未开启"处理。
 func (s *Store) Status(ctx context.Context) (*Channel, error) {
-	return scanChannel(s.Pool.QueryRow(ctx, `SELECT `+channelColumns+` FROM debug_channel WHERE id = true`))
+	// 到期视同未开启（设计 §7 口径一致：未开启/已过期/不存在一视同仁，
+	// 前端轮询据此显示「已过期」并引导重新开启）。reaper 异步落地审计与踢连。
+	return scanChannel(s.Pool.QueryRow(ctx,
+		`SELECT `+channelColumns+` FROM debug_channel WHERE id = true AND enabled AND expires_at > now()`))
 }
 
 // PeekByChannelID 按 channel_id 读行（无锁，供握手前置 404 判别）。
-// 行不存在或与 channel_id 不符都返回 (nil, nil)——未开启/已过期/不存在一视同仁（不可探测）。
+// 行不存在/已过期/未开启都返回 (nil, nil)——不可探测（设计 §2.1）。
 func (s *Store) PeekByChannelID(ctx context.Context, channelID string) (*Channel, error) {
 	return scanChannel(s.Pool.QueryRow(ctx,
-		`SELECT `+channelColumns+` FROM debug_channel WHERE id = true AND channel_id = $1`, channelID))
+		`SELECT `+channelColumns+` FROM debug_channel WHERE id = true AND enabled AND channel_id = $1 AND expires_at > now()`, channelID))
 }
 
 // Enable 开启通道并签发全新凭据（设计 §8.1 首行）。
