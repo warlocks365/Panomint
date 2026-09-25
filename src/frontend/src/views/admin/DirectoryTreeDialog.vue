@@ -45,6 +45,15 @@
           选中：{{ pickedLabel }}
         </span>
         <div class="tree-actions">
+          <button
+            v-if="allowClear"
+            class="btn btn--danger-ghost"
+            type="button"
+            data-testid="tree-clear"
+            @click="onClear"
+          >
+            清除分配
+          </button>
           <button class="btn" type="button" data-testid="tree-cancel" @click="onClose">取消</button>
           <button class="btn btn--primary" type="button" data-testid="tree-confirm" @click="onConfirm">选择此目录</button>
         </div>
@@ -55,17 +64,28 @@
 
 <script setup>
 // 目录树选择对话框（Job000117）：扫描导入的目录选择器。
-// 懒加载：展开节点时才请求 GET /admin/fs/tree?dir=<rel>（seq 守卫防过期响应落地）；
+// 懒加载：展开节点时才请求目录树接口（seq 守卫防过期响应落地）；
 // 边界：无权限子目录 → 锁定图标+禁止展开（后端 readable=false）；目标目录本身无权限 →
 // 后端 200 unreadable=true，本组件就地显示「无权限访问」占位行，不报错；空目录 →
-// 「（无子目录）」占位行。符号链接在后端已被排除（lstat 语义），树不会越出媒体根。
+// 「（无子目录）」占位行。符号链接在后端已被排除（lstat 语义），树不会越出边界。
 // 行渲染拆至 DirTreeRow.vue（frontend_org_guard O1 单文件 ≤300 行棘轮）。
+//
+// Job000123 参数化：loader 可换成任意同构数据源（成员端 /fs/tree 的边界是扫描根而非
+// 媒体根）；allowClear 提供「清除分配」第三出口（管理员取消某账号的 scan_root）。
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { errMessage } from '../../stores/auth'
 import { listDirTree } from '../../api/admin'
 import DirTreeRow from './DirTreeRow.vue'
 
-const emit = defineEmits(['pick', 'close'])
+const props = defineProps({
+  // loader：目录树数据源；缺省用管理端 /admin/fs/tree（admin:system）。
+  loader: { type: Function, default: null },
+  // allowClear：显示「清除分配」按钮，点击 emit('clear')。
+  allowClear: { type: Boolean, default: false }
+})
+const emit = defineEmits(['pick', 'close', 'clear'])
+
+const fetchTree = props.loader || listDirTree
 
 function makeNode(name, rel) {
   return { name, rel, readable: true, expanded: false, loading: false, loaded: false, children: [], error: '' }
@@ -125,7 +145,7 @@ async function load(node) {
   node.loading = true
   node.error = ''
   try {
-    const resp = await listDirTree(node.rel)
+    const resp = await fetchTree(node.rel)
     if (mySeq !== seq) return // 已被更新的展开/关闭取代
     rootLabel.value = resp.root || rootLabel.value
     node.loading = false
@@ -154,6 +174,10 @@ async function load(node) {
 
 function onConfirm() {
   emit('pick', selected.value)
+}
+
+function onClear() {
+  emit('clear')
 }
 
 function onClose() {
@@ -218,30 +242,11 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   padding: 6px 4px;
 }
-.tree-note {
-  padding-top: 3px;
-  padding-bottom: 3px;
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-.tree-note--locked {
-  color: var(--color-warning-text);
-}
-.tree-note--error {
-  color: var(--color-danger);
-}
-.tree-err {
-  margin: 8px 0 0;
-  font-size: var(--font-size-sm);
-  color: var(--color-danger);
-}
-.tree-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 14px;
-}
+.tree-note { padding-top: 3px; padding-bottom: 3px; font-size: var(--font-size-sm); color: var(--color-text-secondary); }
+.tree-note--locked { color: var(--color-warning-text); }
+.tree-note--error { color: var(--color-danger); }
+.tree-err { margin: 8px 0 0; font-size: var(--font-size-sm); color: var(--color-danger); }
+.tree-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
 .tree-picked {
   flex: 1;
   font-size: var(--font-size-sm);
@@ -251,25 +256,10 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tree-actions {
-  display: flex;
-  gap: 8px;
-}
-.btn {
-  padding: 8px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
-  background-color: var(--color-surface);
-  cursor: pointer;
-}
-.btn:hover {
-  background-color: var(--color-surface-hover);
-}
-.btn--primary {
-  border-color: var(--color-primary);
-  color: #fff;
-  background-color: var(--color-primary);
-}
+.tree-actions { display: flex; gap: 8px; }
+.btn { padding: 8px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: var(--font-size-md); color: var(--color-text-primary); background-color: var(--color-surface); cursor: pointer; }
+.btn:hover { background-color: var(--color-surface-hover); }
+.btn--primary { border-color: var(--color-primary); color: #fff; background-color: var(--color-primary); }
+.btn--danger-ghost { border-color: var(--color-danger); color: var(--color-danger); }
+.btn--danger-ghost:hover { background: var(--color-danger); color: var(--color-surface); }
 </style>

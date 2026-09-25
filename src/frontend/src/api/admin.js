@@ -120,3 +120,12 @@ export function listUserPerms(userID) {
 export function putUserPerm(userID, perm, granted) {
   return http.put('/admin/users/' + userID + '/perms', { perm, granted }).then((r) => r.data)
 }
+
+// ---- 扫描根目录分配（admin:users，Job000123）----
+// PUT /admin/users/:id/scan-root ← {scan_root} → {user}
+//   scan_root: 'photos/x' = 分配该子目录；'' = 整个媒体根；null = 取消分配。
+//   服务端校验：路径必须位于 MEDIA_ROOT 内（穿越 400）、必须是真实存在的物理目录、
+//   不能落在 _imports 保留区（任意层级）。
+export function setUserScanRoot(userID, scanRoot) {
+  return http.put(`/admin/users/${userID}/scan-root`, { scan_root: scanRoot }).then((r) => r.data)
+}

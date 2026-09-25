@@ -24,6 +24,10 @@ type Handler struct {
 
 	// Issuer 认证器里显示的服务名（otpauth 链接的 label）；空串取 DefaultMFAIssuer。
 	Issuer string
+
+	// MediaRoot 媒体库根（/data/media）。PutUserScanRoot 校验分配目录是真实物理
+	// 目录且位于其内（dirscope）用；空串时该端点不可用（测试可注入临时目录）。
+	MediaRoot string
 }
 
 // DefaultMFAIssuer otpauth 链接里默认的服务名。

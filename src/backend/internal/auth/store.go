@@ -74,6 +74,12 @@ type User struct {
 	// MFASecret TOTP 密钥（base32）。**绝不序列化**（json:"-"）：它是可离线生成口令的
 	// 长期凭据，泄漏等于二次验证形同虚设。仅在服务端校验路径上使用。
 	MFASecret string `json:"-"`
+
+	// ScanRoot 扫描根目录（Job000123）：相对 MEDIA_ROOT 的斜杠路径。
+	// nil = 未分配（成员侧扫描入口一律 403 SCAN_ROOT_REQUIRED）；"" = 已分配、
+	// 根目录即 MEDIA_ROOT 本身；其余 = MEDIA_ROOT 下的子目录。
+	// 指针而非 string 是为了保住 NULL 与空串的语义差（fail-closed 的前提）。
+	ScanRoot *string `json:"scan_root"`
 }
 
 var (
@@ -190,11 +196,11 @@ func (s *Store) FindByEmail(ctx context.Context, email string) (*User, error) {
 	var u User
 	err := s.Pool.QueryRow(ctx, `
 		SELECT u.id, u.email, COALESCE(u.display_name,''), u.password_hash, r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
 		FROM users u JOIN roles r ON r.id = u.role_id
 		WHERE u.email = $1`, email).
 		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled)
+			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrBadCredentials
 	}
@@ -215,11 +221,11 @@ func (s *Store) FindByEmailCI(ctx context.Context, email string) (*User, error) 
 	var u User
 	err := s.Pool.QueryRow(ctx, `
 		SELECT u.id, u.email, COALESCE(u.display_name,''), u.password_hash, r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
 		FROM users u JOIN roles r ON r.id = u.role_id
 		WHERE lower(u.email) = lower($1)`, email).
 		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled)
+			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrBadCredentials
 	}
@@ -277,11 +283,11 @@ func (s *Store) FindByID(ctx context.Context, id string) (*User, error) {
 	var u User
 	err := s.Pool.QueryRow(ctx, `
 		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
 		FROM users u JOIN roles r ON r.id = u.role_id
 		WHERE u.id = $1`, id).
 		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled)
+			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +434,7 @@ func (s *Store) CreateUser(ctx context.Context, email, displayName, password, ro
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
 		FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.created_at`)
 	if err != nil {
 		return nil, err
@@ -438,7 +444,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var u User
 		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled); err != nil {
+			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot); err != nil {
 			return nil, err
 		}
 		u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
@@ -604,12 +610,12 @@ func (s *Store) UpdateUser(ctx context.Context, id string, in UserUpdate) (*User
 	args = append(args, id)
 	q := fmt.Sprintf(`UPDATE users SET %s, updated_at = now() WHERE id = $%d::uuid
 		RETURNING id, email, COALESCE(display_name,''), '', (SELECT name FROM roles WHERE id = role_id), status,
-		          COALESCE(mfa_secret,''), mfa_enabled`,
+		          COALESCE(mfa_secret,''), mfa_enabled, scan_root`,
 		strings.Join(sets, ", "), len(args))
 
 	var u User
 	err = s.Pool.QueryRow(ctx, q, args...).Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash,
-		&u.Role, &u.Status, &u.MFASecret, &u.MFAEnabled)
+		&u.Role, &u.Status, &u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUserNotFound
 	}
@@ -621,6 +627,42 @@ func (s *Store) UpdateUser(ctx context.Context, id string, in UserUpdate) (*User
 		// 用户角色变更：权限判定缓存立即失效（否则旧角色权限最长残留 30s）。
 		s.InvalidatePermCache()
 	}
+	return &u, nil
+}
+
+// ---------------------------------------------------------------------------
+// 扫描根目录（Job000123）
+// ---------------------------------------------------------------------------
+
+// ScanRootOf 按用户 id 取其 scan_root（NULL = 未分配）。
+// 与 User.ScanRoot 分开单列：成员端 index 包只需这一列，不必拖整条 User 记录。
+func (s *Store) ScanRootOf(ctx context.Context, userID string) (*string, error) {
+	var scanRoot *string
+	err := s.Pool.QueryRow(ctx,
+		`SELECT scan_root FROM users WHERE id = $1::uuid`, userID).Scan(&scanRoot)
+	return scanRoot, err
+}
+
+// SetUserScanRoot 精确覆写某用户的 scan_root（管理员分配/取消扫描根目录）。
+//
+// scanRoot = nil → 置 NULL（未分配，成员侧扫描入口 403）；非 nil → 置归一化后的
+// 相对路径。刻意不复用 UpdateUser：那是"按请求体增量改用户"的通用路径，而 scan_root
+// 有独立的归一化/物理校验链路（handler 层 dirscope + os.Stat），写入只需动一个字段。
+func (s *Store) SetUserScanRoot(ctx context.Context, userID string, scanRoot *string) (*User, error) {
+	var u User
+	err := s.Pool.QueryRow(ctx, `
+		UPDATE users SET scan_root = $2, updated_at = now() WHERE id = $1::uuid
+		RETURNING id, email, COALESCE(display_name,''), '', (SELECT name FROM roles WHERE id = role_id), status,
+		          COALESCE(mfa_secret,''), mfa_enabled, scan_root`, userID, scanRoot).
+		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
+			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
 	return &u, nil
 }
 

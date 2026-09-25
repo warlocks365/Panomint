@@ -30,6 +30,14 @@
       >
         已恢复
       </button>
+      <button
+        class="tb-tab"
+        :class="{ active: tab === 'scan' }"
+        data-testid="toolbox-tab-scan"
+        @click="tab = 'scan'"
+      >
+        扫描导入
+      </button>
     </div>
 
     <ToolboxDupPanel v-if="tab === 'dup'" />
@@ -44,7 +52,10 @@
       <button class="btn primary" @click="goTrash">打开时间轴回收站</button>
     </section>
 
-    <ToolboxRestoredPanel v-else :active="tab === 'restored'" />
+    <ToolboxRestoredPanel v-else-if="tab === 'restored'" :active="tab === 'restored'" />
+
+    <!-- 扫描导入（Job000123）：管理员分配扫描根后，成员自助导入挂载目录里的媒体 -->
+    <ToolboxScanPanel v-else-if="tab === 'scan'" />
   </div>
 </template>
 
@@ -53,6 +64,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ToolboxDupPanel from './toolbox/DupPanel.vue'
 import ToolboxRestoredPanel from './toolbox/RestoredPanel.vue'
+import ToolboxScanPanel from './toolbox/ScanPanel.vue'
 
 const router = useRouter()
 

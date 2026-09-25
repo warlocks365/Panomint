@@ -111,7 +111,7 @@ func main() {
 	// 而这几件事发生在整个 api 生命周期里最早的时刻，晚创建就漏记。
 	// 它是"尽力而为"的（失败只记 warn，不影响请求），因此提前创建没有可用性风险。
 	auditRec := audit.New(pool, log)
-	authH := &auth.Handler{Store: authStore, Secret: secret, Audit: auditRec}
+	authH := &auth.Handler{Store: authStore, Secret: secret, Audit: auditRec, MediaRoot: cfg.MediaRoot}
 
 	// 种子管理员：仅开发环境自动种（admin@pano.local / ADMIN_PASSWORD 或开发默认值）。
 	// 生产环境的第一个账号由首次安装向导创建（POST /setup，Job000107）——
@@ -466,6 +466,12 @@ func main() {
 	admin.GET("/users/:id/perms", authH.ListUserPerms)
 	admin.PUT("/users/:id/perms", authH.PutUserPerm)
 
+	// ===== Job000123 扫描根目录分配：PUT /admin/users/:id/scan-root =====
+	// 管理员为普通账号分配/取消扫描根目录（请求体 {"scan_root": "photos/x" | "" | null}，
+	// 语义见 internal/auth/scan_root.go）。与 /admin/scan（admin:system 运维面）不同，
+	// 本端点挂在 admin:users —— 它是**账号管理**动作（决定某账号能扫哪），不是系统运维。
+	admin.PUT("/users/:id/scan-root", authH.PutUserScanRoot)
+
 	// ===== Phase 5 精选第一项：审计日志 + 管理端只读端点 =====
 	// 契约 §2 `GET /admin/audit`（分页）、§14 `GET /admin/stats`、§12 `GET /admin/jobs`。
 	// 权限点一律取自库中**实际存在**的种子权限（实测只有 admin:system / admin:users 两个 admin 前缀），不新造权限名：
@@ -501,12 +507,24 @@ func main() {
 	// 既有 GET /admin/jobs/:id，不另起查询。权限 admin:system（系统级运维面，与 /admin/jobs
 	// 同级）；nginx 无需改动：/admin 已在 docker/web/Dockerfile 的「纯 API 组」正则内。
 	indexer := newIndexer(cfg, pool, mediaQ)
-	indexH := &index.Handler{Indexer: indexer, MediaRoot: cfg.MediaRoot}
+	indexH := &index.Handler{Indexer: indexer, MediaRoot: cfg.MediaRoot, Pool: pool}
 	authed.POST("/admin/scan", auth.RequirePerm(authStore, "admin:system"), indexH.Scan)
 	// ===== Job000117 目录树选择器数据源：GET /admin/fs/tree（懒加载单层列举）=====
 	// 扫描面板的「浏览」按钮逐级展开媒体库层级；权限/防穿越与 /admin/scan 完全同级，
 	// nginx 前缀不变（/admin 在纯 API 组内）。
 	authed.GET("/admin/fs/tree", auth.RequirePerm(authStore, "admin:system"), indexH.ListDirTree)
+
+	// ===== Job000123 成员扫描导入：边界 = 管理员分配的 users.scan_root =====
+	// 管理员在后台 PUT /admin/users/:id/scan-root 为普通账号分配真实物理子目录后，
+	// 该账号获得三个成员端点；未分配（NULL）一律 403 SCAN_ROOT_REQUIRED（fail-closed）。
+	// 钳制链：dir 解析钳在 scan_root 内 + _imports 保留段黑名单（任意层级）+ 任务按
+	// index_jobs.user_id 归属过滤（无权=404，与不存在逐字节同形）。
+	// nginx：scan|fs|jobs 三个前缀须在第 2 组纯 API 正则内（docker/web/Dockerfile）。
+	authed.POST("/scan", permWrite, indexH.ScanMine)
+	authed.GET("/fs/tree", permRead, indexH.ListDirTreeMine)
+	authed.GET("/jobs/:id", permRead, indexH.MyJobStatus)
+	// 成员查自己的分配（成员扫描面板挂载前置）；管理端分配端点挂在 admin 组（下方）。
+	authed.GET("/user/scan-root", authH.GetMyScanRoot)
 
 	// ===== R1-c 启动可选自动扫描：MEDIA_SCAN_ON_BOOT（默认关）=====
 	// 面向"群晖/NAS 里已有大量历史照片、装完即想全量入库"的场景：api 迁移一完成就在

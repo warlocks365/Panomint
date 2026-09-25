@@ -42,8 +42,20 @@
       @toggle-status="onToggleStatus"
       @reset-password="onResetPassword"
       @delete="onDelete"
+      @assign-scan-root="onAssignScanRoot"
     />
     <p v-else-if="!loading && !err" class="empty">暂无用户</p>
+
+    <!-- 分配扫描根目录（Job000123）：目录树选择器，选中即分配；也可「清除分配」
+         把 scan_root 置回 NULL（该账号成员侧扫描入口随即 403）。 -->
+    <DirectoryTreeDialog
+      v-if="showScanTree && scanTarget"
+      :allow-clear="true"
+      data-testid="scan-root-dialog"
+      @pick="onScanPicked"
+      @clear="onScanCleared"
+      @close="showScanTree = false"
+    />
   </section>
 </template>
 
@@ -51,9 +63,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { errCode, errMessage } from '../../stores/auth'
-import { createUser, deleteUser, listRoles, listUsers, updateUser } from '../../api/admin'
+import { createUser, deleteUser, listRoles, listUsers, setUserScanRoot, updateUser } from '../../api/admin'
 import UserCreateForm from './UserCreateForm.vue'
 import UsersTable from './UsersTable.vue'
+import DirectoryTreeDialog from './DirectoryTreeDialog.vue'
 
 const auth = useAuthStore()
 const users = ref([])
@@ -66,6 +79,8 @@ const formErr = ref('')
 const confirmDeleteId = ref('')
 const resetTarget = ref(null)
 const resetPw = ref('')
+const scanTarget = ref(null)
+const showScanTree = ref(false)
 
 const meId = computed(() => auth.user?.id)
 const roleOptions = computed(() => roles.value.map((r) => r.name))
@@ -135,6 +150,39 @@ function onResetPassword(u) {
   resetPw.value = ''
 }
 
+// ===== Job000123 扫描根目录分配 =====
+
+function onAssignScanRoot(u) {
+  scanTarget.value = u
+  showScanTree.value = true
+}
+
+// 选中即分配（目录树 root 节点 = 媒体根本身，rel='' 表示"整个媒体根"）。
+function onScanPicked(rel) {
+  const u = scanTarget.value
+  if (!u) return
+  const label = rel === '' ? '（整个媒体根）' : rel
+  guard(() => setUserScanRoot(u.id, rel), `已把 ${u.email} 的扫描根目录设为 ${label}`).then(
+    (ok) => {
+      if (ok) {
+        showScanTree.value = false
+        scanTarget.value = null
+      }
+    }
+  )
+}
+
+function onScanCleared() {
+  const u = scanTarget.value
+  if (!u) return
+  guard(() => setUserScanRoot(u.id, null), `已取消 ${u.email} 的扫描根目录分配`).then((ok) => {
+    if (ok) {
+      showScanTree.value = false
+      scanTarget.value = null
+    }
+  })
+}
+
 function onResetSubmit() {
   const u = resetTarget.value
   if (!u) return
@@ -192,52 +240,17 @@ select {
   background: var(--color-surface);
 }
 input:focus,
-select:focus {
-  outline: 2px solid var(--color-primary-active-bg);
-  border-color: var(--color-primary);
-}
-.msg {
-  margin: 0 0 8px;
-  font-size: var(--font-size-md);
-}
-.msg--error {
-  color: var(--color-danger);
-}
-.msg--ok {
-  color: var(--color-success);
-}
-.empty {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-}
-.btn {
-  padding: 6px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-md);
-  cursor: pointer;
-}
-.btn:hover {
-  background: var(--color-surface-hover);
-}
-.btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.btn--primary {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: var(--color-surface);
-}
-.btn--primary:hover {
-  background: var(--color-primary-hover);
-}
-.btn--ghost {
-  border-color: transparent;
-  color: var(--color-primary);
-}
+select:focus { outline: 2px solid var(--color-primary-active-bg); border-color: var(--color-primary); }
+.msg { margin: 0 0 8px; font-size: var(--font-size-md); }
+.msg--error { color: var(--color-danger); }
+.msg--ok { color: var(--color-success); }
+.empty { color: var(--color-text-secondary); font-size: var(--font-size-md); }
+.btn { padding: 6px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text-primary); font-size: var(--font-size-md); cursor: pointer; }
+.btn:hover { background: var(--color-surface-hover); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-surface); }
+.btn--primary:hover { background: var(--color-primary-hover); }
+.btn--ghost { border-color: transparent; color: var(--color-primary); }
 .reset-form {
   display: flex;
   flex-wrap: wrap;

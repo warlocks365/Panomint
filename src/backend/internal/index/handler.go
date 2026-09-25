@@ -18,15 +18,13 @@ package index
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
 
+	"panoalbum/internal/dirscope"
 	"panoalbum/internal/httperr"
 )
 
@@ -35,14 +33,19 @@ type asyncScanner interface {
 	ScanAsync(ctx context.Context, root, ownerID string, onDone func(error)) (string, error)
 }
 
-// Handler POST /admin/scan 管理端扫描导入。
+// Handler POST /admin/scan 管理端扫描导入；成员端三端点（Job000123）同结构体，见 member_scan.go。
 type Handler struct {
 	Indexer   asyncScanner
 	MediaRoot string
 
+	// Pool 成员端（POST /scan、GET /fs/tree、GET /jobs/:id）读 users.scan_root /
+	// index_jobs 归属用；管理端两端点纯文件系统操作，不需要它。
+	Pool MemberDB
+
 	// mu/running：进程内并发互斥——同一时刻只允许一个进行中的扫描任务，重复触发返回 409。
 	// 标准部署为单 api 实例，进程内互斥即正确；多副本时各副本各自互斥（可接受：
 	// 各自任务行都在 index_jobs 可见，最坏是并发扫两遍，hash 幂等去重不会脏库）。
+	// 管理端与成员端**共用**这把锁：扫描是整机资源（CPU/IO）密集动作，单实例全局一件。
 	mu      sync.Mutex
 	running bool
 }
@@ -57,47 +60,21 @@ type scanRequest struct {
 // ErrDirEscapesRoot 待扫描目录越出 MEDIA_ROOT（路径穿越）的本端哨兵。
 // handler 只对**这个哨兵**回显 err.Error()（固定中文文案，见 errEchoRegistry 登记）；
 // filepath.Abs/Rel 的底层错误走 httperr.Fail 固定文案，绝不回显。
-var ErrDirEscapesRoot = errors.New("dir 必须位于 MEDIA_ROOT 之内（不允许路径穿越）")
+//
+// 实现即 dirscope.ErrEscapesScope（Job000123 起钳制真源收敛到 internal/dirscope，
+// 成员端与管理端共用同一哨兵，errors.Is 两种写法等价）。
+var ErrDirEscapesRoot = dirscope.ErrEscapesScope
 
 // resolveScanDir 把调用方给的 dir 解析为 MEDIA_ROOT 内的绝对路径。
-// dir 允许相对（相对 MEDIA_ROOT）或绝对；无论哪种，解析结果必须仍位于 MEDIA_ROOT
-// 之内，否则返回 ErrDirEscapesRoot。空 / "." / 空白均表示 MEDIA_ROOT 本身。
+// 空 / "." / 空白均表示 MEDIA_ROOT 本身；越界返回 ErrDirEscapesRoot。
+// 钳制真源在 dirscope.Resolve，本函数仅是它在 MEDIA_ROOT 场景下的薄封装。
 func resolveScanDir(mediaRoot, dir string) (string, error) {
-	absRoot, err := filepath.Abs(mediaRoot)
-	if err != nil {
-		return "", fmt.Errorf("解析媒体根路径: %w", err)
-	}
-	absRoot = filepath.Clean(absRoot)
-
-	d := strings.TrimSpace(dir)
-	var absDir string
-	switch {
-	case d == "" || d == ".":
-		absDir = absRoot
-	case filepath.IsAbs(d):
-		absDir = filepath.Clean(d)
-	default:
-		absDir = filepath.Clean(filepath.Join(absRoot, d))
-	}
-
-	rel, err := filepath.Rel(absRoot, absDir)
-	if err != nil {
-		return "", fmt.Errorf("解析扫描目录: %w", err)
-	}
-	// 穿越判定：rel 以 ".." 开头、或 rel 本身是绝对路径（Windows 跨盘符），即越界。
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", ErrDirEscapesRoot
-	}
-	return absDir, nil
+	return dirscope.Resolve(mediaRoot, dir)
 }
 
 // relToRoot 返回 absDir 相对 MEDIA_ROOT 的斜杠展示路径（供响应回显；根本身返回 "."）。
 func relToRoot(mediaRoot, absDir string) string {
-	rel, err := filepath.Rel(mediaRoot, absDir)
-	if err != nil || rel == "." {
-		return "."
-	}
-	return filepath.ToSlash(rel)
+	return dirscope.RelDisplay(mediaRoot, absDir)
 }
 
 // Scan POST /admin/scan：异步扫描 MEDIA_ROOT 内的目录，入库归属调用者。
@@ -126,6 +103,14 @@ func (h *Handler) Scan(c *gin.Context) {
 		httperr.Fail(c, http.StatusBadRequest, "INVALID_INPUT", "目录路径无效", err)
 		return
 	}
+	h.runScan(c, absDir, h.MediaRoot, h.MediaRoot)
+}
+
+// runScan 扫描执行体：管理端 Scan 与成员端 ScanMine 解析出各自边界内的 absDir 后共用。
+// absBoundary = 计算 dir 展示值所用的边界绝对路径（管理端 = MEDIA_ROOT；成员端 = 其
+// scan_root 绝对路径）；rootDisplay = 响应 root 字段的回显值（成员端为其 scan_root
+// 相对展示路径，不外泄绝对路径）。
+func (h *Handler) runScan(c *gin.Context, absDir, absBoundary, rootDisplay string) {
 	info, err := os.Stat(absDir)
 	if err != nil {
 		httperr.Envelope(c, http.StatusBadRequest, "INVALID_INPUT", "目录不存在或不可访问")
@@ -161,8 +146,8 @@ func (h *Handler) Scan(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{
 		"job_id": jobID,
 		"status": "running",
-		"root":   h.MediaRoot,
-		"dir":    relToRoot(h.MediaRoot, absDir),
+		"root":   rootDisplay,
+		"dir":    dirscope.RelDisplay(absBoundary, absDir),
 	})
 }
 
