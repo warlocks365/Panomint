@@ -234,7 +234,12 @@ func (h *Handler) Channel(c *gin.Context) {
 	}
 
 	// ⑧ TLS：生产仅 WSS（设计 §6.2）；insecure 开关仅开发用，且仍限回环来源。
-	if c.Request.TLS == nil && !h.allowInsecureWSFrom(ip) {
+	// ⚠️ 判定必须同时看「直连 TLS」与「反代透传的 X-Forwarded-Proto」——标准部署下
+	//  nginx/caddy 在边缘终结 TLS，Go 层 c.Request.TLS 恒为 nil，只看它会把 WSS
+	//  全量误杀成 426（反代后本字段永远拿不到，e2e 全矩阵的实证坑）。
+	tlsOK := c.Request.TLS != nil ||
+		strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
+	if !tlsOK && !h.allowInsecureWSFrom(ip) {
 		httperr.Envelope(c, http.StatusUpgradeRequired, "DEBUG_TLS_REQUIRED", "调试通道仅允许 WSS 接入")
 		return
 	}
