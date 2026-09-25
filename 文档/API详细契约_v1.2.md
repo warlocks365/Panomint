@@ -1,9 +1,20 @@
-# API 详细契约 (v1.12)
+# API 详细契约 (v1.13)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.12 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.13 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.13 变更说明（2026-09-25，Job000124「播放时自动转码（实时转码）」+ 管理概览索引状态中文化）
+
+背景：管理后台「转码」页签在 v1.11 总闸门（`auto_transcode`）之上新增第二个系统级开关 `realtime_transcode`（迁移 `00040` 增列，`DEFAULT FALSE` = 存量行为逐字节不变）。设计方案见《设计方案_播放实时转码_Job000124.md》。两开关 **AND 关系**：有效自动触发 = `auto_transcode AND realtime_transcode`——总闸门语义（409/fail-closed/CLI 例外）全部不动，新开关只管「触发方式自动化」。
+
+1. `system_transcode_config` 增列 `realtime_transcode BOOLEAN NOT NULL DEFAULT FALSE`；`GET /transcode/config` 与 `GET/PUT /admin/transcode-config` 的响应视图增量 `realtime_transcode`（bool，缺省 false）——旧前端忽略新 key 不炸
+2. `PUT /admin/transcode-config` 改为**部分更新**语义（沿用 Job000123「缺失不改」）：body 为 `{"auto_transcode"?, "realtime_transcode"?}` 两可选键、**至少一项**，全缺 → 400；map 先取一层再解指针（防误清空/并发覆盖）；审计 detail 按实际变更键落
+3. `POST /transcode/job` 增可选 `auto: true`（播放器自动触发分支）——归属校验/总闸门/错误口径与手动全同，差异仅两点：**attach-or-create**（该媒体已有 `pending/running` 任务直接复用其 `job_id`，202 响应增量 `reused: true`——同一媒体全站最多一个活动任务，幂等防双击/多端并发）；档位由服务端按源分辨率 `ProfileForSource` 自动选取（与 CLI 补排同口径），请求 `profile` 被忽略。不带 `auto` = 旧语义逐字节不变（手动、profile 校验、新建任务）
+4. 播放器配套：实时开关开且总闸门开时，无 HLS 视频（普通 + 360°）播放即自动发起；普通视频转码期间原始文件照播、完成后原地热切换 HLS（hls.js ABR 调优 `capLevelToPlayerSize`/`maxBufferLength:30`/`maxMaxBufferLength:60`，升降档由双 EWMA 带宽估算承担）；转码失败普通视频保持原始播放（轻提示）、360° 视频失败态可手动重试
+5. 管理端「转码」页签第二个开关行（data-testid `tc-rt-toggle` 系）；总闸门关时实时开关 UI 禁用（AND 语义的界面表达）
+6. 管理概览「索引状态」展示层中文化（纯前端映射，API 码值不动）：`idle→空闲 / running→运行中 / failed→失败 / unknown→未知`；最近任务 `pending→排队中 / running→运行中 / done→已完成 / failed→失败 / canceled→已取消`
 
 ## v1.12 变更说明（2026-09-25，Job000123「账号扫描根目录分配 + 成员自助扫描」）
 
@@ -596,17 +607,17 @@ bbox 内去重地名列表（含计数），供地图底部「地理位置罗列
 更新配置（中国底图 provider、高德 API key【加密存储】、国际底图 URL）。
 > 说明：聚合与直方图由后端按 `gps geometry(Point, 4326)`（PostGIS）+ `taken_at` 联合查询（`ST_MakeEnvelope` + `ST_Intersects` 做 bbox 过滤，时间桶聚合）；高德底图显示需将媒体 WGS-84 坐标转换为 GCJ-02。详见 TDD §3.7、DDL §2.5。
 
-### GET /transcode/config（v1.11，Job000120-r2）
+### GET /transcode/config（v1.11，Job000120-r2；v1.13 增量 realtime_transcode，Job000124）
 
-系统级「自动 HLS 转码」开关只读视图（任何登录用户，authed 组）：`{ "auto_transcode": bool, "updated_at": timestamp }`。无配置行时缺省 true（存量行为不变）。播放器加载视频前预判姿态用——该值非机密，写权限由下方 admin 端点单独把守。
+系统级转码开关只读视图（任何登录用户，authed 组）：`{ "auto_transcode": bool, "realtime_transcode": bool, "updated_at": timestamp }`。无配置行时 `auto_transcode` 缺省 true、`realtime_transcode` 缺省 false（存量行为逐字节不变）。播放器加载视频前预判姿态用——该值非机密，写权限由下方 admin 端点单独把守。两开关 AND 关系：有效自动触发 = `auto_transcode AND realtime_transcode`。
 
 ### GET /admin/transcode-config（v1.11，Job000120-r2）
 
 系统级转码开关读取（需 `admin:system`），响应形状同 `GET /transcode/config`。
 
-### PUT /admin/transcode-config（v1.11，Job000120-r2）
+### PUT /admin/transcode-config（v1.11，Job000120-r2；v1.13 改部分更新，Job000124）
 
-更新系统级开关：`{ "auto_transcode": true|false }` → 同 GET 视图。请求体缺省或显式 null → 400 `BAD_REQUEST`。写操作落审计（`admin.settings.patch`/`setting`/`transcode-config`）。关闭后全站播放器不再发起转码（普通视频回退原始文件播放）；360° 视频例外——全景播放依赖 HLS 切片，关闭后新上传 360° 视频无法播放；CLI 批量补排（transcodectl）不受约束。
+更新系统级开关（v1.13 起**部分更新**语义，沿用 Job000123「缺失不改」）：body 为 `{ "auto_transcode"?: true|false, "realtime_transcode"?: true|false }`，两键可选、**至少一项**，全缺 → 400 `BAD_REQUEST`；map 先取一层再解指针（防误清空/并发覆盖）。→ 同 GET 视图。写操作落审计（`admin.settings.patch`/`setting`/`transcode-config`，detail 按实际变更键落）。`auto_transcode` 关闭后全站播放器不再发起转码（普通视频回退原始文件播放）；360° 视频例外——全景播放依赖 HLS 切片，关闭后新上传 360° 视频无法播放；CLI 批量补排（transcodectl）不受约束。
 
 
 ---
@@ -768,7 +779,12 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 
 ### POST /transcode/job
 
-提交转码：`{ "media_id","kind":"thumbnail|hls|memories","profile":"1080p|2k|4k" }` → `{ "job_id" }`。v1.11 起闸门判**系统级**真源：管理员关闭自动转码（`GET /transcode/config`=false）→ **409 `TRANSCODE_DISABLED`**「管理员已关闭自动转码，请联系管理员开启」（v1.10 曾判调用者个人偏好，r2 上收后作废）
+提交转码：`{ "media_id", "profile": "1080p|2k|4k", "auto"?: bool }` → `{ "job_id", "reused"?: true }`。v1.11 起闸门判**系统级**真源：管理员关闭自动转码（`GET /transcode/config`.auto_transcode=false）→ **409 `TRANSCODE_DISABLED`**「管理员已关闭自动转码，请联系管理员开启」（v1.10 曾判调用者个人偏好，r2 上收后作废）。
+
+v1.13 增 `auto: true` 自动触发分支（Job000124，归属/闸门/错误口径与手动全同）：
+- **attach-or-create**：该媒体已有 `pending/running` 任务 → 直接复用其 `job_id` 返回（202，`reused: true`）——同一媒体全站最多一个活动任务，幂等防双击/多端并发
+- 无活动任务 → 档位由服务端按源分辨率 `ProfileForSource` 自动选取（与 CLI 补排同口径），请求 `profile` 被忽略（可不填）
+- 不带 `auto`（或 `auto: false`）= 旧语义逐字节不变：手动、`profile` 必填校验（缺省 1080p）、每次新建任务
 
 ### GET /transcode/job/:id（v1.2 补录）
 
