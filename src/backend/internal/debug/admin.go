@@ -14,7 +14,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -59,22 +58,12 @@ func strOr(v any, def string) string {
 	return def
 }
 
-// wsURL 按请求拼出接入 URL（wss://host/debug/channel/<id>，设计 §3.3）。
-// scheme 优先采信反代透传的 X-Forwarded-Proto（Caddy 置 https），缺失退回连接本身；
-// 与 shares.originOf 同语义，但 ws/https 对齐。
+// wsURL 拼出接入 URL（wss://host/debug/channel/<id>，设计 §3.3）。
+// 恒 wss：调试通道强制 TLS（明文 ws 握手被 426 DEBUG_TLS_REQUIRED 拒绝），
+// 若按请求 scheme 回退拼 ws:// 会给出一根必死链（e2e D 段实证：直连 8088 拿到
+// ws:// URL 根本不可用）——展示给用户的凭据只给可用形态。
 func wsURL(c *gin.Context, channelID string) string {
-	scheme := "ws"
-	switch strings.ToLower(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))) {
-	case "https":
-		scheme = "wss"
-	case "http":
-		scheme = "ws"
-	default:
-		if c.Request.TLS != nil {
-			scheme = "wss"
-		}
-	}
-	return scheme + "://" + c.Request.Host + "/debug/channel/" + channelID
+	return "wss://" + c.Request.Host + "/debug/channel/" + channelID
 }
 
 // Status GET /admin/debug/status（设计 §10.2 首行）。

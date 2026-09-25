@@ -15,7 +15,7 @@ import (
 )
 
 // jobIDRe job_id 形态校验（UUID；防 PG 22P02 原文路径，设计 §6.6 参数强校验）。
-var jobIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var jobIDRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // exec 命令分发实现。返回 (应答载荷, 审计用 job_id, 错误)。
 // 错误一律 *cmdError（机器可读 code）；底层故障收敛为 INTERNAL，不回显原文。
