@@ -97,9 +97,13 @@ func PutSystemConfig(ctx context.Context, pool *pgxpool.Pool, auto, realtime *bo
 	if auto == nil && realtime == nil {
 		return errors.New("PutSystemConfig: 至少需提供一个待更新字段")
 	}
+	// 显式 ::boolean  casts 是必需的：nil *bool 经 pgx 以未知类型传入时，
+	// COALESCE($1, $3) 会把两个 unknown 解析成 text（42804：
+	// "column auto_transcode is of type boolean but expression is of type text"，
+	// Job000124 e2e 首跑实测踩出）。
 	_, err := pool.Exec(ctx, `
 		INSERT INTO system_transcode_config (singleton, auto_transcode, realtime_transcode, updated_at)
-		VALUES (TRUE, COALESCE($1, $3), COALESCE($2, $4), now())
+		VALUES (TRUE, COALESCE($1::boolean, $3::boolean), COALESCE($2::boolean, $4::boolean), now())
 		ON CONFLICT (singleton) DO UPDATE SET
 			auto_transcode     = COALESCE($1, system_transcode_config.auto_transcode),
 			realtime_transcode = COALESCE($2, system_transcode_config.realtime_transcode),

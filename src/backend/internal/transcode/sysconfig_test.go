@@ -61,6 +61,10 @@ func TestRealtimeTranscodeDefaultsAndPartialUpsert(t *testing.T) {
 	if !strings.Contains(seg, "realtime_transcode = COALESCE($2") {
 		t.Fatal("部分更新 upsert 必须用 COALESCE($2, ...) 保 realtime 列（缺失不改）")
 	}
+	if !strings.Contains(seg, "COALESCE($1::boolean, $3::boolean)") {
+		t.Fatal("INSERT 分支 COALESCE 必须显式 ::boolean 锚定——nil *bool 经 pgx 以 unknown 传入时" +
+			" COALESCE($1,$3) 被解析成 text，落布尔列 42804（Job000124 e2e 首跑实测踩出）")
+	}
 	if !strings.Contains(seg, "PutSystemConfig: 至少需提供一个待更新字段") {
 		t.Fatal("两字段全 nil 必须报错（调用方缺陷的第二道守卫）")
 	}
