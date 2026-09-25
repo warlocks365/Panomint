@@ -48,7 +48,11 @@ def iter_source_files():
     for dirpath, _dirs, files in os.walk(FE_SRC):
         for name in files:
             if name.endswith(SCAN_EXT):
-                yield os.path.relpath(os.path.join(dirpath, name), FE_SRC)
+                rel = os.path.relpath(os.path.join(dirpath, name), FE_SRC)
+                # Job000115：路径键统一 POSIX 斜杠。此前 relpath 在 Windows 产生反斜杠键，
+                # 基线 JSON 也是 Windows 生成 → Linux CI 上正斜杠键与基线永远失配，
+                # 基线文件被误判「新增超大文件」恒 FAIL（本机 PASS / CI FAIL 的根因）。
+                yield rel.replace(os.sep, "/")
 
 
 def line_counts():
@@ -63,7 +67,9 @@ def load_baseline():
     if not os.path.exists(BASELINE_PATH):
         return {}
     with open(BASELINE_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        raw = json.load(f)
+    # Job000115：加载时同样归一化——旧基线（Windows 反斜杠键）无需重新生成即可跨平台匹配。
+    return {k.replace("\\", "/"): v for k, v in raw.items()}
 
 
 def icon_violations():
@@ -175,7 +181,46 @@ def cmd_selftest(_args):
             print(f"[frontend_org] selftest FAIL: {f_}")
         return 1
     print("[frontend_org] selftest 通过：301 行文件/图标库 import/外部 CDN 均检出")
+    print(_cross_platform_selftest())
     return 0
+
+
+def _cross_platform_selftest():
+    """Job000115 跨平台回归钉：旧式 Windows 反斜杠基线键必须能匹配 POSIX 风格路径。
+
+    事故复盘：基线 JSON 在 Windows 生成（键含 \\），Linux CI 上 relpath 产生 / 键，
+    `p not in baseline` 恒真 → 基线文件被误判「新增超大文件」→ quality-gates 恒红。
+    """
+    import contextlib
+    import io
+
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            fe = os.path.join(td, "src", "frontend")
+            fe_src = os.path.join(fe, "src")
+            os.makedirs(os.path.join(fe_src, "big"))
+            with open(os.path.join(fe_src, "big", "Big.vue"), "w") as f:
+                f.write("\n".join(f"<!-- line {i} -->" for i in range(301)))
+            with open(os.path.join(fe, "package.json"), "w", encoding="utf-8") as f:
+                json.dump({"dependencies": {"vue": "^3.5.12"}}, f)  # cmd_check→icon_violations 必读
+            os.makedirs(os.path.join(td, "scripts"))
+            bpath = os.path.join(td, "scripts", "baseline.json")
+            with open(bpath, "w", encoding="utf-8") as f:
+                json.dump({"big\\Big.vue": 301}, f)  # 旧式 Windows 反斜杠键
+            global FE, FE_SRC, BASELINE_PATH
+            saved = (FE, FE_SRC, BASELINE_PATH)
+            FE, FE_SRC, BASELINE_PATH = fe, fe_src, bpath
+            try:
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = cmd_check(argparse.Namespace())
+            finally:
+                FE, FE_SRC, BASELINE_PATH = saved
+        if rc != 0:
+            return "[frontend_org] selftest 跨平台回归 FAIL：反斜杠基线键未匹配 POSIX 路径"
+        return "[frontend_org] selftest 跨平台回归通过：反斜杠基线键 × POSIX 路径 = 匹配"
+    except Exception as exc:  # selftest 自身不应对外抛栈
+        return f"[frontend_org] selftest 跨平台回归异常: {exc}"
 
 
 def main():
