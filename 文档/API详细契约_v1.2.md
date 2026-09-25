@@ -1,9 +1,19 @@
-# API 详细契约 (v1.10)
+# API 详细契约 (v1.11)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.10 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.11 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.11 变更说明（2026-09-25，Job000120-r2「自动转码开关上收系统级」）
+
+用户裁决「播放与转码功能移入管理里」：v1.10 的用户级开关上收为管理员系统级开关。迁移 `00038` 建 `system_transcode_config` 单行表（singleton 主键硬约束）并 DROP `user_ui_prefs.auto_transcode`，`DEFAULT true` = 存量行为不变。
+
+1. `GET /user/ui-prefs` 响应**移除** `auto_transcode` 键（v1.10 第 1 条作废）；`PUT /user/ui-prefs` 的 keep-on-absent 例外同步作废，恢复既有八键统一语义
+2. 新增只读 `GET /transcode/config`（任何登录用户）：系统级开关视图 `{auto_transcode, updated_at}`——播放器加载视频前预判姿态（关闭时如实提示、不发起注定 409 的请求）。该值非机密，写权限由 admin 端点单独把守
+3. 新增 `GET/PUT /admin/transcode-config`（需 `admin:system`）：读写同一视图；PUT 请求体必须含非 null `auto_transcode`（缺省/null → 400）；写操作落审计 `admin.settings.patch`/`setting`/`transcode-config`
+4. `POST /transcode/job` 闸门改判系统级真源：开关关闭 → **409 `TRANSCODE_DISABLED`**「管理员已关闭自动转码，请联系管理员开启」（闸门位置不变：归属/类型校验之后、写任务行+入队之前；查询出错 fail-closed 500）；CLI 批量补排（`transcodectl enqueue-videos`）仍不受约束
+5. 前端配套：管理后台新增「转码」页签（AdminView 第 9 页签 `TranscodeTab.vue`，data-testid `tc-toggle` 系）；设置页「播放与转码」卡移除（`TranscodeSettingsCard.vue` 删除）；播放器改读 `GET /transcode/config`
 
 ## v1.10 变更说明（2026-09-25，Job000120「自动 HLS 转码用户级开关」）
 
@@ -560,11 +570,11 @@ bbox 内去重地名列表（含计数），供地图底部「地理位置罗列
 
 ### GET /user/ui-prefs
 
-当前用户地图 UI 偏好：`{ "map_slider_pos","map_filter_side","map_default_provider","map_default_zoom" }`（需登录）；v1.6 增 `"spaces_group_by_album"`（bool，默认 false）= 空间页个人空间「按相册分组」视图模式（Job000101）；v1.10 增 `"auto_transcode"`（bool，默认 true）= 自动 HLS 转码开关（Job000120，关闭后播放器直接播原始文件）
+当前用户地图 UI 偏好：`{ "map_slider_pos","map_filter_side","map_default_provider","map_default_zoom" }`（需登录）；v1.6 增 `"spaces_group_by_album"`（bool，默认 false）= 空间页个人空间「按相册分组」视图模式（Job000101）；v1.10 曾增 `"auto_transcode"` 已于 v1.11 移除（开关上收系统级，真源改见 `GET /transcode/config`）
 
 ### PUT /user/ui-prefs
 
-更新偏好（滑块位置/筛选栏侧/默认底图）；v1.6 起同步支持 `spaces_group_by_album`（固定键整体替换契约，未携带键不落库变更）；v1.10 起支持 `auto_transcode`（**keep-on-absent 例外**：未携带键 = 保留现值，不清回默认——理由见 v1.10 变更说明第 2 条）。
+更新偏好（滑块位置/筛选栏侧/默认底图）；v1.6 起同步支持 `spaces_group_by_album`（固定键整体替换契约，未携带键不落库变更）。v1.10 的 `auto_transcode` keep-on-absent 例外已于 v1.11 移除——该键整体迁出用户偏好，恢复八键统一语义。
 
 ### GET /admin/map-config
 
@@ -574,6 +584,18 @@ bbox 内去重地名列表（含计数），供地图底部「地理位置罗列
 
 更新配置（中国底图 provider、高德 API key【加密存储】、国际底图 URL）。
 > 说明：聚合与直方图由后端按 `gps geometry(Point, 4326)`（PostGIS）+ `taken_at` 联合查询（`ST_MakeEnvelope` + `ST_Intersects` 做 bbox 过滤，时间桶聚合）；高德底图显示需将媒体 WGS-84 坐标转换为 GCJ-02。详见 TDD §3.7、DDL §2.5。
+
+### GET /transcode/config（v1.11，Job000120-r2）
+
+系统级「自动 HLS 转码」开关只读视图（任何登录用户，authed 组）：`{ "auto_transcode": bool, "updated_at": timestamp }`。无配置行时缺省 true（存量行为不变）。播放器加载视频前预判姿态用——该值非机密，写权限由下方 admin 端点单独把守。
+
+### GET /admin/transcode-config（v1.11，Job000120-r2）
+
+系统级转码开关读取（需 `admin:system`），响应形状同 `GET /transcode/config`。
+
+### PUT /admin/transcode-config（v1.11，Job000120-r2）
+
+更新系统级开关：`{ "auto_transcode": true|false }` → 同 GET 视图。请求体缺省或显式 null → 400 `BAD_REQUEST`。写操作落审计（`admin.settings.patch`/`setting`/`transcode-config`）。关闭后全站播放器不再发起转码（普通视频回退原始文件播放）；360° 视频例外——全景播放依赖 HLS 切片，关闭后新上传 360° 视频无法播放；CLI 批量补排（transcodectl）不受约束。
 
 
 ---
@@ -735,7 +757,7 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 
 ### POST /transcode/job
 
-提交转码：`{ "media_id","kind":"thumbnail|hls|memories","profile":"1080p|2k|4k" }` → `{ "job_id" }`。v1.10 起增用户级闸门：调用者 `auto_transcode=false`（`GET /user/ui-prefs`）→ **409 `TRANSCODE_DISABLED`**「已关闭自动转码，可在设置页重新开启」
+提交转码：`{ "media_id","kind":"thumbnail|hls|memories","profile":"1080p|2k|4k" }` → `{ "job_id" }`。v1.11 起闸门判**系统级**真源：管理员关闭自动转码（`GET /transcode/config`=false）→ **409 `TRANSCODE_DISABLED`**「管理员已关闭自动转码，请联系管理员开启」（v1.10 曾判调用者个人偏好，r2 上收后作废）
 
 ### GET /transcode/job/:id（v1.2 补录）
 
