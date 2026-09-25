@@ -747,6 +747,21 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 
 > 面向场景：NAS bind mount 下照片已进挂载目录但系统"不识别"——此前唯一入库路径是 worker 镜像内的 `indexctl` CLI，api 无入口、启动也不扫 MEDIA_ROOT。配套 R1-c：`MEDIA_SCAN_ON_BOOT=1` 时 api 迁移完成即后台自扫 MEDIA_ROOT（归属种子 owner，哈希幂等）。两者都依赖 api 镜像内置 ffmpeg（视频元数据经 ffprobe 提取）。
 
+### GET /admin/fs/tree  （Job000117，需 `admin:system`）
+
+目录树选择器数据源：扫描面板「浏览」按钮逐级展开文件系统层级。**懒加载单层列举**——每次只返回目标目录的直接子目录，前端展开到哪层才请求哪层，层级再深也只付当前层成本。
+
+请求：`?dir=<相对 MEDIA_ROOT 的目录>`（缺省/`"."` = 媒体根本身）。
+
+响应：`200 OK { "root": "<MEDIA_ROOT>", "dir": "<相对路径>", "unreadable": false, "items": [ { "name","rel","readable" } ] }`
+- `items` 只含**目录**，按名排序；文件不上树。符号链接（含指向目录的）经 `os.ReadDir` 的 lstat 语义天然排除——树不会越出 MEDIA_ROOT。
+- `readable=false` 表示 api 进程对该子目录无权限（打开+读 1 条探测失败）：前端以锁定态展示、禁止展开，**不报错**。
+- 目标目录本身无权限时**同样不报错**：`200 { "unreadable": true, "items": [] }`，前端就地显示「无权限访问」占位行。空目录 → `items: []`，前端显示「（无子目录）」占位行。
+
+错误：`400 INVALID_INPUT`（dir 越界=路径穿越 / 目录不存在 / 非目录——与 `POST /admin/scan` 同一 `resolveScanDir` 边界）、`401 UNAUTHORIZED`、`500 INTERNAL`（非权限类底层列举错误）。
+
+> 选中目录后的联动在前端完成：回填扫描输入框并自动触发 `POST /admin/scan`（扫描进行中则只回填不抢跑）。权限语义提示：进程以 root 运行时（CAP_DAC_OVERRIDE）chmod 权限位不构成无权限，锁定态只在非 root/降权部署（或 NFS root-squash）下出现——属部署形态差异，非缺陷。
+
 ---
 
 
