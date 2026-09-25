@@ -75,6 +75,23 @@ server {
         proxy_send_timeout 300s;
     }
 
+    # debug：Job000121 转码远程调试 WS 通道（/debug/channel/:channel_id，设计 §5.5）。
+    # WS Upgrade 必需（漏配 → 握手被 nginx 405 或拿回 index.html，坑位 20 同款）；
+    # 调试会话长寿命（TTL 最长 72h），读写超时放宽到 3600s（nginx 默认 60s 会掐长空闲连接）。
+    # 独立 location：Upgrade/Connection 头只落在 WS 路径上，不给全组 API 平摊。
+    location ~ ^/debug/ {
+        proxy_pass http://api:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $fwd_proto;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
     # 纯 API 路由（URI 原样透传，无路径剥离）
     # ai：/ai/tags 与 /ai/faces（Job000010 Phase 4 零样本打标与人脸扫描触发）
     # bandwidth：/bandwidth、/bandwidth/probe、/bandwidth/self-test（Phase 4 P1 带宽自测）
@@ -86,6 +103,7 @@ server {
     # version：Job000105 构建版本三元组（无鉴权，部署验收/排障第一现场；纯 API 无前缀冲突）
     # scan/fs/jobs：Job000123 成员扫描三端点（POST /scan、GET /fs/tree、GET /jobs/:id；
     #   漏配则成员扫描刷新/直连拿到 index.html 或 405）
+    # debug 不在此列——WS Upgrade/长超时需要独立 location，见上方 ^/debug/ 块
     # setup 不在此列——它同时是前端路由，已移入上面的导航判别组
     location ~ ^/(auth|media|transcode|shares|public|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes|dav|storage|version|scan|fs|jobs)(/|$) {
         proxy_pass http://api:8080;
