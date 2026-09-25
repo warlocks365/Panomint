@@ -100,6 +100,12 @@ const routes = [
         name: 'toolbox',
         component: () => import('../views/ToolboxView.vue')
       },
+      // Job000119 应用内操作手册（设置页入口；内容静态打包自 src/manual，无后端依赖）
+      {
+        path: 'manual',
+        name: 'manual',
+        component: () => import('../views/ManualView.vue')
+      },
       // Phase 5：账号设置（二次验证 TOTP 的启用/关闭）
       {
         path: 'settings',

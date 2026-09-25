@@ -62,6 +62,18 @@
 
     <!-- 版本信息（Job000117）：当前版本 + 历史更新说明 -->
     <VersionCard />
+
+    <!-- 操作手册（Job000119）：应用内帮助，使用方法 + 原理深入 -->
+    <section class="card">
+      <h2 class="card-title">帮助与操作手册</h2>
+      <p class="card-desc">
+        各功能的详细使用方法与原理说明：上传导入、相册与共享空间、地图、人物、语义搜索、分享、
+        管理后台，以及「虚拟目录与物理存储的区别」等概念解析。
+      </p>
+      <div class="actions">
+        <button class="btn" data-testid="open-manual" @click="router.push({ name: 'manual' })">打开操作手册</button>
+      </div>
+    </section>
   </div>
 </template>
 
