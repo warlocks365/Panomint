@@ -2,6 +2,7 @@
 package transcode
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -106,12 +107,19 @@ func canAccessMedia(c *gin.Context, ownerID string) bool {
 	return role == "owner" || role == "admin"
 }
 
-// CreateJob POST /transcode/job {media_id, profile} → {job_id}
+// CreateJob POST /transcode/job {media_id, profile, auto?} → {job_id, reused?}
 // 写 transcode_jobs 并入队 kind=transcode。
+//
+// auto=true（Job000124 播放器自动触发分支）与手动的差异只有两点，闸门/归属/错误口径全同：
+//   - attach-or-create：该媒体已有 pending/running 任务时直接复用其 job_id（202 + reused=true），
+//     同一媒体全站最多一个活动转码任务（防双击/多端并发把队列刷爆）；
+//   - 档位由服务端按源分辨率 ProfileForSource 选取（与 CLI 批量补排同口径），
+//     请求里的 profile 字段被忽略——自动模式服务的是「自适应多档」，人为指定档位无意义。
 func (h *Handler) CreateJob(c *gin.Context) {
 	var req struct {
 		MediaID string `json:"media_id"`
 		Profile string `json:"profile"`
+		Auto    bool   `json:"auto"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.MediaID == "" {
 		errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需含 media_id")
@@ -120,7 +128,7 @@ func (h *Handler) CreateJob(c *gin.Context) {
 	if req.Profile == "" {
 		req.Profile = "1080p"
 	}
-	if !validProfile(req.Profile) {
+	if !req.Auto && !validProfile(req.Profile) {
 		errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "profile 需为 1080p|2k|4k")
 		return
 	}
@@ -128,9 +136,11 @@ func (h *Handler) CreateJob(c *gin.Context) {
 	ctx := c.Request.Context()
 	// 校验媒体存在且为视频（归属校验：本人或 owner/admin）
 	var ownerID, typ string
+	var srcW, srcH int
 	err := h.Pool.QueryRow(ctx,
-		`SELECT owner_id, type::text FROM media WHERE id = $1 AND deleted_at IS NULL`, req.MediaID).
-		Scan(&ownerID, &typ)
+		`SELECT owner_id, type::text, COALESCE(width, 0), COALESCE(height, 0)
+		 FROM media WHERE id = $1 AND deleted_at IS NULL`, req.MediaID).
+		Scan(&ownerID, &typ, &srcW, &srcH)
 	if errors.Is(err, pgx.ErrNoRows) {
 		errJSON(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在")
 		return
@@ -164,6 +174,25 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		return
 	}
 
+	// Job000124 auto 分支：attach-or-create 排在 enqueueOne 之前——
+	// 幂等复用既有活动任务，绝不重复写行/入队（idx_transcode_media 覆盖该查询）。
+	if req.Auto {
+		var existingID string
+		err := h.Pool.QueryRow(ctx,
+			`SELECT id::text FROM transcode_jobs
+			 WHERE media_id = $1 AND status IN ('pending', 'running')
+			 ORDER BY created_at DESC LIMIT 1`, req.MediaID).Scan(&existingID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+			return
+		}
+		if existingID != "" {
+			c.JSON(http.StatusAccepted, gin.H{"job_id": existingID, "reused": true})
+			return
+		}
+		req.Profile = ProfileForSource(srcW, srcH)
+	}
+
 	// 与 CLI 批量补排共用同一份「写行+入队、失败回滚删行」语义（P1-02）：
 	// 入队失败时任务行会被回滚删除，不留下永久阻断自动补排的 pending 僵尸行。
 	jobID, err := enqueueOne(ctx, h.Pool, h.Q, req.MediaID, req.Profile)
@@ -190,19 +219,49 @@ func (h *Handler) GetConfig(c *gin.Context) {
 
 // PutConfig PUT /admin/transcode-config：系统级开关写入（admin:system，路由层校验）。
 // 与地图配置（ActionSettingsPatch/"map-config"）同一审计动作与目标类型，target 区分实例。
+//
+// Job000124 起 body 支持两个字段的**部分更新**（沿用 Job000123「缺失不改」语义，
+// map 先取一层再解指针，防止管理端并发写互相覆盖；两字段全缺 = 400）：
+// {"auto_transcode":true} 只动总闸门，{"realtime_transcode":true} 只动实时开关。
 func (h *Handler) PutConfig(c *gin.Context) {
-	var body struct {
-		AutoTranscode *bool `json:"auto_transcode"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil || body.AutoTranscode == nil {
-		errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需含 auto_transcode（true|false）")
+	var raw map[string]json.RawMessage
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需为 JSON 对象")
 		return
 	}
-	if err := PutSystemAutoTranscode(c.Request.Context(), h.Pool, *body.AutoTranscode); err != nil {
+	var auto, realtime *bool
+	if v, ok := raw["auto_transcode"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "auto_transcode 需为 true|false")
+			return
+		}
+		auto = &b
+	}
+	if v, ok := raw["realtime_transcode"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "realtime_transcode 需为 true|false")
+			return
+		}
+		realtime = &b
+	}
+	if auto == nil && realtime == nil {
+		errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需含 auto_transcode 或 realtime_transcode")
+		return
+	}
+	if err := PutSystemConfig(c.Request.Context(), h.Pool, auto, realtime); err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "保存失败", err)
 		return
 	}
-	h.record(c, map[string]any{"auto_transcode": *body.AutoTranscode})
+	detail := map[string]any{}
+	if auto != nil {
+		detail["auto_transcode"] = *auto
+	}
+	if realtime != nil {
+		detail["realtime_transcode"] = *realtime
+	}
+	h.record(c, detail)
 	v, err := GetSystemConfig(c.Request.Context(), h.Pool)
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)

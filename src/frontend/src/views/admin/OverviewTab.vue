@@ -27,7 +27,7 @@
         <div class="stat-item">
           <dt>索引状态</dt>
           <dd data-testid="stats-index-state">
-            {{ stats.index_status?.state || '—' }}
+            {{ indexStateLabel(stats.index_status?.state) }}
             <span v-if="stats.index_status?.running" class="state state--running">
               运行中 {{ stats.index_status.running }}
             </span>
@@ -44,7 +44,7 @@
           </div>
           <div class="info-row">
             <dt>状态</dt>
-            <dd>{{ stats.index_status.last_job.status }}</dd>
+            <dd>{{ jobStatusLabel(stats.index_status.last_job.status) }}</dd>
           </div>
           <div class="info-row">
             <dt>进度</dt>
@@ -74,6 +74,20 @@ const stats = ref(null)
 const loading = ref(false)
 const err = ref('')
 const forbidden = ref(false)
+
+// 展示层中文映射（API 码值保持英文不动）：idle=最近一次任务完成且队列清空，属正常运行态
+const INDEX_STATE_LABEL = { idle: '空闲', running: '运行中', failed: '失败', unknown: '未知' }
+const JOB_STATUS_LABEL = { pending: '排队中', running: '运行中', done: '已完成', failed: '失败', canceled: '已取消' }
+
+function indexStateLabel(s) {
+  if (!s) return '—'
+  return INDEX_STATE_LABEL[s] ?? s
+}
+
+function jobStatusLabel(s) {
+  if (!s) return '—'
+  return JOB_STATUS_LABEL[s] ?? s
+}
 
 function formatBytes(n) {
   if (!Number.isFinite(n) || n < 0) return '—'

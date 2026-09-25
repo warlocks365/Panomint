@@ -46,3 +46,22 @@ func TestPutSystemAutoTranscodeUpsertSingleton(t *testing.T) {
 		t.Fatal("写入必须走 singleton 原子 upsert（单行硬约束，00023/00038 同款）")
 	}
 }
+
+// Job000124 增量：realtime_transcode 缺省必须恒为 false（存量部署升级后行为逐字节不变），
+// 且部分更新 upsert 必须用 COALESCE 保列（nil = 该列不动，缺失不改语义）。
+func TestRealtimeTranscodeDefaultsAndPartialUpsert(t *testing.T) {
+	b, err := os.ReadFile("sysconfig.go")
+	if err != nil {
+		t.Fatalf("读不到 sysconfig.go: %v", err)
+	}
+	seg := string(b)
+	if DefaultRealtimeTranscode != false {
+		t.Fatal("DefaultRealtimeTranscode 必须恒为 false（Job000124 之前无此能力）")
+	}
+	if !strings.Contains(seg, "realtime_transcode = COALESCE($2") {
+		t.Fatal("部分更新 upsert 必须用 COALESCE($2, ...) 保 realtime 列（缺失不改）")
+	}
+	if !strings.Contains(seg, "PutSystemConfig: 至少需提供一个待更新字段") {
+		t.Fatal("两字段全 nil 必须报错（调用方缺陷的第二道守卫）")
+	}
+}

@@ -89,15 +89,19 @@ export function putMapConfig(patch) {
   return http.put('/admin/map-config', patch).then((r) => r.data)
 }
 
-// ---- 转码设置（admin:system，Job000120-r2：系统级自动 HLS 转码开关）----
-// GET /admin/transcode-config → {auto_transcode, updated_at?}（无配置行时缺省=开启）
+// ---- 转码设置（admin:system，Job000120-r2：系统级自动 HLS 转码开关；
+// Job000124 增 realtime_transcode「播放时自动转码」，部分更新语义：undefined = 不改）----
+// GET /admin/transcode-config → {auto_transcode, realtime_transcode, updated_at?}（无配置行时缺省=总闸门开/实时关）
 export function getTranscodeConfig() {
   return http.get('/admin/transcode-config').then((r) => r.data)
 }
 
-// PUT /admin/transcode-config ← {auto_transcode: true|false} → 同 GET 视图（写审计）
-export function putTranscodeConfig(autoTranscode) {
-  return http.put('/admin/transcode-config', { auto_transcode: autoTranscode }).then((r) => r.data)
+// PUT /admin/transcode-config ← {auto_transcode?, realtime_transcode?}（至少一项）→ 同 GET 视图（写审计）
+export function putTranscodeConfig(autoTranscode, realtimeTranscode) {
+  const body = {}
+  if (autoTranscode !== undefined) body.auto_transcode = autoTranscode
+  if (realtimeTranscode !== undefined) body.realtime_transcode = realtimeTranscode
+  return http.put('/admin/transcode-config', body).then((r) => r.data)
 }
 
 // ---- 权限体系增强（Job000067 / F1）----

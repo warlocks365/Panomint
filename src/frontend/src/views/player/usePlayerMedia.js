@@ -7,6 +7,9 @@ import { getAccessToken } from '../../utils/tokenStore'
 // load() 四态分支（pano 照片贴球面 / pano 视频 HLS / 普通照片原图 / 普通视频 HLS+blob 回退）
 // + blob URL 池（track/revoke 配对，防泄漏）+ 代次守卫（快速切换旧响应不落地）
 // + 转码发起与轮询（连续失败 5 次置 failed 停重试）。
+// Job000124：播放时自动转码——开关开且总闸门开时，无 HLS 视频播放即自动发起
+//（auto 分支服务端 attach-or-create，幂等）；普通视频转码期间先播原始文件，
+// 完成后原地热切换 HLS；hls.js ABR 调优（capLevelToPlayerSize + 缓冲上界）。
 // plainVideoRef 由宿主传入（DOM 归属宿主）；plainHls 实例本模块自持，cleanup 销毁。
 const API_BASE = http.defaults.baseURL
 
@@ -20,8 +23,10 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   const photoUrl = ref('')
   const panoPhotoUrl = ref('') // 360 照片：原图 blob URL（球面贴图）
   const transcode = ref({ jobId: '', status: '', starting: false, failed: false })
-  // Job000120：用户级「自动 HLS 转码」开关（false = 播放器不得发起转码，直接播原始文件）
+  // Job000120-r2：系统级「自动 HLS 转码」总闸门（false = 播放器不得发起转码，直接播原始文件）
   const transcodeDisabled = ref(false)
+  // Job000124：系统级「播放时自动转码」开关（false = 保持手动按钮现状）
+  const realtimeEnabled = ref(false)
 
   let pollTimer = 0
   let plainHls = null
@@ -55,20 +60,23 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
     pano.value = null
     transcode.value = { jobId: '', status: '', starting: false, failed: false }
     transcodeDisabled.value = false
+    realtimeEnabled.value = false
     pollFailCount = 0
 
     try {
       const [d, p, cfg] = await Promise.all([
         http.get(`/media/${mediaId.value}`),
         http.get(`/media/${mediaId.value}/360`),
-        // 系统级开关每次播放现取（管理后台改完全站即生效；失败按开启处理，
-        // 宁可提示转码也不误锁播放）。Job000120-r2：从 /user/ui-prefs 上收为 /transcode/config。
+        // 系统级开关每次播放现取（管理后台改完全站即生效）。
+        // 总闸门失败按开启处理（宁可提示转码也不误锁播放，Job000120-r2）；
+        // 实时开关失败按关闭处理（宁可退手动也不误自动，Job000124）。
         http.get('/transcode/config').catch(() => null)
       ])
       if (seq !== loadSeq) return // 已切到新媒体：旧响应不得落地（其 blob 可能已被 cleanup revoke）
       detail.value = d.data
       pano.value = p.data
       transcodeDisabled.value = !!cfg && cfg.data && cfg.data.auto_transcode === false
+      realtimeEnabled.value = !!cfg && cfg.data && cfg.data.realtime_transcode === true
 
       if (p.data.is_360) {
         // 360 媒体：直接全景播放（照片贴球面 / 视频走 HLS），无「普通播放器 → 点按钮」两步
@@ -79,6 +87,9 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
           panoPhotoUrl.value = url
         } else if (p.data.hls_master) {
           hlsUrl.value = API_BASE + p.data.hls_master
+        } else if (realtimeEnabled.value && !transcodeDisabled.value) {
+          // Job000124：播放时自动转码——无 HLS 的 360 视频自动发起，进度经 TranscodePrompt 展示
+          startTranscode(true)
         }
       } else if (d.data.type === 'photo') {
         mode.value = 'photo'
@@ -91,6 +102,11 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
         await nextTick()
         if (seq !== loadSeq) return
         setupPlainVideo(p.data.hls_master, seq)
+        if (!p.data.hls_master && realtimeEnabled.value && !transcodeDisabled.value) {
+          // Job000124：普通视频无 HLS 且实时开关开——后台自动转码，期间原始文件照播，
+          // 完成后 pollJob 原地热切换 HLS（用户无感升级）
+          startTranscode(true)
+        }
       }
     } catch (e) {
       if (seq !== loadSeq) return
@@ -103,8 +119,17 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   function setupPlainVideo(master, seq) {
     const v = plainVideoRef.value
     if (!v) return
+    if (plainHls) {
+      plainHls.destroy() // 热切换前先拆旧实例（Job000124：转码完成后 blob → HLS 升级）
+      plainHls = null
+    }
     if (master && Hls.isSupported()) {
       plainHls = new Hls({
+        // ABR 调优（Job000124）：不投放超过播放器像素尺寸的档位；缓冲上界 30s/60s，
+        // 升降档交给 hls.js 双 EWMA 带宽估算（直播式自适应体验，防抖由估算器天然承担）
+        capLevelToPlayerSize: true,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
         xhrSetup: (xhr) => {
           const token = getAccessToken()
           if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token)
@@ -112,7 +137,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
       })
       plainHls.loadSource(API_BASE + master)
       plainHls.attachMedia(v)
-    } else {
+    } else if (!master) {
       // 无 HLS 或 Safari 原生：回退下载 blob（Safari 原生 HLS 无法带 Bearer，同样走 blob）
       fetchBlobUrl(`/media/${mediaId.value}/download`)
         .then((url) => {
@@ -126,22 +151,43 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
     }
   }
 
-  async function startTranscode() {
-    // Job000120：开关关闭时客户端直接挡（服务端 CreateJob 同样 409 拒绝，双保险）
+  // startTranscode：auto=true 走 Job000124 自动分支（服务端 attach-or-create + 按源选档）；
+  // auto=false 保持 Job000120 手动语义（profile 写死 1080p，新建任务）。
+  async function startTranscode(auto = false) {
+    const seq = loadSeq // 代次捕获：退避重试落地前若已切媒体，结果不得写入新态
+    // Job000120：总闸门关闭时客户端直接挡（服务端 CreateJob 同样 409 拒绝，双保险）
     if (transcodeDisabled.value) {
-      error.value = '已关闭自动转码，可在设置页重新开启'
+      if (!auto) error.value = '已关闭自动转码，可在设置页重新开启'
       return
     }
     transcode.value.starting = true
     transcode.value.failed = false
     try {
-      const res = await http.post('/transcode/job', { media_id: mediaId.value, profile: '1080p' })
+      const body = auto ? { media_id: mediaId.value, auto: true } : { media_id: mediaId.value, profile: '1080p' }
+      const res = await http.post('/transcode/job', body)
       transcode.value.jobId = res.data.job_id
       transcode.value.status = 'pending'
       pollFailCount = 0
       pollJob()
     } catch (e) {
-      error.value = e.response?.data?.error?.message || '发起转码失败'
+      if (e?.response?.status === 429 && auto) {
+        // 全局限流（整站共享 60 令牌桶）：自动触发退避 3s 重试一次，再败则按失败态展示
+        await new Promise((r) => setTimeout(r, 3000))
+        if (seq !== loadSeq) return
+        try {
+          const res = await http.post('/transcode/job', { media_id: mediaId.value, auto: true })
+          transcode.value.jobId = res.data.job_id
+          transcode.value.status = 'pending'
+          pollJob()
+          return
+        } catch (e2) {
+          e = e2
+        }
+      }
+      // 自动分支失败不打扰播放：普通视频正播原始文件（提示由 transcode.failed 驱动），
+      // 360 视频由 TranscodePrompt 的失败态给出「重新发起」按钮
+      transcode.value.failed = true
+      if (!auto) error.value = e.response?.data?.error?.message || '发起转码失败'
     } finally {
       transcode.value.starting = false
     }
@@ -157,10 +203,17 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
         if (res.data.status === 'done') {
           const p = await http.get(`/media/${mediaId.value}/360`)
           pano.value = p.data
-          if (p.data.hls_master) hlsUrl.value = API_BASE + p.data.hls_master
+          if (mode.value === 'video' && plainVideoRef.value) {
+            // Job000124 热切换：普通视频转码完成后原地换 HLS（blob 继续兜底由 setupPlainVideo 处理）
+            if (p.data.hls_master) setupPlainVideo(p.data.hls_master, loadSeq)
+          } else if (p.data.hls_master) {
+            hlsUrl.value = API_BASE + p.data.hls_master
+          }
           return
         }
         if (res.data.status === 'failed') {
+          // 降级（Job000124）：普通视频保持原始文件播放（transcode.failed 仅驱动轻提示）；
+          // 360 视频无回退可能，TranscodePrompt 失败态可手动重试；服务端队列层仍有退避重试。
           transcode.value.failed = true
           return
         }
@@ -191,7 +244,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
 
   return {
     loading, error, detail, pano, mode, hlsUrl, photoUrl, panoPhotoUrl, transcode,
-    transcodeDisabled,
+    transcodeDisabled, realtimeEnabled,
     panoKind, panoSrc, panoReady,
     load, startTranscode, cleanup
   }

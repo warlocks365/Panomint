@@ -32,6 +32,13 @@
       <!-- 普通视频 -->
       <div v-else class="video-wrap">
         <video ref="plainVideoRef" controls playsinline class="plain-video"></video>
+        <!-- Job000124：后台自动转码的轻提示（不遮播放）——进行中「完成后自动切换」、失败「保持原始播放」 -->
+        <div v-if="media.mode.value === 'video' && media.transcode.value.jobId && !media.transcode.value.failed" class="tc-notice" data-testid="tc-inline-notice">
+          {{ media.transcode.value.status === 'done' ? '已切换为多码率自适应流' : '转码中…（' + (media.transcode.value.status || 'pending') + '）完成后自动切换' }}
+        </div>
+        <div v-else-if="media.mode.value === 'video' && media.transcode.value.failed" class="tc-notice tc-notice--warn" data-testid="tc-inline-failed">
+          转码失败，已保持原始文件播放
+        </div>
       </div>
 
       <!-- 退出：移动端返回按钮（左上） + 右上 ×（全端） -->
@@ -186,8 +193,28 @@ onBeforeUnmount(() => {
 .photo { max-width: 100%; max-height: 100%; object-fit: contain; }
 .video-wrap {
   height: 100%; display: flex; align-items: center; justify-content: center;
+  position: relative;
 }
 .plain-video { max-width: 100%; max-height: 100%; }
+
+/* Job000124：后台自动转码轻提示——贴底悬浮，不遮播放控制条 */
+.tc-notice {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 20;
+}
+.tc-notice--warn {
+  background: rgba(180, 40, 40, 0.82);
+}
 
 /* 退出 / 信息按钮：悬浮于舞台之上，高于 360 播放器的控制栏（z-index 10） */
 .exit-btn {
