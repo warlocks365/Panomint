@@ -1,9 +1,23 @@
-# API 详细契约 (v1.8)
+# API 详细契约 (v1.10)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.8 ｜ 日期：2026-09-24\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.10 ｜ 日期：2026-09-25\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.10 变更说明（2026-09-25，Job000120「自动 HLS 转码用户级开关」）
+
+背景：超大视频转码长时间占满宿主机 CPU/内存。开关落 `user_ui_prefs.auto_transcode`（迁移 `00037`，`BOOLEAN NOT NULL DEFAULT true`，存量行为不变），关闭后播放器直接播放原始文件，缩略图/语义索引照常生成（本就不依赖转码管线）。
+
+1. `GET /user/ui-prefs` 响应增 `auto_transcode`（bool，缺省 true）——设置页「播放与转码」卡与播放器读取同一真源
+2. `PUT /user/ui-prefs` 对该键采用 **keep-on-absent** 例外语义：请求缺省此键 = **保留现值**（不回落默认）——旧客户端整行 PUT 不会把用户已关的开关清回默认；与既有 8 键「缺省=清回默认」语义不同，是刻意的向后兼容取舍（INSERT 分支缺省落 `true`）
+3. `POST /transcode/job` 增闸门：调用者 `auto_transcode=false` → **409 `TRANSCODE_DISABLED`**「已关闭自动转码，可在设置页重新开启」（闸门在归属/类型校验之后、写任务行+入队之前）。CLI 批量补排（`transcodectl enqueue-videos`）属管理员工具不走本端点、不受约束
+4. 前端配套：设置页 `TranscodeSettingsCard`（data-testid `tc-toggle`）；播放器每次加载现取偏好——普通视频无 HLS 维持原始文件 blob 回退，360° 视频无 HLS 且开关关闭时如实提示（360° 依赖 HLS 切片，原始文件无法全景播放）；`startTranscode` 客户端先挡（服务端 409 双保险）
+
+## v1.9 变更说明（2026-09-25，Job000118「存储位置移除 + 挂载语义目录」）
+
+1. **移除 §18 存储位置**：功能自 v1.7 落地后从未启用（写入侧零消费、线上零数据，评估见《存储位置评估与挂载语义改造方案_v1.0.md》），整功能删除——`internal/storage/locations.go` 与四端点移除，迁移 `00035_drop_storage_locations.sql` 回滚 `media.location_id` 与 `storage_locations` 表；前端 `StorageLocationPanel.vue` 删除
+2. **网络挂载落点语义化**：`POST /storage/mounts` 新增 `landing_dir` 字段（相对媒体库根、逐段 slug 校验、拒穿越、保留前缀 `_imports`/`@eaDir` 黑名单；创建后不可改）。创建时后端在媒体库根下 `MkdirAll(landing_dir)` 并注册 `folder_dirs`——**空挂载目录在「文件夹」页签立即可见**，且天然可被扫描。存量行迁移回填 `'_imports/'||left(id::text,8)`（行为不变）。详见 §18 占位节下方存储挂载端点
 
 ## v1.8 变更说明（2026-09-24，v1.0.0 发布：首次安装引导 + 版本端点，Job000105/107）
 
@@ -546,11 +560,11 @@ bbox 内去重地名列表（含计数），供地图底部「地理位置罗列
 
 ### GET /user/ui-prefs
 
-当前用户地图 UI 偏好：`{ "map_slider_pos","map_filter_side","map_default_provider","map_default_zoom" }`（需登录）；v1.6 增 `"spaces_group_by_album"`（bool，默认 false）= 空间页个人空间「按相册分组」视图模式（Job000101）
+当前用户地图 UI 偏好：`{ "map_slider_pos","map_filter_side","map_default_provider","map_default_zoom" }`（需登录）；v1.6 增 `"spaces_group_by_album"`（bool，默认 false）= 空间页个人空间「按相册分组」视图模式（Job000101）；v1.10 增 `"auto_transcode"`（bool，默认 true）= 自动 HLS 转码开关（Job000120，关闭后播放器直接播原始文件）
 
 ### PUT /user/ui-prefs
 
-更新偏好（滑块位置/筛选栏侧/默认底图）；v1.6 起同步支持 `spaces_group_by_album`（固定键整体替换契约，未携带键不落库变更）。
+更新偏好（滑块位置/筛选栏侧/默认底图）；v1.6 起同步支持 `spaces_group_by_album`（固定键整体替换契约，未携带键不落库变更）；v1.10 起支持 `auto_transcode`（**keep-on-absent 例外**：未携带键 = 保留现值，不清回默认——理由见 v1.10 变更说明第 2 条）。
 
 ### GET /admin/map-config
 
@@ -721,7 +735,7 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 
 ### POST /transcode/job
 
-提交转码：`{ "media_id","kind":"thumbnail|hls|memories","profile":"1080p|2k|4k" }` → `{ "job_id" }`
+提交转码：`{ "media_id","kind":"thumbnail|hls|memories","profile":"1080p|2k|4k" }` → `{ "job_id" }`。v1.10 起增用户级闸门：调用者 `auto_transcode=false`（`GET /user/ui-prefs`）→ **409 `TRANSCODE_DISABLED`**「已关闭自动转码，可在设置页重新开启」
 
 ### GET /transcode/job/:id（v1.2 补录）
 
@@ -880,26 +894,14 @@ v1.1 声明的 `/ai/jobs/:id` 未注册；任务状态由 **`GET /admin/jobs/:id
 ---
 
 
-## 18. 存储位置（命名物理存储根，v1.7 补录，Job000103）
+## 18. ~~存储位置~~（v1.9 移除，Job000118）
 
-管理后台「存储」页签内嵌面板（`StorageLocationPanel.vue`）。位置 = 命名物理存储根（容器内挂载目录名），媒体经 `media.location_id` 归属；NULL = 默认存储根。
+存储位置功能自 v1.7 落地后从未启用（写入侧零消费、线上零数据），Job000118 整功能移除：
+`internal/storage/locations.go` 及四端点（GET/POST/PATCH/DELETE `/storage/locations`）删除，
+迁移 `00035_drop_storage_locations.sql` 回滚 `media.location_id` 与 `storage_locations` 表。
+挂载导入落点由 `_imports/<id8>` 技术前缀改为 `landing_dir` 语义目录（见存储挂载端点与 §9 文件夹）。
 
-### GET /storage/locations
-
-列表。需系统管理员（非管理员 403）。响应 `{ "locations":[ { "id","name","description","media_count","created_at" } ] }`；`media_count` = 引用计数（>0 时前端禁删入口，后端 409 双保险）。
-
-### POST /storage/locations
-
-新建。请求 `{ "name","description?" }`。`name` 违反 `^[a-z][a-z0-9-]{0,31}$` → 400 `INVALID_NAME`；重名 → 409 `DUPLICATE_NAME`。成功 201，响应 = 该位置对象。
-
-### PATCH /storage/locations/:id
-
-改描述。请求 `{ "description" }`；**带 `name` → 400 `NAME_IMMUTABLE`（名称创建后不可改，引用稳定裁决）**。不存在 → 404。成功 204。
-
-### DELETE /storage/locations/:id
-
-删除。仍有媒体引用 → 409 `LOCATION_IN_USE`；无引用物理删（引用行经 `ON DELETE SET NULL` 回默认存储根），成功 204；不存在 → 404。
-
+---
 
 ## 19. 首次安装引导与版本（v1.8，Job000105/107）
 

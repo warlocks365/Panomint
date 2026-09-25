@@ -25,23 +25,3 @@ export async function testMount(id) {
   const { data } = await http.post(`/storage/mounts/${id}/test`)
   return data
 }
-
-// Job000103 存储位置（命名物理存储根）管理 API。
-// 名称约束与后端双保险同口径：^[a-z][a-z0-9-]{0,31}$（Docker 映射名 slug 化，防路径穿越）。
-export async function listLocations() {
-  const { data } = await http.get('/storage/locations')
-  return data.locations || []
-}
-
-export async function createLocation(payload) {
-  const { data } = await http.post('/storage/locations', payload)
-  return data
-}
-
-export async function patchLocation(id, patch) {
-  await http.patch(`/storage/locations/${id}`, patch)
-}
-
-export async function deleteLocation(id) {
-  await http.delete(`/storage/locations/${id}`)
-}

@@ -21,7 +21,8 @@
 
       <p class="hint">
         挂载远程存储（WebDAV / SMB / NFS）并增量导入媒体库：worker 侧执行器自动对账，
-        导入文件落在媒体库 <code>_imports/&lt;挂载ID前8位&gt;/</code> 前缀下，哈希去重可反复同步。
+        导入文件落在创建时指定的语义目录（默认 <code>imports/&lt;名称&gt;/</code>）——
+        目录在「文件夹」页签立即可见、可被扫描，创建后不可改。
         凭据经服务端 AES-256-GCM 加密存储，界面不回显。
       </p>
 
@@ -44,9 +45,6 @@
         @saved="onSaved"
       />
     </section>
-
-    <!-- Job000103 存储位置（命名物理存储根）管理：自持加载与 CRUD，面板内聚 -->
-    <StorageLocationPanel />
   </div>
 </template>
 
@@ -62,7 +60,6 @@ import { errMessage } from '../../stores/auth'
 import { deleteMount, listMounts } from '../../api/storage'
 import StorageMountList from './StorageMountList.vue'
 import StorageMountDialog from './StorageMountDialog.vue'
-import StorageLocationPanel from './StorageLocationPanel.vue'
 import StorageScanPanel from './StorageScanPanel.vue'
 
 const mounts = ref([])
@@ -134,7 +131,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 页签根：三块面板（扫描导入/网络挂载/存储位置）纵向排布留缝 */
+/* 页签根：两块面板（扫描导入/网络挂载）纵向排布留缝 */
 .storage-tab {
   display: flex;
   flex-direction: column;

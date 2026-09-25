@@ -255,17 +255,12 @@ func main() {
 	authed.PUT("/folders/grants", permWrite, foldersH.SetGrants)
 	// Job000070 F4 网络挂载管理：写=owner/admin（handler 内 RolePrivileged 前置），
 	// 列表=登录即可（shared 挂载全员可见）。
-	storageH := &storage.Handler{Pool: pool}
+	storageH := &storage.Handler{Pool: pool, MediaRoot: cfg.MediaRoot}
 	authed.GET("/storage/mounts", permRead, storageH.List)
 	authed.POST("/storage/mounts", permWrite, storageH.Create)
 	authed.PATCH("/storage/mounts/:id", permWrite, storageH.Patch)
 	authed.DELETE("/storage/mounts/:id", permWrite, storageH.Delete)
 	authed.POST("/storage/mounts/:id/test", permWrite, storageH.Test)
-	// Job000103 存储位置（命名物理存储根，Docker 映射名约束 slug 化）
-	authed.GET("/storage/locations", permRead, storageH.ListLocations)
-	authed.POST("/storage/locations", permWrite, storageH.CreateLocation)
-	authed.PATCH("/storage/locations/:id", permWrite, storageH.PatchLocation)
-	authed.DELETE("/storage/locations/:id", permWrite, storageH.DeleteLocation)
 	transH := &transcode.Handler{Pool: pool, Q: transQ, HLSDir: cfg.HLSDir}
 	authed.POST("/transcode/job", permWrite, transH.CreateJob)
 	authed.GET("/transcode/job/:id", permRead, transH.JobStatus)

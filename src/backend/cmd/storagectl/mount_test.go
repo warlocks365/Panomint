@@ -94,3 +94,27 @@ func TestListActiveMounts_Parse(t *testing.T) {
 		}
 	}
 }
+
+// Job000118：落点语义目录（landing_dir 优先，空值回退旧式 _imports/<id8>）。
+func TestLandingDirOf(t *testing.T) {
+	m := mountRec{id: "abcdef12-3456", landingDir: "imports/holiday"}
+	if got := landingDirOf(m); got != "imports/holiday" {
+		t.Errorf("显式落点优先: %q", got)
+	}
+	old := mountRec{id: "abcdef12-3456"}
+	if got := landingDirOf(old); got != "_imports/abcdef12" {
+		t.Errorf("空落点应回退旧式: %q", got)
+	}
+}
+
+func TestSyncLocalDir_LandingDir(t *testing.T) {
+	t.Setenv("UPLOAD_DIR", "/data/media")
+	m := mountRec{id: "abcdef12-3456", landingDir: "imports/holiday"}
+	if got := syncLocalDir(m); got != "/data/media/imports/holiday" {
+		t.Errorf("语义目录落地: %q", got)
+	}
+	old := mountRec{id: "abcdef12-3456"}
+	if got := syncLocalDir(old); got != "/data/media/_imports/abcdef12" {
+		t.Errorf("存量回退旧式落地: %q", got)
+	}
+}

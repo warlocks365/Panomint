@@ -13,7 +13,7 @@
       <div class="mount-sub">
         <span class="mount-conn">{{ connSummary(m) }}</span>
         <span v-if="m.mount_path" class="mount-path">挂载点 {{ m.mount_path }}</span>
-        <span class="mount-import">媒体库前缀 _imports/{{ m.id.slice(0, 8) }}/</span>
+        <span class="mount-import" data-testid="storage-landing">导入到 {{ m.landing_dir || '_imports/' + m.id.slice(0, 8) + '/' }}</span>
       </div>
       <p v-if="m.last_error" class="mount-error" :title="m.last_error">最近错误：{{ m.last_error }}</p>
       <ul v-if="testResults[m.id]" class="test-result" data-testid="storage-test-result">

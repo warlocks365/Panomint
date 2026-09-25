@@ -176,18 +176,19 @@ func nfsMount(cc connConf, mp string) error {
 	return nil
 }
 
-// syncLocalDir 挂载媒体的本地落地目录（主存储内，普通目录语义，用户可管理）。
+// syncLocalDir 挂载媒体的本地落地目录（=MEDIA_ROOT 下语义目录，Job000118）。
 // 导入式语义：远程文件复制进 /data/media（断连后已导入内容仍可读可用；
 // hash 去重保证重复导入幂等）。不沿用"扫描挂载点引用路径"——umount 后文件不可读。
-func syncLocalDir(id string) string {
-	return path.Join(os.Getenv("UPLOAD_DIR"), "_imports", mountKey(id))
+// 落点来自 storage_mounts.landing_dir（语义目录，文件夹树可见）；存量空值回退旧式。
+func syncLocalDir(m mountRec) string {
+	return path.Join(os.Getenv("UPLOAD_DIR"), landingDirOf(m))
 }
 
 // syncMount 增量同步挂载内容到本地落地目录：
 // webdav/smb 走 rclone copy（按 size+mtime 跳过，无变更秒过）；nfs 走 cp -ru。
 // cfg 内容在 rcloneMount 里已删——同步复用挂载点视图（FUSE 读），nfs 直接读挂载点。
 func syncMount(m mountRec, mp string) (string, error) {
-	local := syncLocalDir(m.id)
+	local := syncLocalDir(m)
 	if err := os.MkdirAll(local, 0o755); err != nil {
 		return "", fmt.Errorf("建落地目录: %w", err)
 	}

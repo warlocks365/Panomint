@@ -56,14 +56,16 @@ var (
 
 const timeMillisecond = time.Millisecond
 
-// mountRec 轮询行。
+// mountRec 轮询行。landingDir=导入落点（Job000118，相对媒体库根的语义目录）；
+// 存量行经 00036 迁移回填非空，空值防御回退旧式 _imports/<id8>。
 type mountRec struct {
-	id       string
-	name     string
-	typ      string
-	connJSON string
-	credsEnc string
-	ownerID  string
+	id         string
+	name       string
+	typ        string
+	connJSON   string
+	credsEnc   string
+	ownerID    string
+	landingDir string
 }
 
 func main() {
@@ -107,14 +109,14 @@ func main() {
 // reconcile 一轮对账。
 func reconcile(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, lastHealth, lastSync map[string]time.Time, probeBad map[string]bool) error {
 	rows, err := pool.Query(ctx,
-		`SELECT id::text, name, type, conn::text, creds_enc, owner_id::text FROM storage_mounts`)
+		`SELECT id::text, name, type, conn::text, creds_enc, owner_id::text, landing_dir FROM storage_mounts`)
 	if err != nil {
 		return err
 	}
 	var want []mountRec
 	for rows.Next() {
 		var m mountRec
-		if err := rows.Scan(&m.id, &m.name, &m.typ, &m.connJSON, &m.credsEnc, &m.ownerID); err != nil {
+		if err := rows.Scan(&m.id, &m.name, &m.typ, &m.connJSON, &m.credsEnc, &m.ownerID, &m.landingDir); err != nil {
 			rows.Close()
 			return err
 		}
@@ -202,6 +204,15 @@ func reconcileWith(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, 
 	return nil
 }
 
+// landingDirOf 落点（相对媒体库根）。非空用之；空=存量迁移前旧行防御回退 _imports/<id8>
+//（与旧 syncLocalDir/ScanAsPrefixed 前缀逐字节一致，行为不变）。
+func landingDirOf(m mountRec) string {
+	if m.landingDir != "" {
+		return m.landingDir
+	}
+	return "_imports/" + mountKey(m.id)
+}
+
 // syncAndIndex 增量同步到本地落地目录 + 索引导入（hash 去重幂等，可反复执行）。
 func syncAndIndex(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, m mountRec, mp string, lastSync map[string]time.Time) error {
 	if time.Since(lastSync[m.id]) < syncEvery {
@@ -212,7 +223,8 @@ func syncAndIndex(ctx context.Context, pool *pgxpool.Pool, idx *index.Indexer, m
 	if err != nil {
 		return err
 	}
-	st, err := idx.ScanAsPrefixed(ctx, local, m.ownerID, "_imports/"+mountKey(m.id))
+	// 前缀=落点：media.path/folder_path 记 相对媒体库根的语义路径（文件夹树按此浏览）。
+	st, err := idx.ScanAsPrefixed(ctx, local, m.ownerID, landingDirOf(m))
 	if err != nil {
 		return err
 	}

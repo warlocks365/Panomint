@@ -8,60 +8,8 @@
         <input v-model.trim="form.name" class="input" type="text" maxlength="120" data-testid="storage-dlg-name" />
       </label>
 
-      <label class="field">
-        <span class="field-label">协议类型</span>
-        <select v-model="form.type" class="input" :disabled="mode === 'edit'" data-testid="storage-dlg-type">
-          <option value="webdav">WebDAV</option>
-          <option value="smb">SMB</option>
-          <option value="nfs">NFS</option>
-        </select>
-        <span v-if="mode === 'edit'" class="hint-inline">类型创建后不可更改（连接配置结构不同）</span>
-      </label>
-
-      <template v-if="form.type === 'webdav'">
-        <label class="field">
-          <span class="field-label">服务器 URL</span>
-          <input v-model.trim="form.url" class="input" type="text" placeholder="https://example.com/dav" data-testid="storage-dlg-url" />
-        </label>
-      </template>
-      <template v-else-if="form.type === 'smb'">
-        <label class="field">
-          <span class="field-label">主机</span>
-          <input v-model.trim="form.host" class="input" type="text" placeholder="192.168.1.10" data-testid="storage-dlg-host" />
-        </label>
-        <label class="field">
-          <span class="field-label">共享名</span>
-          <input v-model.trim="form.share" class="input" type="text" placeholder="photos" data-testid="storage-dlg-share" />
-        </label>
-        <label class="field">
-          <span class="field-label">端口（可选，默认 445）</span>
-          <input v-model.number="form.port" class="input" type="number" min="0" max="65535" data-testid="storage-dlg-port" />
-        </label>
-      </template>
-      <template v-else>
-        <label class="field">
-          <span class="field-label">主机</span>
-          <input v-model.trim="form.host" class="input" type="text" placeholder="192.168.1.10" data-testid="storage-dlg-host" />
-        </label>
-        <label class="field">
-          <span class="field-label">导出路径</span>
-          <input v-model.trim="form.export" class="input" type="text" placeholder="/srv/photos" data-testid="storage-dlg-export" />
-        </label>
-      </template>
-      <template v-if="form.type !== 'nfs'">
-        <label class="field">
-          <span class="field-label">用户名（可选，匿名留空）</span>
-          <input v-model="form.credsUser" class="input" type="text" :placeholder="userPlaceholder" data-testid="storage-dlg-user" autocomplete="off" />
-        </label>
-        <label class="field">
-          <span class="field-label">密码</span>
-          <input v-model="form.credsPass" class="input" type="password" :placeholder="passPlaceholder" data-testid="storage-dlg-pass" autocomplete="new-password" />
-        </label>
-        <label v-if="form.type === 'smb'" class="field">
-          <span class="field-label">域（可选）</span>
-          <input v-model="form.credsDomain" class="input" type="text" data-testid="storage-dlg-domain" autocomplete="off" />
-        </label>
-      </template>
+      <!-- 协议类型+连接字段+凭据字段组（Job000118 拆出，行数棘轮 O1） -->
+      <MountConnFields :form="form" :mode="mode" />
 
       <label class="field">
         <span class="field-label">可见性</span>
@@ -69,6 +17,17 @@
           <option value="personal">个人（仅管理员与自己）</option>
           <option value="shared">共享（全部用户可用）</option>
         </select>
+      </label>
+
+      <!-- Job000118 导入落点：媒体库根下的语义目录。创建时默认 imports/<名称slug>，
+           可改；创建后不可改（编辑态锁定）。空挂载目录创建后即在「文件夹」页签可见，
+           并会被扫描导入覆盖。 -->
+      <label class="field">
+        <span class="field-label">导入到</span>
+        <input v-model.trim="form.landingDir" class="input" type="text" :disabled="mode === 'edit'" placeholder="imports/我的相册" data-testid="storage-dlg-landing" @input="landingTouched = true" />
+        <span v-if="mode === 'edit'" class="hint-inline">导入落点创建后不可更改</span>
+        <span v-else-if="landingErr" class="hint-inline hint-inline--error" data-testid="storage-dlg-landing-err">{{ landingErr }}</span>
+        <span v-else class="hint-inline">相对媒体库根；多级用 / 分隔；缺省 imports/&lt;名称&gt;</span>
       </label>
 
       <p v-if="mode === 'edit' && editing?.has_creds" class="hint">
@@ -89,9 +48,10 @@
 // StorageTab 拆解（Job000085）：新建/编辑挂载对话框。
 // 表单态/提交/凭据占位语义（编辑态已设凭据=留空不变/输入覆盖/全空清除）全部自持；
 // 提交成功 emit saved(message)，宿主负责全局消息与列表刷新。凭据红线：密文不出端点，界面不回显。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { errMessage } from '../../stores/auth'
 import { createMount, patchMount } from '../../api/storage'
+import MountConnFields from './MountConnFields.vue'
 
 const props = defineProps({
   mode: { type: String, required: true }, // 'create' | 'edit'
@@ -102,13 +62,40 @@ const emit = defineEmits(['close', 'saved'])
 const submitting = ref(false)
 const dialogError = ref('')
 const form = ref(emptyForm())
+// 落点自动跟随名称（用户手动编辑后停跟；编辑态恒锁）。
+const landingTouched = ref(false)
 
 const credMask = '********'
-const userPlaceholder = computed(() =>
-  props.mode === 'edit' && props.editing?.has_creds ? '已设置（留空不变）' : '可选'
-)
-const passPlaceholder = computed(() =>
-  props.mode === 'edit' && props.editing?.has_creds ? credMask + '（不改动）' : '可选'
+
+// slugify：与后端 slugifyName 同口径（小写、非字母数字压成连字符、去首尾连字符）。
+function slugify(s) {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+// 落点预校验（与后端 normalizeLandingDir 同口径；后端 400 BAD_LANDING_DIR 仍是权威闸门）。
+const landingErr = computed(() => {
+  if (props.mode === 'edit') return ''
+  const segs = (form.value.landingDir || '').trim().replace(/^\/+|\/+$/g, '').split('/')
+  if (segs.length === 1 && segs[0] === '') return '导入落点不能为空'
+  for (const seg of segs) {
+    if (!seg || seg === '.' || seg === '..') return `落点含非法路径段「${seg || '(空)'}」`
+    if (seg.toLowerCase() === '@eadir') return `落点段「${seg}」为系统保留目录`
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(seg)) return `落点段「${seg}」须为字母/数字开头的小写字母·数字·连字符（≤64 位）`
+  }
+  if (segs[0] === '_imports') return '落点前缀 _imports 为系统保留，请改用 imports/<名称>'
+  return ''
+})
+
+watch(
+  () => form.value.name,
+  (n) => {
+    if (props.mode === 'edit' || landingTouched.value) return
+    const slug = slugify(n || '')
+    form.value.landingDir = 'imports/' + (slug || 'import')
+  }
 )
 
 if (props.mode === 'edit' && props.editing) {
@@ -125,7 +112,8 @@ if (props.mode === 'edit' && props.editing) {
     credsUser: '',
     credsPass: '',
     credsDomain: '',
-    visibility: m.visibility || 'personal'
+    visibility: m.visibility || 'personal',
+    landingDir: m.landing_dir || ''
   }
 }
 
@@ -141,7 +129,8 @@ function emptyForm() {
     credsUser: '',
     credsPass: '',
     credsDomain: '',
-    visibility: 'personal'
+    visibility: 'personal',
+    landingDir: 'imports/import'
   }
 }
 
@@ -158,6 +147,10 @@ function buildConn() {
 
 async function submit() {
   if (submitting.value) return
+  if (landingErr.value) {
+    dialogError.value = landingErr.value
+    return
+  }
   submitting.value = true
   dialogError.value = ''
   const f = form.value
@@ -169,8 +162,10 @@ async function submit() {
         payload.creds_pass = f.credsPass
         payload.creds_domain = f.credsDomain
       }
+      // Job000118：导入落点（缺省 imports/<slug> 时仍显式回传，后端校验+兜底双保险）。
+      payload.landing_dir = (f.landingDir || '').trim().replace(/^\/+|\/+$/g, '')
       await createMount(payload)
-      emit('saved', '已创建，worker 执行器将在下一个对账周期（约 10 秒）自动挂载')
+      emit('saved', '已创建：落点目录已就绪并可在「文件夹」中查看，worker 执行器将在下一个对账周期（约 10 秒）自动挂载')
     } else {
       const patch = { name: f.name, conn: buildConn(), visibility: f.visibility }
       if (f.type !== 'nfs') {
@@ -235,6 +230,9 @@ async function submit() {
   font-size: var(--font-size-sm);
   color: var(--color-text-disabled);
   margin-top: 4px;
+}
+.hint-inline--error {
+  color: var(--color-danger);
 }
 .input {
   width: 100%;
