@@ -3,10 +3,12 @@
 # 范围（用户裁决）：**仅构建 + 测试 + 静态检查**；部署维持现有本地 SFTP 流程，不进 CI。
 # 因此本工作流**不使用任何 secrets**（只需默认 GITHUB_TOKEN）。
 #
-# 三个 job：
-#   backend     —— go vet + CGO_ENABLED=0 go test ./...（全部单测；无需 ORT/模型，实测约 22s）
-#   backend-cgo —— 取 ONNX Runtime 原生库后 CGO_ENABLED=1 go build ./cmd/api（验证 CGO 链路）
-#   frontend    —— npm ci && npm run build
+# Job 一览：
+#   backend        —— go vet + CGO_ENABLED=0 go test ./...（全部单测；无需 ORT/模型，实测约 22s）
+#   backend-cgo    —— 取 ONNX Runtime 原生库后 CGO_ENABLED=1 go build ./cmd/api（验证 CGO 链路）
+#   frontend       —— npm ci && npm run build + scan_undef 未定义引用扫描
+#   nodeagent-matrix  —— 算力节点 agent 三平台交叉编译 smoke（Job000057）
+#   debugctl-matrix   —— 调试通道参考 agent 三平台交叉编译 smoke（Job000121）
 #
 # ⚠️ 说明：embed 包对 ORT 采用**运行时 dlopen 动态加载**（见 docker/api/Dockerfile 把 .so 放到
 #    运行阶段 / EMBED_LIB 指向它），编译期只需 gcc（模块自带 c_api 头文件 + -ldl）。
@@ -168,3 +170,33 @@ jobs:
 
       - name: 确认产物
         run: file "/tmp/nodeagent${{ matrix.target.ext }}" && ls -lh "/tmp/nodeagent${{ matrix.target.ext }}"
+
+  # Job000121：调试通道参考 agent 三平台编译 smoke（与 nodeagent-matrix 同矩阵钉死，
+  # 防"本机编过、别的平台悄悄破窗"——纯标准库 + coder/websocket，无 CGO）。
+  debugctl-matrix:
+    name: debugctl 跨平台编译（windows/linux/darwin）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [{goos: windows, ext: .exe}, {goos: linux, ext: ""}, {goos: darwin, ext: ""}]
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/backend/go.mod
+          cache-dependency-path: src/backend/go.sum
+
+      - name: GOOS=${{ matrix.target.goos }} 编译
+        env:
+          GOOS: ${{ matrix.target.goos }}
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go build -trimpath -o "/tmp/debugctl${{ matrix.target.ext }}" ./cmd/debugctl
+
+      - name: 确认产物
+        run: file "/tmp/debugctl${{ matrix.target.ext }}" && ls -lh "/tmp/debugctl${{ matrix.target.ext }}"
