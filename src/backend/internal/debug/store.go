@@ -33,7 +33,10 @@ type Store struct {
 	Pool *pgxpool.Pool
 }
 
-const channelColumns = `enabled, channel_id, key_digest, created_by::text, created_at, expires_at, last_connect_at, last_connect_ip`
+// channelColumns 统一查询列；last_connect_ip 在开启/轮换后从未连接时为 NULL，
+// 而 Channel.LastConnectIP 是 string 值类型，NULL 直扫会报 cannot scan NULL——
+// 故列上套 COALESCE 兜空串（下游以 != "" 判定是否展示）。
+const channelColumns = `enabled, channel_id, key_digest, created_by::text, created_at, expires_at, last_connect_at, COALESCE(last_connect_ip, '') AS last_connect_ip`
 
 func scanChannel(row pgx.Row) (*Channel, error) {
 	var ch Channel
