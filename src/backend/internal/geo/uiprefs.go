@@ -108,11 +108,11 @@ func NormalizeUIPrefs(in UIPrefs) (UIPrefs, error) {
 	out.MapFilterCollapsed = in.MapFilterCollapsed
 	// 布尔无非法值空间（缺失= false = 默认平铺），原样透传即可。
 	out.SpacesGroupByAlbum = in.SpacesGroupByAlbum
-	// Job000120：auto_transcode 的「缺失」语义是 keep-on-absent（nil 原样透传），
-	// 由 PutUIPrefs 的 COALESCE 落库；这里 nil → 默认 true 仅供 GET 缺行场景。
-	if in.AutoTranscode != nil {
-		out.AutoTranscode = in.AutoTranscode
-	}
+	// Job000120：auto_transcode 原样透传（nil 保持 nil = keep-on-absent 交给
+	// PutUIPrefs 的 COALESCE 落库）。**不得**在此回落默认 true——Put 前 Normalize
+	// 会把 nil 洗成 *true，keep-on-absent 即失效（部署验证第一轮 8/11 逮住的本缺陷）。
+	// 「缺省=开启」只由两处负责：DefaultUIPrefs（GET 无行）与 DDL DEFAULT true（INSERT）。
+	out.AutoTranscode = in.AutoTranscode
 
 	if v := strings.ToLower(strings.TrimSpace(in.MapDefaultProvider)); v != "" {
 		if v != providerAuto && v != providerAmap && v != providerOSM {

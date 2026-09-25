@@ -229,13 +229,17 @@ func TestNormalizeUIPrefsSpacesGroup(t *testing.T) {
 // ---- Job000120：auto_transcode（用户级自动 HLS 转码开关）----
 
 func TestNormalizeUIPrefsAutoTranscode(t *testing.T) {
-	// 缺省（nil）= 默认开启（存量行为不变）
+	// 缺省（nil）= keep-on-absent：必须原样透传 nil，由 PutUIPrefs COALESCE 落库。
+	// 若在此回落默认 true，旧客户端整行 PUT 会把用户已关的开关清回默认（本缺陷已在部署验证中逮住）。
 	got, err := NormalizeUIPrefs(UIPrefs{})
 	if err != nil {
 		t.Fatalf("空输入不应报错: %v", err)
 	}
-	if got.AutoTranscode == nil || *got.AutoTranscode != true {
-		t.Fatalf("auto_transcode 缺省应为 true，实际 %v", got.AutoTranscode)
+	if got.AutoTranscode != nil {
+		t.Fatalf("auto_transcode 缺省应为 nil(keep-on-absent)，实际 %v", *got.AutoTranscode)
+	}
+	if d := DefaultUIPrefs(); d.AutoTranscode == nil || *d.AutoTranscode != true {
+		t.Fatalf("DefaultUIPrefs 应为 true(GET 无行的展示默认)，实际 %v", d.AutoTranscode)
 	}
 	// 显式 false / true 原样透传（PUT 由调用方明确给出）
 	off := false
