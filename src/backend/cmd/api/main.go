@@ -505,6 +505,10 @@ func main() {
 	indexer := newIndexer(cfg, pool, mediaQ)
 	indexH := &index.Handler{Indexer: indexer, MediaRoot: cfg.MediaRoot}
 	authed.POST("/admin/scan", auth.RequirePerm(authStore, "admin:system"), indexH.Scan)
+	// ===== Job000117 目录树选择器数据源：GET /admin/fs/tree（懒加载单层列举）=====
+	// 扫描面板的「浏览」按钮逐级展开媒体库层级；权限/防穿越与 /admin/scan 完全同级，
+	// nginx 前缀不变（/admin 在纯 API 组内）。
+	authed.GET("/admin/fs/tree", auth.RequirePerm(authStore, "admin:system"), indexH.ListDirTree)
 
 	// ===== R1-c 启动可选自动扫描：MEDIA_SCAN_ON_BOOT（默认关）=====
 	// 面向"群晖/NAS 里已有大量历史照片、装完即想全量入库"的场景：api 迁移一完成就在

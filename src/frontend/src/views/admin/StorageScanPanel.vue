@@ -23,17 +23,35 @@
 
     <div class="scan-form">
       <label class="scan-label" for="scan-dir">子目录（相对媒体根，可留空）</label>
-      <input
-        id="scan-dir"
-        v-model="dir"
-        class="scan-input"
-        type="text"
-        placeholder="如 photos/trip；留空 = 整个媒体根"
-        :disabled="running"
-        data-testid="scan-dir"
-        @keyup.enter="start"
-      />
+      <div class="scan-input-row">
+        <input
+          id="scan-dir"
+          v-model="dir"
+          class="scan-input"
+          type="text"
+          placeholder="如 photos/trip；留空 = 整个媒体根"
+          :disabled="running"
+          data-testid="scan-dir"
+          @keyup.enter="start"
+        />
+        <button
+          class="btn"
+          type="button"
+          :disabled="running"
+          data-testid="scan-browse"
+          @click="showTree = true"
+        >
+          浏览…
+        </button>
+      </div>
+      <p class="hint hint--compact">可手动输入相对路径，或点「浏览…」在目录树中选择；选中后自动开始扫描。</p>
     </div>
+
+    <DirectoryTreeDialog
+      v-if="showTree"
+      @pick="onPicked"
+      @close="showTree = false"
+    />
 
     <p v-if="err" class="msg msg--error" data-testid="scan-error">{{ err }}</p>
 
@@ -58,17 +76,21 @@
 
 <script setup>
 // Job000113 / R1-b 管理端扫描导入面板：目录输入 → 触发 → 轮询进度 → 结果反馈。
+// Job000117：目录树选择器（浏览…按钮）——选中目录回填输入框并自动触发扫描；
+// 手动输入路径保留可用，两种方式互不冲突（输入框始终可编辑，浏览只是另一种填法）。
 // 进度/终态唯一真源 = GET /admin/jobs/:id（admin:system），与后端 index_jobs 行一一对应；
 // index_jobs 只有 total/processed/status 三列，故"新导入 vs 重复"的明细不展示（后续增强）。
 // 竞态治理：seq 守卫——轮询期间用户再次触发/组件卸载，旧的轮询立即作废（范式见 MediaViewer）。
 import { computed, onUnmounted, ref } from 'vue'
 import { errMessage } from '../../stores/auth'
 import { scanImport, getJob } from '../../api/admin'
+import DirectoryTreeDialog from './DirectoryTreeDialog.vue'
 
 const dir = ref('')
 const err = ref('')
 const job = ref(null)
 const running = ref(false)
+const showTree = ref(false)
 let pollTimer = null
 let seq = 0
 
@@ -100,6 +122,14 @@ async function start() {
   } catch (e) {
     err.value = errMessage(e, '发起扫描失败')
   }
+}
+
+// 目录树选中（Job000117）：回填相对路径并无缝触发扫描；扫描进行中则只回填不抢跑
+// （409 语义交给用户稍后手动触发，避免对话框里隐含失败）。
+function onPicked(rel) {
+  dir.value = rel
+  showTree.value = false
+  if (!running.value) start()
 }
 
 // poll 轮询任务终态；seq 守卫保证只有最后一次触发的轮询存活。
@@ -168,7 +198,13 @@ onUnmounted(() => {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
+.scan-input-row {
+  display: flex;
+  gap: 8px;
+}
 .scan-input {
+  flex: 1;
+  min-width: 0;
   padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -183,6 +219,11 @@ onUnmounted(() => {
 }
 .scan-input:disabled {
   opacity: 0.6;
+}
+.hint--compact {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
 
 .msg {

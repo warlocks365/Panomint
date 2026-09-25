@@ -59,6 +59,9 @@
 
     <!-- 应用密码（第三方客户端/WebDAV）——独立成卡（Job000098） -->
     <AppPasswordCard />
+
+    <!-- 版本信息（Job000117）：当前版本 + 历史更新说明 -->
+    <VersionCard />
   </div>
 </template>
 
@@ -68,6 +71,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore, errMessage, errCode } from '../stores/auth'
 import MfaSettingsCard from './settings/MfaSettingsCard.vue'
 import AppPasswordCard from './settings/AppPasswordCard.vue'
+import VersionCard from './settings/VersionCard.vue'
 
 const auth = useAuthStore()
 const router = useRouter()

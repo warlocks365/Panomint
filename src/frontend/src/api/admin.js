@@ -68,6 +68,14 @@ export function scanImport(dir = '') {
   return http.post('/admin/scan', { dir }).then((r) => r.data)
 }
 
+// ---- 目录树浏览（admin:system，Job000117）----
+// GET /admin/fs/tree?dir=<相对 MEDIA_ROOT> → {root,dir,unreadable,items:[{name,rel,readable}]}
+// 懒加载单层：只返回目标目录的直接子目录；unreadable=true = 目标目录本身无权限（不报错）；
+// 子目录 readable=false = 锁定态（前端展示锁定图标、禁止展开）。
+export function listDirTree(dir = '') {
+  return http.get('/admin/fs/tree', { params: { dir } }).then((r) => r.data)
+}
+
 // ---- 地图配置（admin:system）----
 // GET /admin/map-config → {china_provider,china_tile_url,intl_provider,intl_tile_url,
 //                          china_api_key_state,china_api_key_source,updated_at}
