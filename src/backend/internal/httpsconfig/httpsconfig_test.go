@@ -28,9 +28,15 @@ import (
 
 func forceTester(t *testing.T, force bool) *httptest.ResponseRecorder {
 	t.Helper()
+	return forceTesterPort(t, force, 443)
+}
+
+// forceTesterPort 注入 (force, httpsPort) 的中间件测试器（Job000128 点 9 扩展）。
+func forceTesterPort(t *testing.T, force bool, httpsPort int) *httptest.ResponseRecorder {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(forceHTTPSWith(func(context.Context) bool { return force }))
+	r.Use(forceHTTPSWith(func(context.Context) (bool, int) { return force, httpsPort }))
 	hit := false
 	r.GET("/api/ping", func(c *gin.Context) { hit = true; c.String(http.StatusOK, "pong") })
 	req := httptest.NewRequest(http.MethodGet, "/api/ping", nil)
@@ -61,7 +67,7 @@ func TestForceHTTPSRedirectsPlainHTTP(t *testing.T) {
 func TestForceHTTPSPassesHTTPSAndBare(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(forceHTTPSWith(func(context.Context) bool { return true }))
+	r.Use(forceHTTPSWith(func(context.Context) (bool, int) { return true, 443 }))
 	r.GET("/x", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
 
 	// XFP=https：不拦
@@ -85,7 +91,7 @@ func TestForceHTTPSPassesHTTPSAndBare(t *testing.T) {
 func TestForceHTTPSExemptsHealth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(forceHTTPSWith(func(context.Context) bool { return true }))
+	r.Use(forceHTTPSWith(func(context.Context) (bool, int) { return true, 443 }))
 	called := false
 	r.GET("/health", func(c *gin.Context) { called = true; c.String(http.StatusOK, "ok") })
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -94,6 +100,43 @@ func TestForceHTTPSExemptsHealth(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK || !called {
 		t.Fatalf("/health 必须豁免跳转（got %d called=%v）——巡检探活不跟随重定向", w.Code, called)
+	}
+}
+
+// --- Job000128 点 9：重定向端口 ---
+
+func TestForceHTTPSRedirectUsesConfiguredPort(t *testing.T) {
+	// HTTPS 挂在 8443：目标必须带 :8443（否则跳到 443 上无监听 → 连接失败）
+	w := forceTesterPort(t, true, 8443)
+	if w.Code != http.StatusMovedPermanently {
+		t.Fatalf("must 301（got %d）", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "https://pano.example.com:8443/api/ping" {
+		t.Fatalf("Location 必须携带配置的 HTTPS 端口（got %q）", loc)
+	}
+}
+
+func TestForceHTTPSRedirectStripsLegacyPort(t *testing.T) {
+	// Host 自带旧端口（如 HTTP 入口 host:8080）：剥掉再拼配置端口，不得出现双端口
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(forceHTTPSWith(func(context.Context) (bool, int) { return true, 8443 }))
+	r.GET("/x", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Host = "pano.example.com:8080"
+	req.Header.Set("X-Forwarded-Proto", "http")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if loc := w.Header().Get("Location"); loc != "https://pano.example.com:8443/x" {
+		t.Fatalf("Location 必须剥旧端口拼新端口（got %q）", loc)
+	}
+}
+
+func TestForceHTTPSRedirectPort443StaysBare(t *testing.T) {
+	// 443：不带端口（URL 干净的常规形态）
+	w := forceTesterPort(t, true, 443)
+	if loc := w.Header().Get("Location"); loc != "https://pano.example.com/api/ping" {
+		t.Fatalf("443 不得在 Location 携带端口（got %q）", loc)
 	}
 }
 

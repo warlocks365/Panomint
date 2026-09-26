@@ -53,6 +53,38 @@
         />
       </label>
 
+      <!-- 访问端口（Job000128 点 9）：HTTPS 端口是 301 跳转目标的真实驱动源 -->
+      <div class="https-ports" data-testid="https-ports">
+        <label class="port-field">
+          <span class="https-name">HTTP 端口</span>
+          <input
+            v-model.number="httpPort"
+            type="number"
+            min="1"
+            max="65535"
+            data-testid="https-http-port"
+            :disabled="busy || loading"
+          />
+        </label>
+        <label class="port-field">
+          <span class="https-name">HTTPS 端口</span>
+          <input
+            v-model.number="httpsPort"
+            type="number"
+            min="1"
+            max="65535"
+            data-testid="https-https-port"
+            :disabled="busy || loading"
+          />
+        </label>
+        <button class="btn" type="button" :disabled="busy || loading || !portsChanged" data-testid="https-ports-save" @click="savePorts">
+          保存端口
+        </button>
+      </div>
+      <p class="https-hint" data-testid="https-ports-hint">
+        {{ portHint }}
+      </p>
+
       <div class="https-upload" data-testid="https-upload-block">
         <p class="https-name">上传证书（fullchain + 私钥）</p>
         <div class="https-upload-row">
@@ -78,6 +110,19 @@ import { getHttpsConfig, putHttpsConfig, uploadHttpsCert } from '../../api/admin
 
 const cfg = ref({ force_https: false, request_proto: '', cert_path: '', cert_dir: '' })
 const forceHttps = ref(false)
+// ---- 访问端口（Job000128 点 9）----
+const httpPort = ref(80)
+const httpsPort = ref(443)
+const savedHttpPort = ref(80)
+const savedHttpsPort = ref(443)
+const portsChanged = computed(
+  () => Number(httpPort.value) !== savedHttpPort.value || Number(httpsPort.value) !== savedHttpsPort.value
+)
+const portHint = computed(() =>
+  Number(httpsPort.value) === 443
+    ? 'HTTPS 端口为 443 时，跳转目标不带端口（常规形态）。'
+    : `开启强制 HTTPS 后，HTTP 请求将 301 跳转到 https://<域名>:${httpsPort.value}（保存即生效）。`
+)
 const certRef = ref(null)
 const keyRef = ref(null)
 const applyHint = ref('')
@@ -104,6 +149,41 @@ const daysClass = computed(() => {
 function applyView(d = {}) {
   cfg.value = { ...cfg.value, ...d }
   forceHttps.value = d.force_https === true
+  if (typeof d.http_port === 'number') {
+    httpPort.value = d.http_port
+    savedHttpPort.value = d.http_port
+  }
+  if (typeof d.https_port === 'number') {
+    httpsPort.value = d.https_port
+    savedHttpsPort.value = d.https_port
+  }
+}
+
+async function savePorts() {
+  msg.value = ''
+  const hp = Number(httpPort.value)
+  const sp = Number(httpsPort.value)
+  if (!Number.isInteger(hp) || hp < 1 || hp > 65535 || !Number.isInteger(sp) || sp < 1 || sp > 65535) {
+    msgKind.value = 'error'
+    msg.value = '端口必须是 1–65535 之间的整数'
+    return
+  }
+  if (hp === sp) {
+    msgKind.value = 'error'
+    msg.value = 'HTTP 与 HTTPS 端口不能相同'
+    return
+  }
+  busy.value = true
+  try {
+    applyView(await putHttpsConfig(undefined, hp, sp))
+    msgKind.value = 'ok'
+    msg.value = '端口配置已保存，约 60 秒内全量生效'
+  } catch (e) {
+    msgKind.value = 'error'
+    msg.value = e?.response?.data?.error?.message || '保存失败，请重试'
+  } finally {
+    busy.value = false
+  }
 }
 
 async function load() {
@@ -191,4 +271,9 @@ onMounted(load)
 .https-upload-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
 .https-file-label { font-size: var(--font-size-sm); color: var(--color-text-secondary); display: flex; align-items: center; gap: 6px; }
 .https-note { margin: 8px 0 0; font-size: var(--font-size-sm); color: var(--color-warning); }
+
+.https-ports { display: flex; align-items: flex-end; gap: 16px; padding: 10px 0; border-top: 1px solid var(--color-border); flex-wrap: wrap; }
+.port-field { display: flex; flex-direction: column; gap: 4px; }
+.port-field input { width: 110px; height: 34px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm, 4px); font-size: var(--font-size-sm); }
+.https-ports .btn { height: 34px; }
 </style>

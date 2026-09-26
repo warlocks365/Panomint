@@ -30,6 +30,27 @@ func Envelope(c *gin.Context, status int, code, msg string) {
 	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": msg}})
 }
 
+// EnvelopeExtra 写统一封套并在**顶层**附加额外字段。
+//
+// 存在理由（Job000128）：个别错误响应需要在封套同级携带结构化附加数据——
+// 如 423 锁定响应的 remaining_minute（前端据此跑本地倒计时）。附加字段放顶层
+// 不破坏 {error:{...}} 子树，老客户端读 error 字段零感知。
+// 需要新形状时扩展本文件，而不是在别的包复制 gin.H{"error": ...} 字面量
+//（封套形状守卫 TestEnvelopeShapeHasSingleImplementation 强制这一点）。
+//
+// extra 中若含 "error" 键会被忽略——顶层 "error" 是封套本体，不允许覆盖。
+// extra 为 nil 等价于 Envelope。
+func EnvelopeExtra(c *gin.Context, status int, code, msg string, extra gin.H) {
+	body := gin.H{"error": gin.H{"code": code, "message": msg}}
+	for k, v := range extra {
+		if k == "error" {
+			continue
+		}
+		body[k] = v
+	}
+	c.JSON(status, body)
+}
+
 // Fail 处理来自本端之外的错误：完整错误只进服务端日志，客户端只拿固定文案 msg。
 //
 // 与 Envelope 的分工：msg 必须是**与 err 无关的固定字符串**（如"查询失败"），

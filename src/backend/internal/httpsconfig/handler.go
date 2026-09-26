@@ -45,16 +45,52 @@ func (h *Handler) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, cfg)
 }
 
-// PutConfig PUT /admin/https/config：部分更新（当前仅 force_https；缺失不改）。
+// httpsUpdateReq PUT /admin/https/config 的请求体（Job000128 扩展端口字段后
+// 不再用 map[string]bool —— map 值类型装不下 int）。
+type httpsUpdateReq struct {
+	ForceHTTPS *bool `json:"force_https"`
+	HTTPPort   *int  `json:"http_port"`
+	HTTPSPort  *int  `json:"https_port"`
+}
+
+// PutConfig PUT /admin/https/config：部分更新（缺失字段不改）。
 func (h *Handler) PutConfig(c *gin.Context) {
-	var raw map[string]bool
+	var raw httpsUpdateReq
 	if err := c.ShouldBindJSON(&raw); err != nil {
-		httperr.Fail(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需为 JSON 对象", err)
+		httperr.Fail(c, http.StatusBadRequest, "BAD_REQUEST",
+			`请求体需为 JSON 对象（{"force_https":true,"http_port":80,"https_port":443}，均可省略）`, err)
 		return
 	}
 	u := Update{}
-	if v, ok := raw["force_https"]; ok {
-		u.ForceHTTPS = &v
+	if raw.ForceHTTPS != nil {
+		u.ForceHTTPS = raw.ForceHTTPS
+	}
+	if raw.HTTPPort != nil {
+		u.HTTPPort = raw.HTTPPort
+	}
+	if raw.HTTPSPort != nil {
+		u.HTTPSPort = raw.HTTPSPort
+	}
+	// 端口相等校验必须**连同库中现值**判（只传一个端口时另一个取现值）：
+	// HTTP 与 HTTPS 端口相同的配置没有意义，且会制造"跳转到自己"的迷惑行为。
+	if u.HTTPPort != nil || u.HTTPSPort != nil {
+		cur, err := Get(c.Request.Context(), h.Pool)
+		if err != nil {
+			httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "读取现配置失败", err)
+			return
+		}
+		hp, sp := cur.HTTPPort, cur.HTTPSPort
+		if u.HTTPPort != nil {
+			hp = *u.HTTPPort
+		}
+		if u.HTTPSPort != nil {
+			sp = *u.HTTPSPort
+		}
+		if hp == sp {
+			httperr.Fail(c, http.StatusBadRequest, "BAD_REQUEST",
+				"HTTP 与 HTTPS 端口不能相同", nil)
+			return
+		}
 	}
 	if err := Put(c.Request.Context(), h.Pool, u); err != nil {
 		if IsValidationErr(err) {
@@ -64,9 +100,19 @@ func (h *Handler) PutConfig(c *gin.Context) {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "保存失败", err)
 		return
 	}
-	// 开关写成功 → 失效中间件的 60s 共享缓存，变更立即生效（见 InvalidateForceCache）。
+	// 配置写成功 → 失效中间件的 60s 共享缓存，变更立即生效（见 InvalidateForceCache）。
 	InvalidateForceCache()
-	h.record(c, map[string]any{"force_https": raw["force_https"]})
+	detail := map[string]any{}
+	if raw.ForceHTTPS != nil {
+		detail["force_https"] = *raw.ForceHTTPS
+	}
+	if raw.HTTPPort != nil {
+		detail["http_port"] = *raw.HTTPPort
+	}
+	if raw.HTTPSPort != nil {
+		detail["https_port"] = *raw.HTTPSPort
+	}
+	h.record(c, detail)
 	cfg, err := Get(c.Request.Context(), h.Pool)
 	if err != nil {
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)

@@ -63,6 +63,12 @@ const (
 	ActionSSOLogin = "auth.sso.login"
 	// ActionLogout 登出。
 	ActionLogout = "auth.logout"
+	// ActionRegister 自助注册成功（Job000128，POST /auth/register）。
+	// 注册是"账号从无到有"的事件，必须留痕；detail 记是否用了邀请码。
+	ActionRegister = "auth.register"
+	// ActionInviteCreate 管理员生成邀请码（Job000128）。
+	// 邀请码是准入门卡：明文入库、可复制重发，"谁在什么时候发过码"必须可查。
+	ActionInviteCreate = "admin.invite.create"
 	// ActionTokenRotate 令牌轮换（refresh token / agent_token / 分享口令）。
 	ActionTokenRotate = "auth.token.rotate"
 

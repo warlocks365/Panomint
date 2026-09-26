@@ -289,6 +289,8 @@ func TestActionRegistryIsValid(t *testing.T) {
 		"ActionLogin":         ActionLogin,
 		"ActionSSOLogin":      ActionSSOLogin,
 		"ActionLogout":        ActionLogout,
+		"ActionRegister":      ActionRegister,
+		"ActionInviteCreate":  ActionInviteCreate,
 		"ActionTokenRotate":   ActionTokenRotate,
 		"ActionMFASetup":      ActionMFASetup,
 		"ActionMFAEnable":     ActionMFAEnable,

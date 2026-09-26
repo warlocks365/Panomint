@@ -85,6 +85,10 @@ type tokenPair struct {
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int64  `json:"expires_in"` // access 秒数
 	TokenType    string `json:"token_type"`
+
+	// MustChangePassword 强制改密标记（Job000128）：true 时前端必须引导到改密页，
+	// 不放行进入主界面。omitempty：false 时不出现，老客户端/旧前端零感知。
+	MustChangePassword bool `json:"must_change_password,omitempty"`
 }
 
 // 形状委托给 internal/httperr（单一真源）。
@@ -93,6 +97,12 @@ func errResp(c *gin.Context, code int, errCode, msg string) {
 }
 
 // Login POST /auth/login。
+//
+// 校验顺序（Job000128 调整后）：邮箱存在 → **锁定检查** → 密码 → 状态 → 二次验证。
+// 锁定检查放密码之前：锁定语义是"暂时禁止登录"，密码再正确也不放行（否则爆破者
+// 试出正确密码即绕过锁定）；同时锁定期间省掉 bcrypt 计算（故意触发锁定后反复
+// 打登录接口无法借 bcrypt 消耗 CPU）。枚举面评估：423 只对"最近已被连续试错"
+// 的账号出现，而试错者正是攻击者本人——没有新信息泄漏给第三方。
 func (h *Handler) Login(c *gin.Context) {
 	var req loginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -112,7 +122,17 @@ func (h *Handler) Login(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "INTERNAL", "服务器内部错误")
 		return
 	}
+
+	// ---- 锁定检查（先于密码校验，理由见函数注释）----
+	if ls := EvaluateLock(u.LockedUntil, time.Now()); ls.Locked {
+		h.writeLocked(c, ls.RemainingMinutes)
+		return
+	}
+
 	if !VerifyPassword(u.PasswordHash, req.Password) {
+		if !h.recordFailedAttempt(c, u) {
+			return // 本次失败触发了锁定，已写 423 —— 立即返回，避免再叠一个 401 双写
+		}
 		errResp(c, http.StatusUnauthorized, "BAD_CREDENTIALS", ErrBadCredentials.Error())
 		return
 	}
@@ -162,6 +182,12 @@ func (h *Handler) Login(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "INTERNAL", "会话创建失败")
 		return
 	}
+	// 登录成功：清零失败计数并解除残留锁定（"连续"失败语义，见 ResetFailedLogin 注释）。
+	// 失败只记日志：认证已经成功，计数清理失败不该把成功登录报成错误——
+	// 下次失败会重新计数，最多是"少清了一次历史"，无安全后果。
+	if err := h.Store.ResetFailedLogin(c.Request.Context(), u.ID); err != nil {
+		log.Printf("auth: 登录成功后清零失败计数失败（user=%s）: %v", u.ID, err)
+	}
 	// 登录成功写审计（**失败登录刻意不写**：那是日志与限流的职责，
 	// 且写失败登录会让"任何人可写审计表"成为一个滥用面 —— 见 internal/audit 的既有决定）。
 	//
@@ -173,7 +199,46 @@ func (h *Handler) Login(c *gin.Context) {
 	// 不会报错、只会静默丢字段，所以审计 detail 的键名要避开敏感子串。
 	h.recordAs(c, u.ID, audit.ActionLogin, audit.TargetUser, u.ID,
 		map[string]any{"second_factor": u.MFAEnabled})
-	c.JSON(http.StatusOK, tokenPair{access, refresh, int64(AccessTTL.Seconds()), "Bearer"})
+	c.JSON(http.StatusOK, tokenPair{access, refresh, int64(AccessTTL.Seconds()), "Bearer", u.MustChangePassword})
+}
+
+// recordFailedAttempt 原子记录一次登录失败（计数+达上限即锁定）。
+// 返回 false 表示本次失败触发了锁定、已写 423 响应，调用方必须立即返回。
+//
+// 策略读取 fail-closed：读库失败回 DefaultPolicy —— 绝不能因为读不到配置
+// 就按"无限制"处理（那是"作用域默认全开"式反模式：故障变成防护失效）。
+//
+// ⚠️ MFA 口令错误**不**走这里（保持现状）：TOTP 30 秒窗口自带节流、口令空间小，
+// 且"密码错误次数过多"的锁定文案对 MFA 阶段是误导。禁用账号（密码正确）也不计数。
+func (h *Handler) recordFailedAttempt(c *gin.Context, u *User) bool {
+	p, err := h.Store.LoadAccountPolicy(c.Request.Context())
+	if err != nil {
+		log.Printf("auth: 读取账号策略失败，回退默认策略（fail-closed）: %v", err)
+		p = DefaultPolicy()
+	}
+	count, lockedUntil, err := h.Store.RecordFailedLogin(c.Request.Context(), u.ID, p.LoginMaxAttempts, p.LoginLockMinutes)
+	if err != nil {
+		// 计数失败不改变响应形状（仍让调用方走 401）：锁定是节流不是门禁，
+		// 别让一次计数故障把所有失败登录放大成 500；最多是这一轮少计一次。
+		log.Printf("auth: 记录登录失败计数失败（user=%s）: %v", u.ID, err)
+		return true
+	}
+	if ls := EvaluateLock(lockedUntil, time.Now()); ls.Locked {
+		log.Printf("auth: 用户 %s 连续登录失败达上限（count=%d），锁定 %d 分钟", u.ID, count, p.LoginLockMinutes)
+		h.writeLocked(c, ls.RemainingMinutes)
+		return false
+	}
+	return true
+}
+
+// writeLocked 写统一形状的 423 锁定响应：标准信封 {error:{code,message}} +
+// **顶层**附加字段 remaining_minute（附加字段放顶层不破坏 {error:{...}} 子树；
+// 前端据此跑本地倒计时并禁用登录按钮）。形状委托给 httperr.EnvelopeExtra
+//（封套唯一真源的扩展点），此处不得手写 gin.H{"error": ...} 字面量。
+func (h *Handler) writeLocked(c *gin.Context, remainingMinutes int) {
+	httperr.EnvelopeExtra(c, http.StatusLocked, "ACCOUNT_LOCKED",
+		fmt.Sprintf("%s，请约 %d 分钟后再试", ErrAccountLocked.Error(), remainingMinutes),
+		gin.H{"remaining_minute": remainingMinutes})
 }
 
 // MFASetup POST /auth/mfa/setup（需鉴权）→ {secret, otpauth_url, digits, period}
@@ -372,7 +437,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 		errResp(c, http.StatusInternalServerError, "INTERNAL", "令牌签发失败")
 		return
 	}
-	c.JSON(http.StatusOK, tokenPair{access, newRefresh, int64(AccessTTL.Seconds()), "Bearer"})
+	c.JSON(http.StatusOK, tokenPair{access, newRefresh, int64(AccessTTL.Seconds()), "Bearer", u.MustChangePassword})
 }
 
 // Logout POST /auth/logout（吊销会话）。
@@ -401,6 +466,9 @@ func (h *Handler) Me(c *gin.Context) {
 		// mfa_pending 是附加信息：设置二次验证分 setup→confirm 两步，界面需要知道"配到一半"。
 		"mfa_enabled": u.MFAEnabled,
 		"mfa_pending": u.MFAPending,
+		// Job000128：强制改密标记。登录响应只在签发瞬间有，刷新页面后 me 是
+		// 前端唯一能重新确认"是否仍需强制改密"的端点（改密成功后此值变 false）。
+		"must_change_password": u.MustChangePassword,
 	})
 }
 
@@ -544,6 +612,40 @@ func (h *Handler) guardUserChange(c *gin.Context, target *User, in UserUpdate) b
 	return true
 }
 
+// guardPermEscalation 校验"把用户改成 roleName"不会让目标获得调用者没有的权限。
+// 被拒时已写好 403 响应并返回 false。
+//
+// 比较是**逐项**的：目标角色每个权限都必须被调用者权限覆盖（PermCovered 处理通配符）。
+// 这意味着持 media:* 的管理员能把人改成 member（其权限全是 media/album/share 族），
+// 但改不成 admin（缺 admin:*）—— "你只能发你有的钥匙"。
+func (h *Handler) guardPermEscalation(c *gin.Context, roleName string) bool {
+	ctx := c.Request.Context()
+	callerPerms, err := h.Store.PermsOfRole(ctx, c.GetString("role"))
+	if err != nil {
+		log.Printf("auth: 查询调用者权限失败: %v", err)
+		errResp(c, http.StatusInternalServerError, "INTERNAL", "校验失败")
+		return false
+	}
+	targetPerms, err := h.Store.PermsOfRole(ctx, roleName)
+	if err != nil {
+		log.Printf("auth: 查询目标角色权限失败: %v", err)
+		errResp(c, http.StatusInternalServerError, "INTERNAL", "校验失败")
+		return false
+	}
+	var denied []string
+	for _, p := range targetPerms {
+		if !PermCovered(callerPerms, p) {
+			denied = append(denied, p)
+		}
+	}
+	if len(denied) > 0 {
+		errResp(c, http.StatusForbidden, "PERM_NOT_GRANTABLE",
+			fmt.Sprintf("%s（你缺少：%s）", ErrPermNotGrantable.Error(), strings.Join(denied, ",")))
+		return false
+	}
+	return true
+}
+
 // UpdateUser PATCH /admin/users/:id（需 admin:users 权限）← {display_name?,role?,status?,password?}
 //
 // 部分更新：只传要改的字段。契约 §2 写的"改角色/状态/重置密码"即此。
@@ -578,6 +680,18 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 	}
 	if !h.guardUserChange(c, target, norm) {
 		return
+	}
+	// ---- 提权守卫（Job000128 点 4）----
+	// 改角色 = 把目标用户**授权为目标角色的全部权限**。只挡"自锁/最后 owner"不够：
+	// 只持 admin:users 的管理员可以把自己（或同伙）改成含 admin:system 的角色，
+	// 拿到从未被授予的权限。与 CreateRole 的 PERM_NOT_GRANTABLE 同一条不变量：
+	// **只能授予调用者自己已拥有的权限**（通配符展开后逐项比较）。
+	// 角色不存在时这里放行（空权限集不触发 denied），由 Store.UpdateUser 的
+	// RoleExists 报更准确的 400 ROLE_NOT_FOUND —— 403 不该抢在 400 之前说谎。
+	if norm.Role != nil {
+		if !h.guardPermEscalation(c, *norm.Role) {
+			return
+		}
 	}
 
 	u, err := h.Store.UpdateUser(ctx, id, norm)
@@ -621,6 +735,8 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 	if norm.Password != nil {
 		// 键名避开敏感子串（含 password/pwd/credential/secret 的键会被 RedactDetail 整键剔除）
 		detail["auth_material_reset"] = true
+		// Job000128：管理员重置密码已联动置位 must_change_password（buildUserUpdate）
+		detail["force_password_change"] = true
 	}
 	h.record(c, action, audit.TargetUser, id, detail)
 

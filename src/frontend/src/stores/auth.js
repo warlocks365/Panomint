@@ -33,7 +33,10 @@ export const useAuthStore = defineStore('auth', {
     mfaEnabled: (s) => !!s.user?.mfa_enabled,
     // "配到一半"：已生成密钥但尚未用口令确认。界面需要据此提示重新生成，
     // 否则用户刷新页面后就无从知道自己停在哪一步。
-    mfaPending: (s) => !!s.user?.mfa_pending
+    mfaPending: (s) => !!s.user?.mfa_pending,
+    // 强制改密（Job000128）：管理员重置密码后置位（登录响应与 /auth/me 都会带出）。
+    // 路由守卫据此把用户困在设置页，直到改密成功（服务端清除标记）。
+    mustChangePassword: (s) => !!s.user?.must_change_password
   },
   actions: {
     // totpCode 可选：未启用二次验证的账号照旧只传邮箱密码。

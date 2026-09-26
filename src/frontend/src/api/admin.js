@@ -123,11 +123,14 @@ export function getHttpsConfig() {
   return http.get('/admin/https/config').then((r) => r.data)
 }
 
-// PUT /admin/https/config ← {force_https}（缺失不改）→ 同 GET 视图（写审计）
-// force_https 保存即热生效（应用层 301 中间件，60s 缓存内收敛）。
-export function putHttpsConfig(forceHTTPS) {
+// PUT /admin/https/config ← {force_https?, http_port?, https_port?}（缺失不改，Job000128 点 9 扩展端口）
+// force_https 保存即热生效（应用层 301 中间件，60s 缓存内收敛）；
+// https_port 非 443 时 301 目标携带 `:port`（同样热生效）。
+export function putHttpsConfig(forceHTTPS, httpPort, httpsPort) {
   const body = {}
   if (forceHTTPS !== undefined) body.force_https = forceHTTPS
+  if (httpPort !== undefined && httpPort !== null) body.http_port = Number(httpPort)
+  if (httpsPort !== undefined && httpsPort !== null) body.https_port = Number(httpsPort)
   return http.put('/admin/https/config', body).then((r) => r.data)
 }
 
@@ -172,4 +175,44 @@ export function putUserPerm(userID, perm, granted) {
 //   不能落在 _imports 保留区（任意层级）。
 export function setUserScanRoot(userID, scanRoot) {
   return http.put(`/admin/users/${userID}/scan-root`, { scan_root: scanRoot }).then((r) => r.data)
+}
+
+// ---- 账号策略配置（admin:users，Job000128 点 6/7/8）----
+// GET /admin/account-config → {policy:{allow_registration, invite_required, pwd_min_length,
+//   pwd_require_upper, pwd_require_lower, pwd_require_digit, pwd_require_special,
+//   login_max_attempts, login_lock_minutes}}
+export function getAccountConfig() {
+  return http.get('/admin/account-config').then((r) => r.data)
+}
+
+// PUT /admin/account-config ← 全量 policy（全量覆盖式 PUT；范围校验在服务端）
+export function putAccountConfig(policy) {
+  return http.put('/admin/account-config', policy).then((r) => r.data)
+}
+
+// ---- 邀请码管理（admin:users，Job000128 点 6）----
+// GET /admin/invites → {invites:[{id, code, creator_email, expires_at, used_by?, used_by_email?, used_at?, created_at}]}
+export function listInvites() {
+  return http.get('/admin/invites').then((r) => r.data)
+}
+
+// POST /admin/invites ← {expires_in_hours?}（默认 72，上限 720）→ {invite}
+export function createInvite(expiresInHours) {
+  const body = expiresInHours ? { expires_in_hours: expiresInHours } : {}
+  return http.post('/admin/invites', body).then((r) => r.data)
+}
+
+// ---- 自助注册（公开端点，Job000128 点 6）----
+// GET /auth/register/status → {allow_registration, invite_required}
+//   （公开：注册页在未登录时也要能查询；读库失败服务端按"关闭"返回）
+export function getRegisterStatus() {
+  return http.get('/auth/register/status', { skipAuthRefresh: true }).then((r) => r.data)
+}
+
+// POST /auth/register ← {email, display_name?, password, invite_code?} → {id}
+export function register(email, displayName, password, inviteCode) {
+  const body = { email, password }
+  if (displayName) body.display_name = displayName
+  if (inviteCode) body.invite_code = inviteCode
+  return http.post('/auth/register', body, { skipAuthRefresh: true }).then((r) => r.data)
 }

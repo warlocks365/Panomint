@@ -80,6 +80,18 @@ type User struct {
 	// 根目录即 MEDIA_ROOT 本身；其余 = MEDIA_ROOT 下的子目录。
 	// 指针而非 string 是为了保住 NULL 与空串的语义差（fail-closed 的前提）。
 	ScanRoot *string `json:"scan_root"`
+
+	// ---- Job000128 账号安全三列 ----
+
+	// MustChangePassword 强制下次登录改密：管理员重置密码时自动置位
+	// （buildUserUpdate 的 password 分支），用户自助改密成功后清除。
+	// 登录响应与 /auth/me 都会带出，前端据此引导到改密页。
+	MustChangePassword bool `json:"must_change_password"`
+	// FailedLoginCount 连续登录失败计数（达策略上限触发锁定）。
+	// 管理端列表据此显示"再错几次锁定"；成功登录即清零。
+	FailedLoginCount int `json:"failed_login_count"`
+	// LockedUntil 锁定截止时刻；NULL = 未锁定。管理端据此显示锁定剩余时间。
+	LockedUntil *time.Time `json:"locked_until"`
 }
 
 var (
@@ -115,6 +127,20 @@ var (
 	ErrLastOwner = errors.New("不能移除最后一个可用的 owner（否则系统将无人可管理）")
 	// ErrUserHasAssets 该用户仍被业务数据引用，无法硬删除。
 	ErrUserHasAssets = errors.New("该用户仍拥有媒体 / 相册 / 分享 / 审计等数据，无法删除")
+
+	// ---- Job000128 ----
+
+	// ErrAccountLocked 登录锁定进行中（连续失败达策略上限）。
+	// 错误文案不含剩余时间——时间是动态的，由 handler 拼 423 响应。
+	ErrAccountLocked = errors.New("登录失败次数过多，账户已被暂时锁定")
+	// ErrEmailExists 注册邮箱已被占用（users.email UNIQUE，23505 映射）。
+	ErrEmailExists = errors.New("该邮箱已被注册")
+	// ErrInviteInvalid 邀请码不存在或格式非法。
+	ErrInviteInvalid = errors.New("邀请码无效")
+	// ErrInviteUsed 邀请码已被使用（一次性）。
+	ErrInviteUsed = errors.New("邀请码已被使用")
+	// ErrInviteExpired 邀请码已过期。
+	ErrInviteExpired = errors.New("邀请码已过期")
 
 	// ErrInvalidInput 入参非法（校验失败）。handler 据此映射 400，与其它包的同类错误语义一致。
 	ErrInvalidInput = errors.New("输入非法")
@@ -191,24 +217,48 @@ func CheckUserPatch(actorID string, target *User, in UserUpdate, otherActiveOwne
 	return nil
 }
 
+// userSelectCols 用户查询的公共列清单（与 User 字段一一对应）。
+// 唯一的 %s 占位是 password_hash 列：登录路径传 "u.password_hash"（要真哈希校验），
+// 列表/详情路径传 "''"（不取哈希）。抽成常量是防"六处 SELECT 各写一遍、改一处漏五处"——
+// 列与 Scan 参数必须同源（拼 SQL 辅助函数不许偷偷 append 参数的教训，见工程手册）。
+const userSelectCols = `u.id, u.email, COALESCE(u.display_name,''), %s, r.name, u.status,
+		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root,
+		       u.must_change_password, u.failed_login_count, u.locked_until`
+
+// scanUser 把一行用户查询结果扫进 User（列顺序必须与 userSelectCols 严格一致）。
+// 接受 pgx.Row 与 pgx.Rows（二者都有 Scan(dest ...any) error）。
+func scanUser(row interface{ Scan(dest ...any) error }) (*User, error) {
+	var u User
+	err := row.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
+		&u.MFASecret, &u.MFAEnabled, &u.ScanRoot,
+		&u.MustChangePassword, &u.FailedLoginCount, &u.LockedUntil)
+	if err != nil {
+		return nil, err
+	}
+	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
+	return &u, nil
+}
+
+// userReturningCols UPDATE users … RETURNING 的公共列清单（无表别名——UPDATE 无 JOIN，
+// 列不能带 u. 前缀；角色名用子查询取）。与 userSelectCols 的列语义一一对应，
+// scanUser 的 Scan 顺序对两者通用。
+const userReturningCols = `id, email, COALESCE(display_name,''), '', (SELECT name FROM roles WHERE id = role_id), status,
+		          COALESCE(mfa_secret,''), mfa_enabled, scan_root,
+		          must_change_password, failed_login_count, locked_until`
+
 // FindByEmail 按邮箱查用户。
 func (s *Store) FindByEmail(ctx context.Context, email string) (*User, error) {
-	var u User
-	err := s.Pool.QueryRow(ctx, `
-		SELECT u.id, u.email, COALESCE(u.display_name,''), u.password_hash, r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
+	u, err := scanUser(s.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT `+userSelectCols+`
 		FROM users u JOIN roles r ON r.id = u.role_id
-		WHERE u.email = $1`, email).
-		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
+		WHERE u.email = $1`, "u.password_hash"), email))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrBadCredentials
 	}
 	if err != nil {
 		return nil, err
 	}
-	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
-	return &u, nil
+	return u, nil
 }
 
 // FindByEmailCI 大小写不敏感按邮箱查用户（SSO 用）。
@@ -218,22 +268,17 @@ func (s *Store) FindByEmail(ctx context.Context, email string) (*User, error) {
 // IdP claims，各家 IdP 大小写口径不一（UPN 常大写），JIT 开通前用 lower() 对齐，
 // 避免同一邮箱因大小写被判成两个人、重复开通。
 func (s *Store) FindByEmailCI(ctx context.Context, email string) (*User, error) {
-	var u User
-	err := s.Pool.QueryRow(ctx, `
-		SELECT u.id, u.email, COALESCE(u.display_name,''), u.password_hash, r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
+	u, err := scanUser(s.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT `+userSelectCols+`
 		FROM users u JOIN roles r ON r.id = u.role_id
-		WHERE lower(u.email) = lower($1)`, email).
-		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
+		WHERE lower(u.email) = lower($1)`, "u.password_hash"), email))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrBadCredentials
 	}
 	if err != nil {
 		return nil, err
 	}
-	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
-	return &u, nil
+	return u, nil
 }
 
 // AppPasswordHash 读取用户的应用密码哈希（WebDAV/第三方客户端用，Job000055）。
@@ -280,19 +325,10 @@ func (s *Store) ClearAppPassword(ctx context.Context, userID string) error {
 
 // FindByID 按 ID 查用户（me 端点与二次验证端点）。
 func (s *Store) FindByID(ctx context.Context, id string) (*User, error) {
-	var u User
-	err := s.Pool.QueryRow(ctx, `
-		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
+	return scanUser(s.Pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT `+userSelectCols+`
 		FROM users u JOIN roles r ON r.id = u.role_id
-		WHERE u.id = $1`, id).
-		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
-	if err != nil {
-		return nil, err
-	}
-	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
-	return &u, nil
+		WHERE u.id = $1`, "''"), id))
 }
 
 // VerifyPassword bcrypt 校验。
@@ -432,23 +468,20 @@ func (s *Store) CreateUser(ctx context.Context, email, displayName, password, ro
 
 // ListUsers 用户列表（管理端点）。
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.Pool.Query(ctx, `
-		SELECT u.id, u.email, COALESCE(u.display_name,''), '', r.name, u.status,
-		       COALESCE(u.mfa_secret,''), u.mfa_enabled, u.scan_root
-		FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.created_at`)
+	rows, err := s.Pool.Query(ctx, fmt.Sprintf(`
+		SELECT `+userSelectCols+`
+		FROM users u JOIN roles r ON r.id = u.role_id ORDER BY u.created_at`, "''"))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []User
 	for rows.Next() {
-		var u User
-		if err := rows.Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
-		out = append(out, u)
+		out = append(out, *u)
 	}
 	return out, rows.Err()
 }
@@ -575,6 +608,11 @@ func buildUserUpdate(in UserUpdate, passwordHash string) (sets []string, args []
 	}
 	if in.Password != nil && passwordHash != "" {
 		add("password_hash = $%d", passwordHash)
+		// 管理员重置密码 ⇒ 强制下次登录改密（Job000128 点 1+3 联动）：
+		// 管理员设的是临时口令，若不强制改密，临时口令就会变成永久口令。
+		// 注意只在此处置位——改昵称/角色/状态不动这个标记。
+		// 常量表达式不走 add（无占位符，直接进 SET 清单，参数序列保持对齐）。
+		sets = append(sets, "must_change_password = TRUE")
 	}
 	return sets, args
 }
@@ -609,25 +647,21 @@ func (s *Store) UpdateUser(ctx context.Context, id string, in UserUpdate) (*User
 	sets, args := buildUserUpdate(in, hash)
 	args = append(args, id)
 	q := fmt.Sprintf(`UPDATE users SET %s, updated_at = now() WHERE id = $%d::uuid
-		RETURNING id, email, COALESCE(display_name,''), '', (SELECT name FROM roles WHERE id = role_id), status,
-		          COALESCE(mfa_secret,''), mfa_enabled, scan_root`,
+		RETURNING `+userReturningCols,
 		strings.Join(sets, ", "), len(args))
 
-	var u User
-	err = s.Pool.QueryRow(ctx, q, args...).Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash,
-		&u.Role, &u.Status, &u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
+	u, err := scanUser(s.Pool.QueryRow(ctx, q, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUserNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
 	if in.Role != nil {
 		// 用户角色变更：权限判定缓存立即失效（否则旧角色权限最长残留 30s）。
 		s.InvalidatePermCache()
 	}
-	return &u, nil
+	return u, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -649,21 +683,251 @@ func (s *Store) ScanRootOf(ctx context.Context, userID string) (*string, error) 
 // 相对路径。刻意不复用 UpdateUser：那是"按请求体增量改用户"的通用路径，而 scan_root
 // 有独立的归一化/物理校验链路（handler 层 dirscope + os.Stat），写入只需动一个字段。
 func (s *Store) SetUserScanRoot(ctx context.Context, userID string, scanRoot *string) (*User, error) {
-	var u User
-	err := s.Pool.QueryRow(ctx, `
+	u, err := scanUser(s.Pool.QueryRow(ctx, `
 		UPDATE users SET scan_root = $2, updated_at = now() WHERE id = $1::uuid
-		RETURNING id, email, COALESCE(display_name,''), '', (SELECT name FROM roles WHERE id = role_id), status,
-		          COALESCE(mfa_secret,''), mfa_enabled, scan_root`, userID, scanRoot).
-		Scan(&u.ID, &u.Email, &u.DisplayName, &u.PasswordHash, &u.Role, &u.Status,
-			&u.MFASecret, &u.MFAEnabled, &u.ScanRoot)
+		RETURNING `+userReturningCols, userID, scanRoot))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUserNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	u.MFAPending = u.MFASecret != "" && !u.MFAEnabled
-	return &u, nil
+	return u, nil
+}
+
+// ---------------------------------------------------------------------------
+// 登录失败计数与锁定（Job000128 点 7）
+//
+// 全部走**单条原子 UPDATE**（与 TOTP 状态变更同一纪律）：并发登录失败同时到达时，
+// "读计数→判断→写锁定"三步分开做必然竞态（两个请求都读到 4、都判定"还没到上限"）。
+// 计数、锁定判定、写入三件事在同一条 SQL 里完成，天然无竞态。
+// ---------------------------------------------------------------------------
+
+// RecordFailedLogin 原子递增失败计数；达到 maxAttempts 时同时设置 locked_until。
+// 返回更新后的计数与锁定截止时刻（供 handler 拼 ACCOUNT_LOCKED 响应）。
+//
+// ⚠️ 锁定到期后的第一次失败必须**重置为 1** 而不是"旧值+1"：否则旧计数（≥上限）
+// 会残留，用户锁定到期后输错一次立刻再次被锁满全程 —— "暂时锁定"变成事实上的永久锁定。
+// 判据：locked_until IS NULL（从未锁）或 locked_until <= now()（已到期）→ 此前不算连续失败。
+// 锁定**进行中**的失败照常 +1（无害：反正锁着，到期后下一次失败会走重置分支）。
+func (s *Store) RecordFailedLogin(ctx context.Context, userID string, maxAttempts, lockMinutes int) (count int, lockedUntil *time.Time, err error) {
+	// 重置条件 = 「锁定到期瞬间」（locked_until 非空且已过）——不是「无锁定」！
+	// Job000128 e2e 实测缺陷：原条件 `locked_until IS NULL OR <= now()` 把"从未锁定"
+	// 也算成重置，导致每次失败都把计数写回 1，永远达不到 maxAttempts，锁定永不触发。
+	// 三态语义：
+	//   · locked_until IS NULL（从未锁定）          → +1 正常累计；
+	//   · locked_until 非空且 <= now()（刚到期）    → 重置为 1（到期后首败重新起算）；
+	//   · locked_until 非空且 > now()（锁定中）     → +1（理论被 Login 前置 423 拦下，兜底无害）。
+	err = s.Pool.QueryRow(ctx, `
+		UPDATE users SET
+			failed_login_count = CASE
+				WHEN locked_until IS NOT NULL AND locked_until <= now() THEN 1
+				ELSE failed_login_count + 1 END,
+			locked_until = CASE
+				WHEN (CASE
+					WHEN locked_until IS NOT NULL AND locked_until <= now() THEN 1
+					ELSE failed_login_count + 1 END) >= $2
+				THEN now() + make_interval(mins => $3)
+				ELSE locked_until END,
+			updated_at = now()
+		WHERE id = $1::uuid
+		RETURNING failed_login_count, locked_until`,
+		userID, maxAttempts, lockMinutes).Scan(&count, &lockedUntil)
+	return count, lockedUntil, err
+}
+
+// ResetFailedLogin 登录成功后清零计数并解除锁定。
+//
+// 成功登录即"密码正确的有力证明"，历史失败记录不再有意义；不清零的话，
+// 用户"错 4 次→对 1 次→再错 1 次"就会被锁，不符合"**连续**失败达上限"的语义。
+func (s *Store) ResetFailedLogin(ctx context.Context, userID string) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE users SET failed_login_count = 0, locked_until = NULL, updated_at = now()
+		WHERE id = $1::uuid`, userID)
+	return err
+}
+
+// ClearMustChangePassword 清除强制改密标记（用户自助改密成功后调用）。
+//
+// 与 ResetFailedLogin 分开单列：改密（PUT /user/password）与登录成功是两条路径，
+// 各自动作各自字段，合并成一个"清理方法"会让两处的语义互相纠缠
+// （改密不该清锁定计数——改密时人已登录，登录计数本来就该是零）。
+func (s *Store) ClearMustChangePassword(ctx context.Context, userID string) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE users SET must_change_password = FALSE, updated_at = now()
+		WHERE id = $1::uuid`, userID)
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// 邀请注册（Job000128 点 6）
+// ---------------------------------------------------------------------------
+
+// DefaultRegisterRole 新注册用户的默认角色：member（普通成员，个人空间+共享空间贡献）。
+// 不用 viewer（只读）——注册者是要使用相册的人；更不可能给 owner/admin。
+// 若部署方删掉了内置 member 角色，注册会以 ErrRoleNotFound 失败（fail-closed）。
+const DefaultRegisterRole = "member"
+
+// InviteCode 邀请码（管理端列表/注册消耗）。
+type InviteCode struct {
+	ID           string     `json:"id"`
+	Code         string     `json:"code"`
+	CreatedBy    string     `json:"created_by"`
+	CreatorEmail string     `json:"creator_email"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	UsedBy       *string    `json:"used_by,omitempty"`
+	UsedByEmail  string     `json:"used_by_email,omitempty"`
+	UsedAt       *time.Time `json:"used_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+// CreateInviteCode 写入一条邀请码（明文入库：一次性门卡需可复制重发，见 policy.go 的生成说明）。
+func (s *Store) CreateInviteCode(ctx context.Context, code, createdBy string, expiresAt time.Time) (*InviteCode, error) {
+	var ic InviteCode
+	err := s.Pool.QueryRow(ctx, `
+		INSERT INTO invite_codes (code, created_by, expires_at)
+		VALUES ($1, $2::uuid, $3)
+		RETURNING id, code, created_by, expires_at, created_at`,
+		code, createdBy, expiresAt).
+		Scan(&ic.ID, &ic.Code, &ic.CreatedBy, &ic.ExpiresAt, &ic.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &ic, nil
+}
+
+// ListInviteCodes 邀请码列表（管理端）。
+func (s *Store) ListInviteCodes(ctx context.Context) ([]InviteCode, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT ic.id, ic.code, ic.created_by, COALESCE(cr.email,''), ic.expires_at,
+		       ic.used_by, COALESCE(ur.email,''), ic.used_at, ic.created_at
+		FROM invite_codes ic
+		JOIN users cr ON cr.id = ic.created_by
+		LEFT JOIN users ur ON ur.id = ic.used_by
+		ORDER BY ic.created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []InviteCode
+	for rows.Next() {
+		var ic InviteCode
+		if err := rows.Scan(&ic.ID, &ic.Code, &ic.CreatedBy, &ic.CreatorEmail, &ic.ExpiresAt,
+			&ic.UsedBy, &ic.UsedByEmail, &ic.UsedAt, &ic.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, ic)
+	}
+	return out, rows.Err()
+}
+
+// CheckInviteUsable 注册前预检邀请码，给出**细分**错误（不存在/已用/过期）供响应文案。
+//
+// 这只是预检（面向 UX）：真正的消耗判定在 RegisterUser 事务内的条件 UPDATE
+// ——并发下两个注册预检都通过，事务里只有一个能命中 used_by IS NULL。
+func (s *Store) CheckInviteUsable(ctx context.Context, code string) error {
+	var expiresAt time.Time
+	var used bool
+	err := s.Pool.QueryRow(ctx,
+		`SELECT expires_at, used_by IS NOT NULL FROM invite_codes WHERE code = $1`, code).
+		Scan(&expiresAt, &used)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrInviteInvalid
+	}
+	if err != nil {
+		return err
+	}
+	if used {
+		return ErrInviteUsed
+	}
+	if !time.Now().Before(expiresAt) {
+		return ErrInviteExpired
+	}
+	return nil
+}
+
+// RegisterInput 注册入参（store 层形态：已归一化，不含策略判定——那是 handler 的事）。
+type RegisterInput struct {
+	Email       string
+	DisplayName string
+	Password    string
+	InviteCode  string // 空 = 不用邀请码
+}
+
+// RegisterUser 创建注册用户（默认 member 角色），邀请码非空时**事务内**原子消耗。
+//
+// 为什么必须事务：used_by 外键指向 users(id)，消耗必须发生在建号之后；
+// 而"建号+消耗"若分两步提交，并发下两个请求可能都建号成功、只有一个码 ——
+// 一个邀请码换来两个账号。条件 UPDATE（used_by IS NULL AND expires_at > now()）
+// 保证只有一个事务能消耗，另一个整体回滚（账号也不会留下）。
+func (s *Store) RegisterUser(ctx context.Context, in RegisterInput) (string, error) {
+	ok, err := s.RoleExists(ctx, DefaultRegisterRole)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%w（缺少默认角色 %s）", ErrRoleNotFound, DefaultRegisterRole)
+	}
+	hash, err := HashPassword(in.Password)
+	if err != nil {
+		return "", err
+	}
+
+	// insertUser 统一 RETURNING id：Job000128 e2e 实测缺陷——原无邀请分支用 Exec
+	// 且回常量 ""，注册成功也返回空 id（响应 {"id":""}，审计主体/后续引导拿不到账号）。
+	insertUser := func(q interface {
+		QueryRow(ctx context.Context, sql string, arguments ...any) pgx.Row
+	}) (string, error) {
+		var id string
+		err := q.QueryRow(ctx, `
+			INSERT INTO users (email, display_name, password_hash, role_id)
+			VALUES ($1, NULLIF($2,''), $3, (SELECT id FROM roles WHERE name = $4))
+			RETURNING id`,
+			in.Email, in.DisplayName, hash, DefaultRegisterRole).Scan(&id)
+		return id, err
+	}
+
+	if in.InviteCode == "" {
+		id, err := insertUser(s.Pool)
+		return id, mapRegisterErr(err)
+	}
+
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx) // 已 Commit 后 Rollback 是无害 no-op
+
+	userID, err := insertUser(tx)
+	if err != nil {
+		return "", mapRegisterErr(err)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE invite_codes SET used_by = $2::uuid, used_at = now()
+		WHERE code = $1 AND used_by IS NULL AND expires_at > now()`, in.InviteCode, userID)
+	if err != nil {
+		return "", err
+	}
+	if tag.RowsAffected() == 0 {
+		// 并发被抢（预检到消耗之间码被用掉/过期）：整个事务回滚，账号不留。
+		return "", ErrInviteUsed
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return userID, nil
+}
+
+// mapRegisterErr 注册插入错误的统一映射（23505 唯一冲突 → ErrEmailExists）。
+func mapRegisterErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrEmailExists
+	}
+	return err
 }
 
 // RevokeAllSessions 吊销某用户的全部会话。

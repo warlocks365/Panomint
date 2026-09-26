@@ -210,18 +210,27 @@ func TestBuildUserUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("密码：有哈希才写，且键名是 password_hash", func(t *testing.T) {
+	t.Run("密码：有哈希才写，且联动置位强制改密（Job000128）", func(t *testing.T) {
 		in := UserUpdate{Password: ptrS("12345678")}
 		sets, args := buildUserUpdate(in, "")
 		if len(sets) != 0 {
 			t.Fatalf("未传哈希时不应产出 SET（bcrypt 由 handler 生成），实际 %v", sets)
 		}
 		sets, args = buildUserUpdate(in, "$2a$10$fakehash")
-		if len(sets) != 1 || args[0] != "$2a$10$fakehash" {
-			t.Fatalf("应写入传入的哈希，实际 sets=%v args=%v", sets, args)
+		// 管理员重置密码 = 联动 must_change_password=TRUE（点 1+3）：2 条 SET、1 个参数
+		if len(sets) != 2 || len(args) != 1 || args[0] != "$2a$10$fakehash" {
+			t.Fatalf("应写入哈希并联动置位强制改密，实际 sets=%v args=%v", sets, args)
 		}
 		if sets[0] != "password_hash = $1" {
 			t.Fatalf("列名应为 password_hash，实际 %q", sets[0])
+		}
+		if sets[1] != "must_change_password = TRUE" {
+			t.Fatalf("重置密码必须联动 must_change_password = TRUE，实际 %q", sets[1])
+		}
+		// 不改密码（只改昵称）绝不能碰强制改密标记
+		setsOnlyName, _ := buildUserUpdate(UserUpdate{DisplayName: ptrS("n")}, "")
+		if strings.Contains(strings.Join(setsOnlyName, ","), "must_change_password") {
+			t.Fatalf("仅改昵称不得置位强制改密，实际 %v", setsOnlyName)
 		}
 	})
 

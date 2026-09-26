@@ -27,6 +27,10 @@
     <!-- 修改密码 -->
     <section class="card">
       <h2 class="card-title">修改密码</h2>
+      <!-- 强制改密提示（Job000128 点 3）：管理员重置密码后由路由守卫引导至此 -->
+      <p v-if="auth.mustChangePassword" class="must-banner" data-testid="must-change-banner">
+        管理员已重置您的密码，请立即设置新密码；完成前无法使用其他功能。
+      </p>
       <p class="card-desc">
         修改成功后，本账号在<strong>所有设备上的登录状态都会失效</strong>，需要用新密码重新登录
         —— 这样即使旧密码或旧会话曾经泄漏，也会随之作废。
@@ -272,5 +276,15 @@ input[type='password']:focus {
 
 .msg--ok {
   color: var(--color-success);
+}
+
+.must-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-warning, #b8860b);
+  border-radius: var(--radius-sm);
+  background: rgba(184, 134, 11, 0.08);
+  color: var(--color-warning, #b8860b);
+  font-size: var(--font-size-sm);
 }
 </style>

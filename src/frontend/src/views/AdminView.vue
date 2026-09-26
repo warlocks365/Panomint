@@ -31,6 +31,7 @@
       <!-- 页签组件按需挂载，切换后保留状态（keep-alive 语义 = v-show） -->
       <OverviewTab v-show="activeTab === 'overview'" data-testid="panel-overview" />
       <UsersTab v-show="activeTab === 'users'" data-testid="panel-users" />
+      <AccountsTab v-show="activeTab === 'accounts'" data-testid="panel-accounts" />
       <RolesTab v-show="activeTab === 'roles'" data-testid="panel-roles" />
       <PermTab v-show="activeTab === 'perms'" data-testid="panel-perms" />
       <JobsTab v-show="activeTab === 'jobs'" data-testid="panel-jobs" />
@@ -49,6 +50,7 @@ import { useAuthStore } from '../stores/auth'
 import { getStats, listUsers } from '../api/admin'
 import OverviewTab from './admin/OverviewTab.vue'
 import UsersTab from './admin/UsersTab.vue'
+import AccountsTab from './admin/AccountsTab.vue'
 import RolesTab from './admin/RolesTab.vue'
 import PermTab from './admin/PermTab.vue'
 import JobsTab from './admin/JobsTab.vue'
@@ -65,6 +67,7 @@ const forbidden = ref(false)
 const tabs = [
   { key: 'overview', label: '概览' },
   { key: 'users', label: '用户' },
+  { key: 'accounts', label: '账号策略' },
   { key: 'roles', label: '角色' },
   { key: 'perms', label: '权限' },
   { key: 'jobs', label: '任务' },

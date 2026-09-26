@@ -85,6 +85,12 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 		return
 	}
+	// Job000128：自助改密成功即清除"强制改密"标记（管理员重置密码置的位）。
+	// 不清的话用户改完密码、重新登录还会被再次引导到改密页，死循环。
+	if err := h.Store.ClearMustChangePassword(ctx, userID); err != nil {
+		log.Printf("auth: 清除强制改密标记失败（user=%s）: %v", userID, err)
+		// 不阻断：标记残留的后果只是多一次改密引导，安全上无害
+	}
 
 	if err := h.Store.RevokeAllSessions(ctx, userID); err != nil {
 		log.Printf("auth: 自助改密后吊销会话失败（user=%s）: %v", userID, err)

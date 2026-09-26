@@ -52,10 +52,17 @@
         </label>
 
         <p v-if="errorMsg" class="error-msg" data-testid="login-error">{{ errorMsg }}</p>
+        <p v-if="lockMsg" class="lock-msg" data-testid="login-locked">{{ lockMsg }}</p>
 
-        <button class="submit-btn" data-testid="login-submit" type="submit" :disabled="loading">
+        <button class="submit-btn" data-testid="login-submit" type="submit" :disabled="loading || !!lockUntil">
           {{ loading ? '登录中…' : '登录' }}
         </button>
+
+        <!-- 注册入口（Job000128 点 6）：仅当服务端注册开关开启时渲染 -->
+        <p v-if="registerOpen" class="alt-link">
+          还没有账号？
+          <RouterLink to="/register" data-testid="login-to-register">注册新账号</RouterLink>
+        </p>
 
         <!-- SSO 登录（Job000054）：仅当后端配置了 OIDC 才渲染。整页跳转到 IdP，
              授权后 IdP 带 code/state 跳回本页，由 onMounted 里的回调分支接手。 -->
@@ -71,9 +78,10 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore, errCode, errMessage, MFA_REQUIRED, MFA_INVALID } from '../stores/auth'
+import { getRegisterStatus } from '../api/admin'
 import { safeInternalPath } from '../utils/url'
 
 const router = useRouter()
@@ -98,6 +106,31 @@ const loading = ref(false)
 const errorMsg = ref('')
 const codeInput = ref(null)
 const ssoEnabled = ref(false)
+// ---- 账号锁定与注册入口（Job000128）----
+const lockMsg = ref('')
+const lockUntil = ref(0) // 锁定截止时间戳（ms）；0 = 未锁定。锁定期间禁用登录按钮
+const lockTimer = ref(null)
+const registerOpen = ref(false)
+
+// 锁定倒计时：每秒刷新提示，到期自动解锁并清空提示。
+// 不做"替用户隐藏锁定"——服务端才是裁决者，这里只是把 423 响应里的信息变得可读。
+function startLockCountdown(seconds) {
+  clearInterval(lockTimer.value)
+  const deadline = Date.now() + seconds * 1000
+  lockUntil.value = deadline
+  const tick = () => {
+    const left = Math.ceil((deadline - Date.now()) / 1000)
+    if (left <= 0) {
+      lockUntil.value = 0
+      lockMsg.value = ''
+      clearInterval(lockTimer.value)
+      return
+    }
+    lockMsg.value = `登录失败次数过多，账户已暂时锁定，请约 ${Math.ceil(left / 60)} 分钟后再试`
+  }
+  tick()
+  lockTimer.value = setInterval(tick, 1000)
+}
 
 // SSO 回调（Job000054）：IdP 授权后跳回 /login?code=..&state=..。
 // 有回调参数就直奔 token 交换，不渲染表单流程；失败提示与登录失败同区显示。
@@ -121,7 +154,20 @@ onMounted(async () => {
     errorMsg.value = 'SSO 登录未完成'
   }
   ssoEnabled.value = await auth.fetchSSOEnabled()
+  // 注册入口可见性（Job000128）：失败按关闭处理（入口不出现比出现一个点不动的入口好）
+  try {
+    registerOpen.value = !!(await getRegisterStatus())?.allow_registration
+  } catch {
+    registerOpen.value = false
+  }
+  // 刚注册成功跳转过来：给一条正向提示
+  if (route.query.registered) {
+    lockMsg.value = ''
+    errorMsg.value = ''
+  }
 })
+
+onUnmounted(() => clearInterval(lockTimer.value))
 
 // 整页跳转到后端 /auth/sso/oidc/login（302 再到 IdP 授权页）。
 // 不能用 axios/fetch：需要浏览器真实导航以维持 IdP 的会话 cookie。
@@ -130,6 +176,7 @@ function onSSO() {
 }
 
 async function onSubmit() {
+  if (lockUntil.value) return // 锁定期间按钮已禁用，这里双保险
   errorMsg.value = ''
   loading.value = true
   try {
@@ -138,7 +185,12 @@ async function onSubmit() {
     goAfterLogin()
   } catch (e) {
     const code = errCode(e)
-    if (code === MFA_REQUIRED) {
+    if (code === 'ACCOUNT_LOCKED') {
+      // 账号锁定（Job000128）：显示服务端文案并按 remaining_minute 跑倒计时，
+      // 到期前禁用登录按钮——省得用户反复提交注定失败的请求。
+      startLockCountdown((e?.response?.data?.remaining_minute || 1) * 60)
+      errorMsg.value = ''
+    } else if (code === MFA_REQUIRED) {
       // 服务端说"该账户已启用二次验证"：展开口令框并把焦点送过去，
       // 用户不必再去猜自己为什么登不上。
       needCode.value = true
@@ -240,6 +292,28 @@ async function onSubmit() {
   margin: 0;
   font-size: var(--font-size-sm);
   color: var(--color-danger);
+}
+
+.lock-msg {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.alt-link {
+  margin: 0;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.alt-link a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.alt-link a:hover {
+  text-decoration: underline;
 }
 
 .submit-btn {

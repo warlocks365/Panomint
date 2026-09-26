@@ -407,7 +407,9 @@ func (h *SSOHandler) Callback(c *gin.Context) {
 		return
 	}
 	h.recordSSO(c, u.ID, jitCreated)
-	c.JSON(http.StatusOK, tokenPair{accessTok, refreshTok, int64(AccessTTL.Seconds()), "Bearer"})
+	// SSO 登录不带强制改密：口令由 IdP 管理，"强制改密"语义只适用于本地口令
+	// （must_change_password 由管理员重置本地口令时置位，SSO 路径恒 false）。
+	c.JSON(http.StatusOK, tokenPair{accessTok, refreshTok, int64(AccessTTL.Seconds()), "Bearer", false})
 }
 
 // recordSSO 写审计（尽力而为）。公开端点 → recordAs 显式传 actor。

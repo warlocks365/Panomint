@@ -137,6 +137,10 @@ func main() {
 	r.POST("/auth/login", authH.Login)
 	r.POST("/auth/refresh", authH.Refresh)
 	r.POST("/auth/logout", authH.Logout)
+	// Job000128 点 6：自助注册（开关默认关闭 + 可选邀请制，见 auth.Register）。
+	// ⚠️ nginx 前缀核对：`auth` 已在 docker/web/Dockerfile 的纯 API 正则组内，无需改动。
+	r.GET("/auth/register/status", authH.RegisterStatus)
+	r.POST("/auth/register", authH.Register)
 
 	// ===== 版本与首次安装引导（Job000105/107）=====
 	// /version：构建版本三元组（发布产物注入 ldflags；开发产物恒 "dev"），
@@ -511,6 +515,15 @@ func main() {
 	// 语义见 internal/auth/scan_root.go）。与 /admin/scan（admin:system 运维面）不同，
 	// 本端点挂在 admin:users —— 它是**账号管理**动作（决定某账号能扫哪），不是系统运维。
 	admin.PUT("/users/:id/scan-root", authH.PutUserScanRoot)
+
+	// ===== Job000128：账号策略配置 + 邀请码管理 =====
+	// 挂 admin:users（账号管理域）：注册开关/密码策略/锁定参数决定"谁能有账号、
+	// 账号多难进"，与用户/角色管理同域；不是 admin:system 的系统运维面。
+	// ⚠️ nginx 前缀核对：`admin` 已在纯 API 正则组内，无需改动。
+	admin.GET("/account-config", authH.GetAccountConfig)
+	admin.PUT("/account-config", authH.PutAccountConfig)
+	admin.GET("/invites", authH.ListInvites)
+	admin.POST("/invites", authH.CreateInvite)
 
 	// ===== Phase 5 精选第一项：审计日志 + 管理端只读端点 =====
 	// 契约 §2 `GET /admin/audit`（分页）、§14 `GET /admin/stats`、§12 `GET /admin/jobs`。

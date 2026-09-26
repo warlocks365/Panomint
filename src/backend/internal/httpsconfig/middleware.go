@@ -15,7 +15,9 @@ package httpsconfig
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -29,30 +31,34 @@ const (
 	forceRetryTTL = 10 * time.Second
 )
 
-// forceCache force_https 开关的进程内缓存（60s）。
+// forceCache force_https 开关与 HTTPS 端口的进程内缓存（60s）。
+// 端口与开关同源同缓存（Job000128 点 9）：301 目标端口必须与开关一致地热生效，
+// 否则会出现"开关即时生效、端口要等 60s"的分裂行为。
 type forceCache struct {
-	mu      sync.Mutex
-	pool    *pgxpool.Pool
-	value   bool
-	expires time.Time
+	mu        sync.Mutex
+	pool      *pgxpool.Pool
+	value     bool
+	httpsPort int
+	expires   time.Time
 }
 
-func (c *forceCache) get(ctx context.Context) bool {
+func (c *forceCache) get(ctx context.Context) (bool, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if time.Now().Before(c.expires) {
-		return c.value
+		return c.value, c.httpsPort
 	}
 	cfg, err := Get(ctx, c.pool)
 	if err != nil || cfg == nil {
 		log.Printf("[httpsconfig] 读 force_https 失败，沿用 %v（%ds 后重试）: %v",
 			c.value, int(forceRetryTTL.Seconds()), err)
 		c.expires = time.Now().Add(forceRetryTTL)
-		return c.value
+		return c.value, c.httpsPort
 	}
 	c.value = cfg.ForceHTTPS
+	c.httpsPort = cfg.HTTPSPort
 	c.expires = time.Now().Add(forceTTL)
-	return c.value
+	return c.value, c.httpsPort
 }
 
 // sharedForceCache 包级单例：进程内只有一个 api 实例、一个中间件挂载点与一个
@@ -78,9 +84,15 @@ func InvalidateForceCache() {
 }
 
 // forceHTTPSWith 可注入开关读取器的中间件（测试用）。
-func forceHTTPSWith(read func(ctx context.Context) bool) gin.HandlerFunc {
+//
+// 重定向目标端口（Job000128 点 9）：httpsPort ≠ 443 时目标拼 `:port` ——
+// 用户自托管常见"443 被占、HTTPS 挂在 8443"的形态，跳到 https://host/（443）
+// 会连接失败；Host 自带旧端口时先剥掉再拼配置端口，避免出现双端口。
+// httpsPort ≤ 0（异常值/旧缓存零值）按 443 处理（不拼端口）。
+func forceHTTPSWith(read func(ctx context.Context) (bool, int)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !read(c.Request.Context()) {
+		force, httpsPort := read(c.Request.Context())
+		if !force {
 			c.Next()
 			return
 		}
@@ -95,7 +107,14 @@ func forceHTTPSWith(read func(ctx context.Context) bool) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		target := "https://" + c.Request.Host + c.Request.URL.RequestURI()
+		host := c.Request.Host
+		if httpsPort > 0 && httpsPort != 443 {
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			host = fmt.Sprintf("%s:%d", host, httpsPort)
+		}
+		target := "https://" + host + c.Request.URL.RequestURI()
 		c.Redirect(http.StatusMovedPermanently, target)
 		c.Abort()
 	}

@@ -33,6 +33,13 @@ const routes = [
     meta: { public: true }
   },
   {
+    // Job000128 点 6：自助注册（注册开关开启时才可达；页面自身先查服务端状态）
+    path: '/register',
+    name: 'register',
+    component: () => import('../views/RegisterView.vue'),
+    meta: { public: true }
+  },
+  {
     // Job000107 首次安装引导（一次性初始化向导）：未初始化时所有导航被守卫重定向到这里
     path: '/setup',
     name: 'setup',
@@ -188,6 +195,12 @@ router.beforeEach(async (to) => {
       } catch {
         // 忽略：页面照常渲染，顶栏暂时显示兜底值
       }
+    }
+    // 强制改密闸门（Job000128 点 3）：管理员重置密码后，用户必须先改密才能用系统。
+    // 只放行设置页（改密卡片所在）——放行任何其他页面都等于绕过这个要求。
+    // fetchMe 失败（user 为 null）时不拦：用户信息都没有，无从判定；401 自有拦截器处理。
+    if (auth.user?.must_change_password && to.name !== 'settings') {
+      return { name: 'settings', query: { must_change_password: '1' } }
     }
   }
   return true

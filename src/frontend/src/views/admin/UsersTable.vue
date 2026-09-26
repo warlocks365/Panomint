@@ -30,6 +30,28 @@
             <span class="state" :class="u.status === 'active' ? 'state--ok' : 'state--off'">
               {{ u.status === 'active' ? '正常' : '已禁用' }}
             </span>
+            <!-- Job000128：锁定/强制改密状态随行展示（数据来自 GET /admin/users 的 3 新列） -->
+            <span
+              v-if="isLockedNow(u)"
+              class="state state--warn"
+              :data-testid="`user-locked-${u.email}`"
+            >
+              已锁定
+            </span>
+            <span
+              v-if="u.failed_login_count > 0"
+              class="state state--warn"
+              :data-testid="`user-failed-${u.email}`"
+            >
+              失败 {{ u.failed_login_count }} 次
+            </span>
+            <span
+              v-if="u.must_change_password"
+              class="state state--warn"
+              :data-testid="`user-forcepwd-${u.email}`"
+            >
+              待改密
+            </span>
           </td>
           <td>{{ u.mfa_enabled ? '已启用' : u.mfa_pending ? '待确认' : '未启用' }}</td>
           <td>
@@ -97,6 +119,12 @@ function scanRootLabel(u) {
   if (u.scan_root === '') return '（媒体根）'
   return u.scan_root
 }
+
+// isLockedNow 锁定进行中判定（与后端 EvaluateLock 同口径：> now 才算锁着）。
+// 管理端列表是低频刷新的快照，按当前时刻算即可，不做秒级倒计时。
+function isLockedNow(u) {
+  return !!u.locked_until && new Date(u.locked_until).getTime() > Date.now()
+}
 </script>
 
 <style scoped>
@@ -129,6 +157,10 @@ function scanRootLabel(u) {
 }
 .state--ok {
   color: var(--color-success);
+}
+.state--warn {
+  color: var(--color-warning);
+  margin-left: 8px;
 }
 .state--off {
   color: var(--color-text-disabled);
