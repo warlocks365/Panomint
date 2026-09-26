@@ -48,7 +48,7 @@ docker pull warlocks/panomint-app:1.7.0
 # worker / db 同名同理；编排中 image tag 改为 1.7.0（或 latest）后 up -d
 ```
 
-镜像 digest 核验（构建推送后回填，见 §2.3）。
+镜像 digest 核验（2026-09-26 Hub 实测，本机 Registry API 独立查询与推送日志逐字一致，每镜像 1.7.0 = latest）：
 
 运行版本自检：登录后设置页「版本信息」卡显示 `v1.7.0`；或 `curl http://<host>:8088/version` 返回 `{version: "1.7.0", ...}`。
 
@@ -60,10 +60,10 @@ docker pull warlocks/panomint-app:1.7.0
 
 | 镜像 | 1.7.0 = latest digest |
 | --- | --- |
-| warlocks/panomint-app | 待构建后回填 |
-| warlocks/panomint-web | 待构建后回填 |
-| warlocks/panomint-worker | 待构建后回填 |
-| warlocks/panomint-db | 待构建后回填 |
+| warlocks/panomint-app | `sha256:d4a1c241…`（异于 1.6.0 `57e4243a…`） |
+| warlocks/panomint-web | `sha256:509ed338…`（异于 1.6.0 `6cf637f0…`） |
+| warlocks/panomint-worker | `sha256:7191e6ed…`（在库） |
+| warlocks/panomint-db | `sha256:fdc2262f…`（在库） |
 
 ---
 
