@@ -119,6 +119,11 @@ services:
       # Job000070 F4 挂载凭据加密密钥（32 字节 hex）：api 加密/校验，worker 解密执行挂载。
       # 只经 .env 注入，绝不入库；未配置时带凭据的挂载写操作 400 CIPHER_KEY_MISSING。
       STORAGE_CIPHER_KEY: ${STORAGE_CIPHER_KEY:-}
+      # Job000125 HTTPS/证书设置：管理后台上传的证书落盘目录（fullchain.crt/private.pem）。
+      # 落在 mediadata 卷的 certs/ 子目录（搭备份纪律的车）；TLS 终止在反代（Caddy），
+      # 此目录供部署者把证书接给反代 —— 应用层只做校验落盘与到期日跟踪，不热切 TLS。
+      # 未配置该变量时上传端点 503 fail-closed（防止证书写进不可预期位置）。
+      HTTPS_CERT_DIR: ${HTTPS_CERT_DIR:-/data/certs}
     volumes:
       - mediadata:/data
       - tilecache:/tile-cache

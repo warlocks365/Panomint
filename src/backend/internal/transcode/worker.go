@@ -6,6 +6,7 @@ import (
 	"log"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,11 +25,40 @@ type HLSWorker struct {
 	q         *queue.Queue
 	hlsDir    string   // HLS 输出根目录
 	mediaDirs []string // 媒体根目录候选（上传目录、索引根目录）
+
+	// Job000125：系统配置 hls_seg_seconds 的进程内缓存（60s）。
+	// 每任务都查一次库没必要（分片时长是低频变更的运维配置）；查询失败沿用旧值/零值
+	// （零值经 TranscodeHLS 归一化为 DefaultSegSeconds=4，即历史行为，永远安全）。
+	segMu       sync.Mutex
+	segSeconds  int
+	segExpires  time.Time
 }
 
 // NewHLSWorker 创建 Worker；mediaDirs 为 media.path 相对路径的解析根（按序探测）。
 func NewHLSWorker(db *pgxpool.Pool, q *queue.Queue, hlsDir string, mediaDirs ...string) *HLSWorker {
 	return &HLSWorker{db: db, q: q, hlsDir: hlsDir, mediaDirs: mediaDirs}
+}
+
+// systemSegSeconds 读系统配置的分片时长（60s 缓存；越界值防御性归零 → 调用链取默认）。
+func (w *HLSWorker) systemSegSeconds(ctx context.Context) int {
+	w.segMu.Lock()
+	defer w.segMu.Unlock()
+	if time.Now().Before(w.segExpires) {
+		return w.segSeconds
+	}
+	v, err := GetSystemConfig(ctx, w.db)
+	if err != nil || v == nil {
+		w.segExpires = time.Now().Add(30 * time.Second)
+		return w.segSeconds
+	}
+	seg := v.HLSSegSeconds
+	if seg < 2 || seg > 20 {
+		log.Printf("[transcode] 系统配置 hls_seg_seconds=%d 越界（2-20），本任务回退默认 %d", seg, DefaultSegSeconds)
+		seg = 0
+	}
+	w.segSeconds = seg
+	w.segExpires = time.Now().Add(60 * time.Second)
+	return w.segSeconds
 }
 
 // resolveInput 按候选根目录解析 media.path 到磁盘文件。
@@ -85,12 +115,13 @@ func (w *HLSWorker) Handle(ctx context.Context, job queue.Job) error {
 	}
 
 	masterURL, err := TranscodeHLS(ctx, HLSTranscodeRequest{
-		MediaID:   mediaID,
-		Input:     input,
-		HLSDir:    w.hlsDir,
-		Profile:   profile,
-		SrcWidth:  srcW,
-		SrcHeight: srcH,
+		MediaID:    mediaID,
+		Input:      input,
+		HLSDir:     w.hlsDir,
+		Profile:    profile,
+		SegSeconds: w.systemSegSeconds(ctx), // Job000125：管理后台可配；0 → TranscodeHLS 取默认 4
+		SrcWidth:   srcW,
+		SrcHeight:  srcH,
 	})
 	if err != nil {
 		// 与历史行为一致：转码失败标记 failed 但**不**进死信，留给队列退避重试。

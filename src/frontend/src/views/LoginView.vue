@@ -74,10 +74,20 @@
 import { nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore, errCode, errMessage, MFA_REQUIRED, MFA_INVALID } from '../stores/auth'
+import { safeInternalPath } from '../utils/url'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+
+// 登录成功后的落点（Job000125）：守卫拦截时带 ?redirect=<原目标>，
+// 这里经 safeInternalPath 清洗后回跳原页 —— 拒绝外链/协议相对/回 login|setup
+// 本身（开放重定向防御），非法或缺省一律落 /timeline。
+// 注意：SSO 整页跳去 IdP 时 redirect 参数不跟随，回跳自然落回 /timeline，属预期。
+function goAfterLogin() {
+  const raw = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+  router.push(safeInternalPath(raw) || '/timeline')
+}
 
 const email = ref('')
 const password = ref('')
@@ -99,7 +109,7 @@ onMounted(async () => {
     errorMsg.value = ''
     try {
       await auth.loginWithSSO(code, state)
-      router.push('/timeline')
+      goAfterLogin()
       return
     } catch (e) {
       errorMsg.value = errMessage(e, 'SSO 登录失败，请重试')
@@ -125,7 +135,7 @@ async function onSubmit() {
   try {
     // 未要求二次验证时不传 totp_code（后端字段可选，老流程完全不受影响）
     await auth.login(email.value, password.value, remember.value, needCode.value ? totpCode.value : '')
-    router.push('/timeline')
+    goAfterLogin()
   } catch (e) {
     const code = errCode(e)
     if (code === MFA_REQUIRED) {

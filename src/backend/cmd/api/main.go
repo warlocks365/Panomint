@@ -37,6 +37,7 @@ import (
 	"panoalbum/internal/middleware"
 	"panoalbum/internal/queue"
 	"panoalbum/internal/search"
+	"panoalbum/internal/httpsconfig"
 	"panoalbum/internal/setup"
 	"panoalbum/internal/shares"
 	"panoalbum/internal/spaces"
@@ -98,6 +99,10 @@ func main() {
 		middleware.RequestID(),
 		middleware.Recovery(log),
 		middleware.Logging(log),
+		// Job000125 强制 HTTPS（应用层热生效）：必须在 CORS/限流之前——
+		// 被 301 的明文请求不应消耗限流桶，也不参与 CORS 判定。
+		// 开关在 DB（system_https_config，60s 缓存）；无反代透传 XFP 的部署不受影响（见包说明）。
+		httpsconfig.ForceHTTPS(pool),
 		middleware.CORS(cfg.CORSOrigins),
 		middleware.RateLimit(q.NewRateLimiter(), 60, 10), // 每 IP：突发 60、持续 10/s
 	)
@@ -350,6 +355,15 @@ func main() {
 	authed.PUT("/admin/map-config", auth.RequirePerm(authStore, "admin:system"), geoH.PutMapConfig)
 	authed.GET("/admin/transcode-config", auth.RequirePerm(authStore, "admin:system"), transH.GetConfig)
 	authed.PUT("/admin/transcode-config", auth.RequirePerm(authStore, "admin:system"), transH.PutConfig)
+
+	// ===== Job000125 HTTPS/证书设置（admin:system）=====
+	// 强制跳转的**执行**在全局中间件（ForceHTTPS），这里只做配置面读写与证书上传。
+	// HTTPS_CERT_DIR：证书落盘目录（compose 为 api 挂载证书卷并注入；未配置时上传端点 503，
+	//   配置读写不受影响）。文件名服务端定死，客户端不参与拼路径。
+	httpsH := &httpsconfig.Handler{Pool: pool, Audit: auditRec, CertDir: os.Getenv("HTTPS_CERT_DIR")}
+	authed.GET("/admin/https/config", auth.RequirePerm(authStore, "admin:system"), httpsH.GetConfig)
+	authed.PUT("/admin/https/config", auth.RequirePerm(authStore, "admin:system"), httpsH.PutConfig)
+	authed.POST("/admin/https/cert", auth.RequirePerm(authStore, "admin:system"), httpsH.UploadCert)
 
 	// ===== Job000121 转码远程调试通道（一次性、短寿命、全审计的远程排障通道）=====
 	// 管理面四端点（admin:system，与 /admin/transcode-config 同权限位）；

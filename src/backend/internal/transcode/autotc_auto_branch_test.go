@@ -57,7 +57,9 @@ func TestPutConfigPartialUpdateShape(t *testing.T) {
 	}
 	body := methodBody(t, string(b), "PutConfig")
 
-	// 部分更新三要件：map 先取一层、两字段独立解指针、全缺 400。
+	// 部分更新三要件：map 先取一层、字段独立解指针、全缺 400。
+	// Job000125 更新：字段从两个扩到五个；「全缺 400」由 PutSystemConfigFields 的
+	// ErrValidation 哨兵承担（Handler isValidationErr 映射），守卫断言随形状同步。
 	if !strings.Contains(body, "map[string]json.RawMessage") {
 		t.Fatal("PutConfig 需用 map[string]json.RawMessage 先取一层（缺失不改语义）")
 	}
@@ -66,11 +68,16 @@ func TestPutConfigPartialUpdateShape(t *testing.T) {
 			t.Fatalf("PutConfig 缺少字段解析：%s", key)
 		}
 	}
-	if !strings.Contains(body, "auto == nil && realtime == nil") {
-		t.Fatal("PutConfig 缺少「两字段全缺 = 400」守卫（防空写）")
+	for _, key := range []string{`raw["hls_seg_seconds"]`, `raw["hls_cache_profile"]`, `raw["stream_base_url"]`} {
+		if !strings.Contains(body, key) {
+			t.Fatalf("PutConfig 缺少 Job000125 字段解析：%s", key)
+		}
 	}
-	putAt := strings.Index(body, "PutSystemConfig(")
+	if !strings.Contains(body, "isValidationErr(err)") {
+		t.Fatal("PutConfig 缺少 isValidationErr 分类（校验错 400 与库错 500 的分界）")
+	}
+	putAt := strings.Index(body, "PutSystemConfigFields(")
 	if putAt < 0 {
-		t.Fatal("PutConfig 缺少 PutSystemConfig 调用")
+		t.Fatal("PutConfig 缺少 PutSystemConfigFields 调用")
 	}
 }

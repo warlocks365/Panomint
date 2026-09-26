@@ -2,6 +2,28 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getAccessToken } from '../utils/tokenStore'
 import { useAuthStore } from '../stores/auth'
 import { getSetupStatus } from '../api/setup'
+import { safeInternalPath } from '../utils/url'
+
+// Job000125：setup 状态的模块级缓存（15s TTL）。
+// 之前每次路由导航都发一次 GET /setup/status（时间轴缩放/地图拖动等高频导航场景白耗请求）；
+// 初始化完成（SetupView 成功）与登出等低频事件远低于 TTL，行为安全。
+// 不可达（网络错）不缓存失败——下次导航立即重试，保持「可用性优先」语义。
+let setupCache = null // { initialized: boolean, expires: number }
+const SETUP_TTL = 15000
+
+export function invalidateSetupCache() {
+  setupCache = null
+}
+
+async function setupInitialized() {
+  if (setupCache && Date.now() < setupCache.expires) return setupCache.initialized
+  const st = await getSetupStatus()
+  if (st && typeof st.initialized === 'boolean') {
+    setupCache = { initialized: st.initialized, expires: Date.now() + SETUP_TTL }
+    return st.initialized
+  }
+  return null // 状态形状异常：按不可达处理（不拦）
+}
 
 const routes = [
   {
@@ -129,14 +151,15 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  // 安装向导闸门（Job000107）：未初始化时全站只放行 /setup；已初始化后 /setup 也不再出现。
-  // 查询失败（null）时不拦 —— 可用性优先，SetupView 提交时后端仍会 fail-closed 裁决。
+  // 安装向导闸门（Job000107 首建；Job000125 增 15s 缓存）：未初始化时全站只放行 /setup；
+  // 已初始化后 /setup 也不再出现。查询失败（null）时不拦 —— 可用性优先，
+  // SetupView 提交时后端仍会 fail-closed 裁决。
   try {
-    const st = await getSetupStatus()
-    if (st && !st.initialized && to.name !== 'setup') {
+    const initialized = await setupInitialized()
+    if (initialized === false && to.name !== 'setup') {
       return { name: 'setup' }
     }
-    if (st && st.initialized && to.name === 'setup') {
+    if (initialized === true && to.name === 'setup') {
       return { name: 'login' }
     }
   } catch {
@@ -144,9 +167,15 @@ router.beforeEach(async (to) => {
   }
 
   if (!to.meta.public && !getAccessToken()) {
-    return { name: 'login' }
+    // Job000125：携带原始目标路径，登录成功后回跳（safeInternalPath 校验在 LoginView）。
+    return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.name === 'login' && getAccessToken()) {
+    // 已登录访问 /login：尊重 redirect（合法时），否则回首页。
+    // safeInternalPath 对空串/非法值一律返回 ''，统一走首页回退。
+    const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : ''
+    const safe = safeInternalPath(redirect)
+    if (safe) return { path: safe }
     return { path: '/' }
   }
   // 启动引导：token 仍在（如页面刷新）但用户信息未恢复时补拉一次 /auth/me。

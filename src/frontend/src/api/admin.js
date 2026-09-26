@@ -90,18 +90,58 @@ export function putMapConfig(patch) {
 }
 
 // ---- 转码设置（admin:system，Job000120-r2：系统级自动 HLS 转码开关；
-// Job000124 增 realtime_transcode「播放时自动转码」，部分更新语义：undefined = 不改）----
-// GET /admin/transcode-config → {auto_transcode, realtime_transcode, updated_at?}（无配置行时缺省=总闸门开/实时关）
+// Job000124 增 realtime_transcode「播放时自动转码」；
+// Job000125 增 HLS 三字段：hls_seg_seconds / hls_cache_profile / stream_base_url，
+// 全部部分更新语义：undefined = 不改）----
+// GET /admin/transcode-config → {auto_transcode, realtime_transcode, hls_seg_seconds,
+//   hls_cache_profile, stream_base_url, updated_at?}（无配置行时缺省=开/关/4s/balanced/空）
 export function getTranscodeConfig() {
   return http.get('/admin/transcode-config').then((r) => r.data)
 }
 
-// PUT /admin/transcode-config ← {auto_transcode?, realtime_transcode?}（至少一项）→ 同 GET 视图（写审计）
-export function putTranscodeConfig(autoTranscode, realtimeTranscode) {
+// PUT /admin/transcode-config ← {auto_transcode?, realtime_transcode?, hls_seg_seconds?,
+//   hls_cache_profile?, stream_base_url?}（至少一项）→ 同 GET 视图（写审计）
+// 兼容旧签名（两个布尔位传参）；新代码建议传单个对象。
+export function putTranscodeConfig(a, b, c, d, e) {
   const body = {}
-  if (autoTranscode !== undefined) body.auto_transcode = autoTranscode
-  if (realtimeTranscode !== undefined) body.realtime_transcode = realtimeTranscode
+  if (a !== null && typeof a === 'object') {
+    Object.assign(body, a)
+  } else {
+    if (a !== undefined) body.auto_transcode = a
+    if (b !== undefined) body.realtime_transcode = b
+    if (c !== undefined) body.hls_seg_seconds = c
+    if (d !== undefined) body.hls_cache_profile = d
+    if (e !== undefined) body.stream_base_url = e
+  }
   return http.put('/admin/transcode-config', body).then((r) => r.data)
+}
+
+// ---- HTTPS/证书设置（admin:system，Job000125）----
+// GET /admin/https/config → {force_https, cert_path, cert_key_path, cert_not_after?,
+//   updated_at?, cert_dir, request_proto}
+export function getHttpsConfig() {
+  return http.get('/admin/https/config').then((r) => r.data)
+}
+
+// PUT /admin/https/config ← {force_https}（缺失不改）→ 同 GET 视图（写审计）
+// force_https 保存即热生效（应用层 301 中间件，60s 缓存内收敛）。
+export function putHttpsConfig(forceHTTPS) {
+  const body = {}
+  if (forceHTTPS !== undefined) body.force_https = forceHTTPS
+  return http.put('/admin/https/config', body).then((r) => r.data)
+}
+
+// POST /admin/https/cert ← multipart {cert: fullchain PEM, key: 私钥 PEM}
+// → {config, apply_hint}。服务端校验配对 + 解析到期日 + 落盘 HTTPS_CERT_DIR；
+//   **不**自动让反代生效（响应带 apply_hint 指引手动重启 caddy）。
+export function uploadHttpsCert(certFile, keyFile) {
+  const fd = new FormData()
+  fd.append('cert', certFile)
+  fd.append('key', keyFile)
+  return http.post('/admin/https/cert', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000
+  }).then((r) => r.data)
 }
 
 // ---- 权限体系增强（Job000067 / F1）----

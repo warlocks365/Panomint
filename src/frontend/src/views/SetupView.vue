@@ -79,6 +79,9 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { errCode, errMessage } from '../stores/auth'
 import { getSetupStatus, invalidateSetupStatus, runSetup } from '../api/setup'
+// 路由闸门的 15s TTL 缓存（router/index.js）：初始化成功后必须主动失效，
+// 否则接下来 15 秒内导航会被 setup 闸门反向弹回 /login（闸门认为已初始化）。
+import { invalidateSetupCache } from '../router'
 
 const router = useRouter()
 
@@ -120,12 +123,14 @@ async function onSubmit() {
       password: password.value
     })
     invalidateSetupStatus()
+    invalidateSetupCache() // 同步失效路由闸门缓存，跳转 /login 不再被弹回
     done.value = true
   } catch (e) {
     errorMsg.value = errMessage(e, '初始化失败，请重试')
     // SETUP_COMPLETED（别的窗口抢先完成）也视为完成 —— 引导不再出现，直接给登录入口。
     if (errCode(e) === 'SETUP_COMPLETED') {
       invalidateSetupStatus()
+      invalidateSetupCache()
       done.value = true
     }
   } finally {

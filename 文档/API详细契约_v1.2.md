@@ -1,9 +1,21 @@
-# API 详细契约 (v1.14)
+# API 详细契约 (v1.15)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.14 ｜ 日期：2026-09-26\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.15 ｜ 日期：2026-09-26\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.15 变更说明（2026-09-26，Job000125「HLS 流媒体设置 + HTTPS/证书设置 + 访问守卫强化」）
+
+背景：管理后台补齐流媒体与网络两块系统级配置，并强化前端访问守卫。设计方案《流媒体与访问控制设计_HLS_HTTPS_访问守卫_v1.0.md》（含 HLS 必要性论证：4K 360° 直连四矛盾 / 视线不可预知 → ABR 必须 / 微信 H5 iOS 原生 + Android MSE）。e2e：API 层 38/38、UI 层 20/21（唯一未过项为测试状态残留，SQL 归位后语义全成立）。
+
+1. `system_transcode_config` 增三列（迁移 `00042`，`DEFAULT` = 存量行为逐字节不变）：`hls_seg_seconds INT DEFAULT 4`（分片时长，仅影响新任务，worker 读侧 60s 缓存）、`hls_cache_profile TEXT DEFAULT 'balanced'`（no_cache=调试 / balanced=m3u8 no-cache+ts 一年=历史行为 / aggressive=归档）、`stream_base_url TEXT DEFAULT ''`（空=站内相对路径）；`GET/PUT /admin/transcode-config` 响应/请求体增量三键（PUT 部分更新扩为五键、至少一项）；校验：seg 2-20、profile 枚举、url 须 http(s):// 且含主机（非法 → 400 `ErrValidation`）
+2. HLS 缓存头由 `HLSCacheControl(profile, isMaster)` 纯函数输出：三档 m3u8/ts 头矩阵（no_cache 全不缓存、balanced m3u8 no-cache、aggressive m3u8 60s；ts 一年 immutable 仅 balanced/aggressive）；`ServeHLS` 热读缓存档（60s TTL，读失败沿用旧值）
+3. 新表 `system_https_config`（迁移 `00042`，singleton）+ 新包 `internal/httpsconfig`：`GET /admin/https/config`（视图含 `force_https/cert_path/cert_key_path/cert_not_after` + 运行时注入 `cert_dir/request_proto`）、`PUT /admin/https/config`（当前仅 `force_https` 键）、`POST /admin/https/cert`（multipart cert+key）；全部 `admin:system`，写操作落审计 `admin.settings.patch`/`setting`/`https-config`
+4. 强制 HTTPS = **应用层中间件**（挂 CORS/限流之前）热生效：判据为反代透传的 `X-Forwarded-Proto`，**XFP==http 才 301**（缺失/其他值不拦——防无反代部署 301 死局）；`/health` `/ready` 豁免（探活不跟随重定向）；开关 60s 进程内缓存 + 读失败沿用旧值（可用性优先），**PUT 成功后 `InvalidateForceCache()` 立即失效**（e2e 实测踩出：不失效则变更最长 60s 不可见）；301 Location = `https://<host><RequestURI>`，**不带原 HTTP 端口**（nginx `$host` 语义：HTTPS 走 443，保留 8088 反指向不监听 TLS 的端口）。**架构边界**：中间件在 api 层，只能拦 API 请求；SPA 页面（/timeline 等）由 nginx `location /` 直接回 index.html，页面级跳转由入口反代（Caddy auto_https）兜底——应用层为 API 面的纵深防御
+5. 证书上传链：multipart 读内存（1MB 上限）→ PEM 语法预检 → `tls.X509KeyPair` 配对校验（失败一字节不落盘）→ 文件名服务端定死 `fullchain.crt`/`private.pem` → 落盘 0644/0600 → 到期日（x509 NotAfter）入库；`HTTPS_CERT_DIR` 未配置时上传端点 **503 fail-closed**（compose 为 api 服务注入，落 mediadata 卷 `certs/` 子目录搭备份车）；响应带 `apply_hint`（指向 Caddyfile.tls 的 TLS_CERT/TLS_KEY + `docker compose restart caddy`）——**不做 TLS 运行时热切换**（TLS 终止在反代，自动化重启入口容器风险大于收益）
+6. 前端守卫强化：`router.beforeEach` 鉴权闸门携带 `?redirect=<原目标>`，登录成功经 `safeInternalPath()`（拒绝 `//` 协议相对 / `scheme:` 前缀 / 控制字符 / 回 login|setup 本身——开放重定向防御）回跳原页，非法回退 /timeline；setup 闸门增 15s TTL 进程内缓存（`invalidateSetupCache()` 供 SetupView 初始化成功后主动失效，防 15s 窗口内反向弹回）
+7. 管理后台：新增「网络」页签（10 页签，`tab-network`）挂 `HttpsCard`；转码页签尾挂 `HlsSettingsCard`（三字段 + clientValidate 前置 + 外部地址红色警告）；testid 系 `hls-seg-input/hls-cache-select/hls-base-input/hls-save` + `https-proto/https-cert-days/https-force-toggle/https-cert-upload/https-apply-hint`
 
 ## v1.14 变更说明（2026-09-26，Job000121「转码远程调试通道」全量落地 + Job000122 CI paths-ignore）
 

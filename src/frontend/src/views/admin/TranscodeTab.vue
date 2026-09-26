@@ -1,5 +1,8 @@
 <template>
-  <section class="card">
+  <!-- ⚠️ 单根约束（#129 同型教训）：本组件被 AdminView 以 v-show 切换，
+       多根 fragment 会让 v-show 失效造成页签串台——外层 div 必须保留。 -->
+  <div class="transcode-tab">
+    <section class="card">
     <div class="card-head">
       <h2 class="card-title">转码设置</h2>
       <button class="btn btn--ghost" type="button" :disabled="loading" data-testid="tc-reload" @click="load">
@@ -46,6 +49,10 @@
       </label>
     </template>
   </section>
+
+  <!-- Job000125：HLS 流媒体参数（分片时长/缓存策略/流媒体地址），独立组件卡 -->
+  <HlsSettingsCard />
+  </div>
 </template>
 
 <script setup>
@@ -57,6 +64,7 @@
 // PUT 为部分更新（undefined = 不改），失败回滚开关姿态，与服务端真值保持一致。
 import { computed, onMounted, ref } from 'vue'
 import { getTranscodeConfig, putTranscodeConfig } from '../../api/admin'
+import HlsSettingsCard from './HlsSettingsCard.vue'
 
 const enabled = ref(true)
 const realtime = ref(false)

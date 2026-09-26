@@ -2,6 +2,7 @@
 package transcode
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -28,6 +30,11 @@ type Handler struct {
 	Q      *queue.Queue    // 转码队列（"transcode"，transcodectl worker 消费）
 	HLSDir string          // HLS 输出根目录（./data/hls）
 	Audit  *audit.Recorder // 系统配置变更审计（PutConfig 用）；可为 nil（测试跳过）
+
+	// profileCache hls_cache_profile 的读侧缓存（ServeHLS 用；懒初始化，零值可用）。
+	// 不放进构造函数：Handler 由多处字面量构造（含测试），懒初始化避免改遍所有调用点。
+	profileCache    *hlsCacheProfileCache
+	profileCacheMu  sync.Mutex
 }
 
 // LadderForProfile 按档位名选 HLS 码率阶梯（1080p|2k|4k）。
@@ -221,8 +228,10 @@ func (h *Handler) GetConfig(c *gin.Context) {
 // 与地图配置（ActionSettingsPatch/"map-config"）同一审计动作与目标类型，target 区分实例。
 //
 // Job000124 起 body 支持两个字段的**部分更新**（沿用 Job000123「缺失不改」语义，
-// map 先取一层再解指针，防止管理端并发写互相覆盖；两字段全缺 = 400）：
-// {"auto_transcode":true} 只动总闸门，{"realtime_transcode":true} 只动实时开关。
+// map 先取一层再解指针，防止管理端并发写互相覆盖）；
+// Job000125 起扩展五个字段：auto_transcode / realtime_transcode（bool）、
+// hls_seg_seconds（int 2-20）、hls_cache_profile（枚举）、stream_base_url（形态校验）。
+// 校验失败一律 400 且**错误文本含字段名**（前端表单逐字段定位）。
 func (h *Handler) PutConfig(c *gin.Context) {
 	var raw map[string]json.RawMessage
 	if err := c.ShouldBindJSON(&raw); err != nil {
@@ -246,11 +255,37 @@ func (h *Handler) PutConfig(c *gin.Context) {
 		}
 		realtime = &b
 	}
-	if auto == nil && realtime == nil {
-		errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "请求体需含 auto_transcode 或 realtime_transcode")
-		return
+	u := SystemConfigUpdate{Auto: auto, Realtime: realtime}
+	if v, ok := raw["hls_seg_seconds"]; ok {
+		var n int
+		if err := json.Unmarshal(v, &n); err != nil {
+			errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "hls_seg_seconds 需为整数（2-20）")
+			return
+		}
+		u.SegSeconds = &n
 	}
-	if err := PutSystemConfig(c.Request.Context(), h.Pool, auto, realtime); err != nil {
+	if v, ok := raw["hls_cache_profile"]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err != nil {
+			errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "hls_cache_profile 需为字符串")
+			return
+		}
+		u.CacheProfile = &s
+	}
+	if v, ok := raw["stream_base_url"]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err != nil {
+			errJSON(c, http.StatusBadRequest, "BAD_REQUEST", "stream_base_url 需为字符串")
+			return
+		}
+		u.StreamBaseURL = &s
+	}
+	if err := PutSystemConfigFields(c.Request.Context(), h.Pool, u); err != nil {
+		// 校验类错误（字段范围/枚举/形态）映射 400；真库错误保持 500。
+		if isValidationErr(err) {
+			errJSON(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			return
+		}
 		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "保存失败", err)
 		return
 	}
@@ -260,6 +295,15 @@ func (h *Handler) PutConfig(c *gin.Context) {
 	}
 	if realtime != nil {
 		detail["realtime_transcode"] = *realtime
+	}
+	if u.SegSeconds != nil {
+		detail["hls_seg_seconds"] = *u.SegSeconds
+	}
+	if u.CacheProfile != nil {
+		detail["hls_cache_profile"] = *u.CacheProfile
+	}
+	if u.StreamBaseURL != nil {
+		detail["stream_base_url"] = *u.StreamBaseURL
 	}
 	h.record(c, detail)
 	v, err := GetSystemConfig(c.Request.Context(), h.Pool)
@@ -384,12 +428,22 @@ func (h *Handler) ServeHLS(c *gin.Context) {
 	switch strings.ToLower(filepath.Ext(full)) {
 	case ".m3u8":
 		c.Header("Content-Type", "application/vnd.apple.mpegurl")
-		c.Header("Cache-Control", "no-cache")
+		c.Header("Cache-Control", HLSCacheControl(h.hlsCacheProfile(c.Request.Context()), true))
 	case ".ts":
 		c.Header("Content-Type", "video/mp2t")
-		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		c.Header("Cache-Control", HLSCacheControl(h.hlsCacheProfile(c.Request.Context()), false))
 	}
 	c.File(full)
+}
+
+// hlsCacheProfile 取当前缓存档（懒初始化 + 并发安全；60s 进程内缓存见 cache_profile.go）。
+func (h *Handler) hlsCacheProfile(ctx context.Context) string {
+	h.profileCacheMu.Lock()
+	if h.profileCache == nil {
+		h.profileCache = newHLSCacheProfileCache(h.Pool)
+	}
+	h.profileCacheMu.Unlock()
+	return h.profileCache.get(ctx)
 }
 
 func errJSON(c *gin.Context, status int, code, msg string) {
