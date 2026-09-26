@@ -1,9 +1,20 @@
-# API 详细契约 (v1.15)
+# API 详细契约 (v1.16)
 
 
 # 全景相册系统 · API 详细契约（OpenAPI 风格）
 
-> 版本：v1.15 ｜ 日期：2026-09-26\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+> 版本：v1.16 ｜ 日期：2026-09-26\ 配套：PRD v3.1 / TDD v1.1 / 数据库 DDL v1.1\ Base URL：`https://<domain>/api`\ 认证：**独立后台账户**，Bearer JWT（不对接 DSM）；SSO 走 OIDC
+
+## v1.16 变更说明（2026-09-26，Job000126「360° 视频无 HLS 原始回退播放」）
+
+背景：总闸门（`auto_transcode`）关闭或实时开关未开时，无 HLS 的 360° 视频此前完全无法播放（`usePanoStream` 只吃 HLS + CreateJob 409 死局）。本版打通「原始文件回退贴球面」：Three.js VideoTexture 对原始 mp4 blob 与 HLS 解码 video 元素同等可用（iOS 原生分支同型实证），回退后视角转动 / 陀螺仪 / VR 头追全部保留，仅清晰度切换与拖动起播降级。e2e：G 矩阵 + 渲染配对回归 **37/37 ALL GREEN**。
+
+1. 前端 `usePanoStream.attachSource` 增 `blob:` 前缀分派 → 新 `attachOriginal`（video 元素直吃 blob，纹理循环照常；档位选择器随 `qualityOptions` 为空自动隐藏）
+2. `usePlayerMedia`：`panoSrc` 优先级改为 `hlsUrl || panoOriginalUrl`——HLS 就绪后经 `:key=panoSrc` 重挂载自动切回 HLS；新增 `panoOriginalUrl` / `panoFallbackLoading` 状态与 `untrackBlob`（HLS 就绪即 revoke 原始 blob，防 4K 双份内存）；无 HLS 的 360 视频加载即回退，实时开+闸门开则 `startTranscode(true)` 并行发起（attach-or-create 幂等语义不变）
+3. `PlayerView` 新增回退提示条 `pano-fallback-notice` 四态：转码中/已切换、发起失败保持原始播放、未转码+「立即转码」按钮（`startTranscode(false)`）、闸门关闭说明；`panoFallbackLoading` 前置守卫防 TranscodePrompt 闪现
+4. **AND 语义不变**：总闸门关闭时仅回退、不发起转码（`auto_transcode AND realtime_transcode` 语义逐字节不动，409 闸门测试不放松）
+5. 回归修复（e2e 截图目检逮出）：回退提示条为独立 `v-if`，其后的普通视频分支由裸 `v-else` 改 `v-else-if="mode==='video'"`——否则照片 / 全景 / HLS 就绪态会意外渲染空 video 播放器
+6. **无后端改动**（零 API 变更、零迁移）；本节为前端播放器行为契约补充
 
 ## v1.15 变更说明（2026-09-26，Job000125「HLS 流媒体设置 + HTTPS/证书设置 + 访问守卫强化」）
 
@@ -1121,4 +1132,4 @@ nginx：docker/web 内嵌 conf 独立 `^/debug/` location（Upgrade/Connection �
 
 ---
 
-文档结束（API v1.14）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。
+文档结束（API v1.16）。与《技术设计文档.md》《数据库 DDL.md》共同构成实现基线。商业化许可证合规矩阵见 PRD §12.2。
