@@ -201,10 +201,21 @@ export function usePanoStream({ engine, props, showToast }) {
     )
   }
 
-  /* ---- 按媒体形态分派加载：照片贴图 / 视频 HLS ---- */
+  /* ---- 按媒体形态分派加载：照片贴图 / 原始文件直连（Job000126 回退）/ HLS ---- */
   function attachSource() {
-    if (props.mode === 'photo') attachPhoto(props.src)
-    else attachHls(props.src)
+    if (props.mode === 'photo') { attachPhoto(props.src); return }
+    // blob: 前缀 = 原始文件回退（usePlayerMedia 在无 HLS 时提供）：video 元素直接吃 blob，
+    // 纹理循环照常每帧取帧贴球——视角转动/陀螺仪/VR 全部可用，仅清晰度切换与拖动起播降级。
+    if (props.src && props.src.startsWith('blob:')) { attachOriginal(props.src); return }
+    attachHls(props.src)
+  }
+  function attachOriginal(url) {
+    statsLevel = ''
+    qualityOptions.value = [] // 原始文件无档位概念（360Player 档位选择器随 options 为空隐藏）
+    const v = video()
+    v.src = url
+    v.play().catch(() => {})
+    playing.value = !v.paused
   }
   function onRetry() {
     overlay.show = false

@@ -21,7 +21,12 @@
         class="pano"
       />
 
-      <!-- 360 视频：未转码 → 提示并发起转码（照片无需转码）；关闭自动转码时如实提示（Job000120） -->
+      <!-- 360 视频：原始回退 blob 拉取中（Job000126，防 TranscodePrompt 闪现） -->
+      <div v-else-if="media.mode.value === 'pano' && media.panoKind.value === 'video' && media.panoFallbackLoading.value" class="state">
+        加载中…
+      </div>
+
+      <!-- 360 视频：原始回退也不可用 → 提示并发起转码（照片无需转码）；关闭自动转码时如实提示（Job000120） -->
       <TranscodePrompt
         v-else-if="media.mode.value === 'pano' && media.panoKind.value === 'video'"
         :transcode="media.transcode.value"
@@ -29,8 +34,31 @@
         @start="media.startTranscode"
       />
 
-      <!-- 普通视频 -->
-      <div v-else class="video-wrap">
+      <!-- Job000126：360 原始回退提示条（叠加在播放器上，贴底不遮控制）——
+           转码中/失败/可手动发起/闸门关闭四态；HLS 就绪后 panoSrc 切走，本条随条件消失 -->
+      <div
+        v-if="media.mode.value === 'pano' && media.panoKind.value === 'video' && media.panoOriginalUrl.value"
+        class="tc-notice pano-fallback-notice"
+        data-testid="pano-fallback-notice"
+      >
+        <template v-if="media.transcode.value.jobId && !media.transcode.value.failed">
+          {{ media.transcode.value.status === 'done' ? '已切换为多码率自适应流' : '转码中…（' + (media.transcode.value.status || 'pending') + '）完成后自动切换' }}
+        </template>
+        <template v-else-if="media.transcode.value.failed">
+          转码发起失败，已保持原始文件播放
+        </template>
+        <template v-else-if="!media.transcodeDisabled.value">
+          未转码，原始文件播放中（清晰度/拖动受限）
+          <button class="fb-btn" data-testid="pano-fallback-transcode" @click="media.startTranscode(false)">立即转码</button>
+        </template>
+        <template v-else>
+          原始文件播放中——系统已关闭自动转码，多码率流不可用
+        </template>
+      </div>
+
+      <!-- 普通视频（v-else-if 显式条件——上方回退提示条是独立 v-if，裸 v-else 会与其配对，
+           导致照片/全景/loading 态意外渲染空 video 播放器；e2e 截图目检逮出后修复） -->
+      <div v-else-if="media.mode.value === 'video'" class="video-wrap">
         <video ref="plainVideoRef" controls playsinline class="plain-video"></video>
         <!-- Job000124：后台自动转码的轻提示（不遮播放）——进行中「完成后自动切换」、失败「保持原始播放」 -->
         <div v-if="media.mode.value === 'video' && media.transcode.value.jobId && !media.transcode.value.failed" class="tc-notice" data-testid="tc-inline-notice">
@@ -215,6 +243,15 @@ onBeforeUnmount(() => {
 .tc-notice--warn {
   background: rgba(180, 40, 40, 0.82);
 }
+
+/* Job000126：360 原始回退提示条——含「立即转码」按钮，需恢复指针事件 */
+.pano-fallback-notice { pointer-events: auto; display: flex; align-items: center; gap: 8px; }
+.fb-btn {
+  background: var(--color-primary); color: #fff; border: none;
+  border-radius: var(--radius-sm); padding: 3px 10px;
+  font-size: var(--font-size-sm); cursor: pointer; white-space: nowrap;
+}
+.fb-btn:hover { filter: brightness(1.1); }
 
 /* 退出 / 信息按钮：悬浮于舞台之上，高于 360 播放器的控制栏（z-index 10） */
 .exit-btn {

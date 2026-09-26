@@ -6,7 +6,7 @@
     <div class="bar topbar" :class="{ hidden: barsHidden }">
       <span class="title">{{ title || (isPhoto ? '360 全景照片' : '360 全景播放') }}</span>
       <span class="stats">{{ stream.statsText.value }}</span>
-      <select v-if="!isPhoto" v-model="qualityValue" @change="stream.onQualityChange">
+      <select v-if="!isPhoto && stream.qualityOptions.value.length > 0" v-model="qualityValue" @change="stream.onQualityChange">
         <option value="-1">自动</option>
         <option v-for="q in stream.qualityOptions.value" :key="q.value" :value="q.value" :disabled="q.disabled">
           {{ q.label }}

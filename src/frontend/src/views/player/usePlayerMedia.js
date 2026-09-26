@@ -10,6 +10,9 @@ import { getAccessToken } from '../../utils/tokenStore'
 // Job000124：播放时自动转码——开关开且总闸门开时，无 HLS 视频播放即自动发起
 //（auto 分支服务端 attach-or-create，幂等）；普通视频转码期间先播原始文件，
 // 完成后原地热切换 HLS；hls.js ABR 调优（capLevelToPlayerSize + 缓冲上界）。
+// Job000126：无 HLS 的 360 视频不再死局——原始文件 blob 回退贴球面（视角/陀螺仪/VR
+// 可用，清晰度切换与拖动降级）；实时开关开则转码期间同播、完成后经 panoSrc 优先级
+// 自动切回 HLS（blob 即时 revoke 防双份大文件占内存）；总闸门关闭时仅回退不发起。
 // plainVideoRef 由宿主传入（DOM 归属宿主）；plainHls 实例本模块自持，cleanup 销毁。
 const API_BASE = http.defaults.baseURL
 
@@ -22,6 +25,8 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   const hlsUrl = ref('')
   const photoUrl = ref('')
   const panoPhotoUrl = ref('') // 360 照片：原图 blob URL（球面贴图）
+  const panoOriginalUrl = ref('') // Job000126：360 视频无 HLS 时的原始文件 blob URL（回退贴球面）
+  const panoFallbackLoading = ref(false) // Job000126：原始回退 blob 拉取中（防止 TranscodePrompt 闪现）
   const transcode = ref({ jobId: '', status: '', starting: false, failed: false })
   // Job000120-r2：系统级「自动 HLS 转码」总闸门（false = 播放器不得发起转码，直接播原始文件）
   const transcodeDisabled = ref(false)
@@ -34,14 +39,23 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   let loadSeq = 0 // 代次守卫（同 MediaViewer.loadCurrent）：快速切换媒体时旧响应不得落地
   let pollFailCount = 0 // 转码轮询连续失败计数（P2-06：达上限置 failed 停止重试）
 
-  /* 360 播放属性：照片走 TextureLoader，视频走 HLS */
+  /* 360 播放属性：照片走 TextureLoader，视频走 HLS（Job000126：无 HLS 时原始 blob 回退） */
   const panoKind = computed(() => (detail.value?.type === 'photo' ? 'photo' : 'video'))
-  const panoSrc = computed(() => (panoKind.value === 'photo' ? panoPhotoUrl.value : hlsUrl.value))
+  const panoSrc = computed(() =>
+    panoKind.value === 'photo' ? panoPhotoUrl.value : (hlsUrl.value || panoOriginalUrl.value)
+  )
   const panoReady = computed(() => !!panoSrc.value)
 
   function trackBlob(url) {
     blobUrls.push(url)
     return url
+  }
+
+  // Job000126：从池中移除并立即 revoke（360 视频原始 blob 体积大，HLS 就绪后不留双份内存）
+  function untrackBlob(url) {
+    const i = blobUrls.indexOf(url)
+    if (i >= 0) blobUrls.splice(i, 1)
+    URL.revokeObjectURL(url)
   }
 
   async function fetchBlobUrl(path) {
@@ -61,6 +75,8 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
     transcode.value = { jobId: '', status: '', starting: false, failed: false }
     transcodeDisabled.value = false
     realtimeEnabled.value = false
+    panoOriginalUrl.value = ''
+    panoFallbackLoading.value = false
     pollFailCount = 0
 
     try {
@@ -87,9 +103,28 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
           panoPhotoUrl.value = url
         } else if (p.data.hls_master) {
           hlsUrl.value = API_BASE + p.data.hls_master
-        } else if (realtimeEnabled.value && !transcodeDisabled.value) {
-          // Job000124：播放时自动转码——无 HLS 的 360 视频自动发起，进度经 TranscodePrompt 展示
-          startTranscode(true)
+        } else {
+          // Job000126：无 HLS 的 360 视频——原始文件 blob 回退贴球面（总闸门关闭也可见，
+          // 不再死局）。视角转动/陀螺仪/VR 可用，清晰度切换与拖动起播降级（提示条说明）。
+          // 拉取期间 panoFallbackLoading 守卫 TranscodePrompt 闪现；转码完成后 panoSrc
+          // 优先 hlsUrl 自动切回 HLS，旧 blob 即时 revoke。
+          panoFallbackLoading.value = true
+          fetchBlobUrl(`/media/${mediaId.value}/download`)
+            .then((url) => {
+              if (seq !== loadSeq) return
+              panoOriginalUrl.value = url
+            })
+            .catch(() => {
+              if (seq !== loadSeq) return
+              error.value = '视频加载失败'
+            })
+            .finally(() => {
+              if (seq === loadSeq) panoFallbackLoading.value = false
+            })
+          if (realtimeEnabled.value && !transcodeDisabled.value) {
+            // Job000124 自动转码：回退播放与转码并行，完成后热切换 HLS
+            startTranscode(true)
+          }
         }
       } else if (d.data.type === 'photo') {
         mode.value = 'photo'
@@ -208,12 +243,18 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
             if (p.data.hls_master) setupPlainVideo(p.data.hls_master, loadSeq)
           } else if (p.data.hls_master) {
             hlsUrl.value = API_BASE + p.data.hls_master
+            // Job000126：HLS 就绪即收回原始 blob（panoSrc 优先 hlsUrl，key 变化触发 360Player
+            // 重挂载走 attachHls）——4K 原始文件 blob 体积大，不留双份内存
+            if (panoOriginalUrl.value) {
+              untrackBlob(panoOriginalUrl.value)
+              panoOriginalUrl.value = ''
+            }
           }
           return
         }
         if (res.data.status === 'failed') {
-          // 降级（Job000124）：普通视频保持原始文件播放（transcode.failed 仅驱动轻提示）；
-          // 360 视频无回退可能，TranscodePrompt 失败态可手动重试；服务端队列层仍有退避重试。
+          // 降级（Job000124/126）：普通视频保持原始文件播放（transcode.failed 仅驱动轻提示）；
+          // 360 视频 Job000126 起同样有原始回退——失败态由回退提示条给出重试按钮；服务端队列层仍有退避重试。
           transcode.value.failed = true
           return
         }
@@ -245,7 +286,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   return {
     loading, error, detail, pano, mode, hlsUrl, photoUrl, panoPhotoUrl, transcode,
     transcodeDisabled, realtimeEnabled,
-    panoKind, panoSrc, panoReady,
+    panoKind, panoSrc, panoReady, panoOriginalUrl, panoFallbackLoading,
     load, startTranscode, cleanup
   }
 }
