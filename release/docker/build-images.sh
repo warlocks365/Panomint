@@ -18,7 +18,7 @@ cd "$ROOT"
 echo "[images] 1/4 app（api + AI 工具链，CGO/ORT，含模型资产，版本经 build-arg 注入）"
 DOCKER_BUILDKIT=1 docker build \
   --build-arg "APP_VERSION=$V" \
-  --build-arg "APP_COMMIT=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+  --build-arg "APP_COMMIT=${APP_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}" \
   --build-arg "APP_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -f docker/api/Dockerfile -t "panomint/app:$V" .
 
