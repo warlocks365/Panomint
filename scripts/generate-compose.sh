@@ -97,6 +97,30 @@ if [[ "$MODE" == "2" || "$MODE" == "3" ]]; then
   ok "  照片目录 = $MEDIA_DIR"
 fi
 
+# ---------- 可选 7：HTTPS 入口（Caddy 终结 TLS；证书放共享卷，管理后台上传可直接落盘） ----------
+HTTPS_MODE="0"
+SITE_DOMAIN=""
+CERTS_DIR="/volume1/docker/panomint/certs"
+ask "7/7 HTTPS 入口：1) 不启用  2) Caddy + 自有证书 [默认 1]："
+read -r HM
+HTTPS_MODE="${HM:-1}"
+[[ "$HTTPS_MODE" =~ ^[12]$ ]] || die "HTTPS 选项须为 1/2"
+if [[ "$HTTPS_MODE" == "2" ]]; then
+  ask "    站点域名（须与证书 CN/SAN 一致，如 photo.example.com）："
+  read -r SITE_DOMAIN
+  [[ "$SITE_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || die "域名格式不合法：$SITE_DOMAIN"
+  if [[ "$MODE" == "2" || "$MODE" == "3" ]]; then
+    ask "    证书共享目录 [默认 $CERTS_DIR]："
+    read -r CERTS_DIR
+    CERTS_DIR="${CERTS_DIR:-/volume1/docker/panomint/certs}"
+    [[ "$CERTS_DIR" == /* ]] || die "证书目录须为绝对路径"
+    CERTS_DIR="${CERTS_DIR%/}"
+  fi
+  ok "  HTTPS = Caddy 终结 TLS（域名 $SITE_DOMAIN）；上传/放置证书后 restart caddy 生效"
+else
+  ok "  跳过（仅 HTTP）"
+fi
+
 # ---------- 生成通用 compose ----------
 gen_generic() {
   cat > "$OUTDIR/docker-compose.yml" <<YAML
@@ -493,8 +517,67 @@ services:
 YAML
 }
 
-if [[ "$MODE" == "1" || "$MODE" == "3" ]]; then gen_generic;  ok "已生成 $OUTDIR/docker-compose.yml"; fi
-if [[ "$MODE" == "2" || "$MODE" == "3" ]]; then gen_synology; ok "已生成 $OUTDIR/docker-compose.synology.yml"; fi
+# Job000131：HTTPS 启用时为生成的编排注入 caddy 入口与 api 证书卷（awk 锚点替换，幂等）。
+inject_https() {
+  local f="$1"
+  awk -v certs="$CERTS_DIR" -v dom="$SITE_DOMAIN" '
+    # api 的 environment 块锚点（api 独有行）后注入 HTTPS_CERT_DIR
+    /^      TRUSTED_PROXIES: 172.16.0.0\/12/ && !done_env {
+      print
+      print "      HTTPS_CERT_DIR: /etc/pano-certs"
+      done_env = 1
+      next
+    }
+    # api 的 volumes（appdata 独有）后注入证书共享卷
+    /^      - appdata:\/data$/ && !done_vol {
+      print
+      print "      - " certs ":/etc/pano-certs"
+      done_vol = 1
+      next
+    }
+    # services 块结束处（顶级 volumes: 前）插入 caddy 服务
+    /^volumes:$/ && !done_caddy {
+      print "  caddy:"
+      print "    image: caddy:2-alpine"
+      print "    container_name: panomint-caddy"
+      print "    restart: unless-stopped"
+      print "    ports:"
+      print "      - \"8443:443\""
+      print "      - \"8443:443/udp\""
+      print "    environment:"
+      print "      SITE_ADDRESS: " dom
+      print "    volumes:"
+      print "      - " certs ":/etc/pano-certs:ro"
+      print "      - ./caddy:/etc/caddy:ro"
+      print "    depends_on:"
+      print "      - web"
+      print ""
+      done_caddy = 1
+      print
+      next
+    }
+    { print }
+  ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  mkdir -p "$OUTDIR/caddy"
+  cat > "$OUTDIR/caddy/Caddyfile" <<CADDY
+{
+	auto_https disable_redirects
+}
+
+{$SITE_ADDRESS} {
+	tls /etc/pano-certs/fullchain.crt /etc/pano-certs/private.pem
+	reverse_proxy web:80 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+}
+CADDY
+  ok "已生成 $OUTDIR/caddy/Caddyfile（域名 $SITE_DOMAIN；NAT/防火墙放行 8443 即可 https 访问）"
+}
+
+if [[ "$MODE" == "1" || "$MODE" == "3" ]]; then { gen_generic;  [[ "$HTTPS_MODE" == "2" ]] && inject_https "$OUTDIR/docker-compose.yml";  ok "已生成 $OUTDIR/docker-compose.yml"; } fi
+if [[ "$MODE" == "2" || "$MODE" == "3" ]]; then { gen_synology; [[ "$HTTPS_MODE" == "2" ]] && inject_https "$OUTDIR/docker-compose.synology.yml"; ok "已生成 $OUTDIR/docker-compose.synology.yml"; } fi
 
 cat > "$OUTDIR/README.md" <<MD
 # Panomint 部署编排（由 generate-compose.sh 生成）
