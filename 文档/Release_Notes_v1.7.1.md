@@ -56,7 +56,7 @@ docker pull warlocks/panomint-app:1.7.1
 
 | 镜像 | 1.7.1 = latest digest |
 | --- | --- |
-| warlocks/panomint-app | `sha256:d368589e…`（异于 1.7.0 `d4a1c241…`） |
+| warlocks/panomint-app | `sha256:e2e1fb93…`（异于 1.7.0 `d4a1c241…`；含构建提交号 34a087a 注入） |
 | warlocks/panomint-web | `sha256:acae7da2…`（异于 1.7.0 `509ed338…`） |
 | warlocks/panomint-worker | `sha256:5d96d37c…`（异于 1.7.0 `7191e6ed…`） |
 | warlocks/panomint-db | `sha256:fdc2262f…`（与 1.7.0 相同——db 层本版未变更） |
