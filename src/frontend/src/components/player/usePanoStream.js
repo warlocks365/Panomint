@@ -204,9 +204,11 @@ export function usePanoStream({ engine, props, showToast }) {
   /* ---- 按媒体形态分派加载：照片贴图 / 原始文件直连（Job000126 回退）/ HLS ---- */
   function attachSource() {
     if (props.mode === 'photo') { attachPhoto(props.src); return }
-    // blob: 前缀 = 原始文件回退（usePlayerMedia 在无 HLS 时提供）：video 元素直接吃 blob，
-    // 纹理循环照常每帧取帧贴球——视角转动/陀螺仪/VR 全部可用，仅清晰度切换与拖动起播降级。
-    if (props.src && props.src.startsWith('blob:')) { attachOriginal(props.src); return }
+    // 原始文件回退（usePlayerMedia 在无 HLS 时提供）：video 元素直接吃原始源——
+    // Job000126 为 blob URL（全量下载），Job000129 起为直链 HTTP URL（浏览器原生
+    // Range 流式，GB 级文件不再缓冲预分配即死）。两者共同特征：非 .m3u8（HLS 入口
+    // 恒为 master playlist）；纹理循环照常每帧取帧贴球——视角转动/陀螺仪/VR 全部可用。
+    if (props.src && !props.src.includes('.m3u8')) { attachOriginal(props.src); return }
     attachHls(props.src)
   }
   function attachOriginal(url) {
@@ -216,6 +218,13 @@ export function usePanoStream({ engine, props, showToast }) {
     v.src = url
     v.play().catch(() => {})
     playing.value = !v.paused
+  }
+  // Job000129：直链模式下网络/鉴权失败不再经 axios catch（video 元素自主拉流）——
+  // error 事件兜底 overlay，避免静默黑屏（token 过期/断流/编码不支持均落此提示）。
+  function onOriginalError() {
+    if (props.mode === 'photo') return
+    if (hls) return // HLS 模式的错误由 hls.js ERROR 事件处理（含重试/恢复），不重复弹层
+    showOverlay('视频加载失败', '请检查网络或登录状态后重试')
   }
   function onRetry() {
     overlay.show = false
@@ -275,6 +284,7 @@ export function usePanoStream({ engine, props, showToast }) {
     engine.onFrame(fpsFrame)
     engine.setVisibilityHook(onVisibilityPause)
     video().addEventListener('timeupdate', onTimeUpdate)
+    video().addEventListener('error', onOriginalError)
     detectVr()
     attachSource()
   }
@@ -284,6 +294,7 @@ export function usePanoStream({ engine, props, showToast }) {
     const v = engine.getVideo()
     if (v) {
       v.removeEventListener('timeupdate', onTimeUpdate)
+      v.removeEventListener('error', onOriginalError)
       v.pause()
       v.removeAttribute('src')
       v.load()

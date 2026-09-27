@@ -63,6 +63,27 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
     return trackBlob(URL.createObjectURL(res.data))
   }
 
+  /* Job000129：原始文件直链流式（Range）——GB 级视频的全量 blob 下载会在 Chromium
+   * 缓冲预分配阶段直接失败（实测 5.3GB：net::ERR_FAILED @ 8ms，传输未开始）。
+   * <video> 元素无法携带 Authorization 头：download 端点经 AuthRequired 的 query 分支
+   * 接受短时 ?at=<access_token>（仅 GET /media/ 读路径），浏览器原生 Range 分段拉取
+   * （服务端 Accept-Ranges: bytes 已在位，206 能力零改动）。 */
+  function directDownloadUrl() {
+    const token = getAccessToken()
+    const base = API_BASE + `/media/${mediaId.value}/download`
+    return token ? `${base}?at=${encodeURIComponent(token)}` : base
+  }
+  function isHevcCodec(codec) {
+    const c = (codec || '').toLowerCase()
+    return c === 'hevc' || c === 'h265' || c === 'hev1' || c === 'hvc1'
+  }
+  // Chrome/Edge 默认无 HEVC 解码（需硬件解码 + 系统扩展）：先检测，不支持的给出
+  // 显式编码提示——否则 Range 改造后仍会以 video error 形式笼统失败。
+  function hevcPlayable() {
+    const v = document.createElement('video')
+    return v.canPlayType('video/mp4; codecs="hvc1"') !== '' || v.canPlayType('video/mp4; codecs="hev1"') !== ''
+  }
+
   async function load() {
     const seq = ++loadSeq
     cleanup()
@@ -104,23 +125,18 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
         } else if (p.data.hls_master) {
           hlsUrl.value = API_BASE + p.data.hls_master
         } else {
-          // Job000126：无 HLS 的 360 视频——原始文件 blob 回退贴球面（总闸门关闭也可见，
+          // Job000126：无 HLS 的 360 视频——原始文件回退贴球面（总闸门关闭也可见，
           // 不再死局）。视角转动/陀螺仪/VR 可用，清晰度切换与拖动起播降级（提示条说明）。
+          // Job000129：回退由全量 blob 改为直链 Range 流式（GB 级 blob 缓冲预分配即死）；
+          // HEVC 源文件先经浏览器解码能力检测，不支持则显式提示而非笼统加载失败。
           // 拉取期间 panoFallbackLoading 守卫 TranscodePrompt 闪现；转码完成后 panoSrc
-          // 优先 hlsUrl 自动切回 HLS，旧 blob 即时 revoke。
-          panoFallbackLoading.value = true
-          fetchBlobUrl(`/media/${mediaId.value}/download`)
-            .then((url) => {
-              if (seq !== loadSeq) return
-              panoOriginalUrl.value = url
-            })
-            .catch(() => {
-              if (seq !== loadSeq) return
-              error.value = '视频加载失败'
-            })
-            .finally(() => {
-              if (seq === loadSeq) panoFallbackLoading.value = false
-            })
+          // 优先 hlsUrl 自动切回 HLS。
+          const codec = (d.data && d.data.codec) || ''
+          if (isHevcCodec(codec) && !hevcPlayable()) {
+            error.value = '浏览器不支持该视频编码（HEVC），请开启 HLS 转码或换用支持的浏览器'
+          } else {
+            panoOriginalUrl.value = directDownloadUrl()
+          }
           if (realtimeEnabled.value && !transcodeDisabled.value) {
             // Job000124 自动转码：回退播放与转码并行，完成后热切换 HLS
             startTranscode(true)
@@ -136,7 +152,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
         loading.value = false // 先渲染出 video 元素再挂载 HLS
         await nextTick()
         if (seq !== loadSeq) return
-        setupPlainVideo(p.data.hls_master, seq)
+        setupPlainVideo(p.data.hls_master, (d.data && d.data.codec) || '')
         if (!p.data.hls_master && realtimeEnabled.value && !transcodeDisabled.value) {
           // Job000124：普通视频无 HLS 且实时开关开——后台自动转码，期间原始文件照播，
           // 完成后 pollJob 原地热切换 HLS（用户无感升级）
@@ -145,13 +161,13 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
       }
     } catch (e) {
       if (seq !== loadSeq) return
-      error.value = e.response?.data?.error?.message || '加载失败'
+      error.value = e.response?.data?.error?.message || `加载失败（${e.response?.status || '网络'}）`
     } finally {
       if (seq === loadSeq) loading.value = false
     }
   }
 
-  function setupPlainVideo(master, seq) {
+  function setupPlainVideo(master, codec) {
     const v = plainVideoRef.value
     if (!v) return
     if (plainHls) {
@@ -173,16 +189,13 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
       plainHls.loadSource(API_BASE + master)
       plainHls.attachMedia(v)
     } else if (!master) {
-      // 无 HLS 或 Safari 原生：回退下载 blob（Safari 原生 HLS 无法带 Bearer，同样走 blob）
-      fetchBlobUrl(`/media/${mediaId.value}/download`)
-        .then((url) => {
-          if (seq !== loadSeq) return // 过期代次的 blob 不回填（URL 可能已被 revoke）
-          v.src = url
-        })
-        .catch(() => {
-          if (seq !== loadSeq) return
-          error.value = '视频加载失败'
-        })
+      // 无 HLS 或 Safari 原生：回退原始文件（Job000129：直链 Range 流式替代全量 blob；
+      // HEVC 先检测浏览器解码能力，不支持给显式编码提示）
+      if (isHevcCodec(codec) && !hevcPlayable()) {
+        error.value = '浏览器不支持该视频编码（HEVC），请开启 HLS 转码或换用支持的浏览器'
+        return
+      }
+      v.src = directDownloadUrl()
     }
   }
 
