@@ -62,11 +62,11 @@ docker pull warlocks/panomint-app:1.7.2
 2. **兼容播放的算力预期**：实时转码单路约 1 核 CPU（4K 源更高），并发被限制为 1 路以保护宿主机；低功耗 NAS 上首次缓冲可能超过 10 秒，属预期行为。
 3. **降级回滚**：image tag 换回 `1.7.1` 重建即可；无数据结构差异。
 
-## 三、镜像 digest 三方核验（发布当日 Hub 实测，回填）
+## 三、镜像 digest 三方核验（2026-09-27 Hub 实测，推送日志与本机 Registry API 独立查询逐字一致，每镜像 1.7.2 = latest）
 
 | 镜像 | 1.7.2 = latest digest |
 | --- | --- |
-| warlocks/panomint-app | 待构建后回填 |
-| warlocks/panomint-web | 待构建后回填 |
-| warlocks/panomint-worker | 待构建后回填 |
-| warlocks/panomint-db | 待构建后回填 |
+| warlocks/panomint-app | `sha256:e9b63ffb…`（含构建提交 1c734be 注入） |
+| warlocks/panomint-web | `sha256:76d8280c…` |
+| warlocks/panomint-worker | `sha256:cc218e98…` |
+| warlocks/panomint-db | `sha256:fdc2262f…`（与 1.7.1 相同——db 层未变更） |
