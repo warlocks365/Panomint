@@ -3,7 +3,17 @@
     <!-- 舞台区：按类型渲染核心（照片 / 普通视频 / 360 全景直接球面渲染） -->
     <div class="stage-area">
       <div v-if="media.loading.value" class="state">加载中…</div>
-      <div v-else-if="media.error.value" class="state error">{{ media.error.value }}</div>
+      <!-- Job000131 P1：HEVC 编码且浏览器不支持 → 错误态旁提供「兼容播放」（实时转码兜底，显式触发） -->
+      <div v-else-if="media.error.value && !liveMode" class="state error">
+        {{ media.error.value }}
+        <button
+          v-if="media.liveEligible.value"
+          class="btn live-entry"
+          data-testid="live-play-entry"
+          @click="liveMode = true"
+        >兼容播放（720p 实时转码）</button>
+      </div>
+      <LivePlayer v-else-if="liveMode" :media-id="mediaId" class="live-wrap" />
 
       <!-- 照片：直接显示原图 -->
       <div v-else-if="media.mode.value === 'photo'" class="photo-wrap">
@@ -134,6 +144,7 @@ import { useRoute } from 'vue-router'
 import { useResponsive } from '../composables/useResponsive'
 import { useBackNavigation } from '../composables/useBackNavigation'
 import Player360 from '../components/player/360Player.vue'
+import LivePlayer from '../components/player/LivePlayer.vue'
 import MediaInfoPanel from '../components/player/MediaInfoPanel.vue'
 import PlaysetNav from '../components/player/PlaysetNav.vue'
 import TranscodePrompt from '../components/player/TranscodePrompt.vue'
@@ -149,6 +160,7 @@ const plainVideoRef = ref(null) // 普通视频元素宿主自持（DOM 归属�
 const media = usePlayerMedia(mediaId, plainVideoRef)
 const nav = usePlaysetNav(mediaId)
 const drawerOpen = ref(false)
+const liveMode = ref(false) // Job000131 P1：HEVC 兼容播放（用户显式触发实时转码兜底）
 
 /* 退出（Job000102 抽 useBackNavigation，判定口径不变）：返回来源页（优先路由历史，直达链接则回时间轴） */
 function exit() {

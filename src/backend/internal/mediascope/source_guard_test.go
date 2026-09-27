@@ -452,6 +452,14 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 			"判定与 Detail/Download 共用 readAccessOf → mediascope.ReadCond（单一真源）。",
 		Evidence: "media/thumb.go（h.thumbAccess 先于 SELECT；thumbAccessCheck → Store.readAllowed → readAccessOf）。",
 	},
+	// Job000131 补登记（2026-09-27，HEVC 兼容播放实时转码兜底端点）：
+	regKey("internal/media/live_handlers.go", "FROM media"): {
+		UserFacing: true,
+		Reason: "GET /media/:id/live/master.m3u8 与 /media/:id/live/:name（实时转码兜底分片）——" +
+			"交付**转码流**，两个端点调用前均先过 h.Media.checkReadAccess（与 Download 同判定，" +
+			"无权 404/403 同形），且仅服务已授权媒体的转码产物，不返回 media 行数据本身。",
+		Evidence: "media/live_handlers.go MasterM3U8/Segment（先 checkReadAccess → Manager.Ensure/Get）。",
+	},
 	regKey("internal/media/detail.go", "FROM media"): {
 		UserFacing: true,
 		Reason: "GET /media/:id 详情，返回 media 全字段；读访问由 handler 层 checkReadAccess 在调用 Store.GetDetail **之前**判定" +
@@ -604,6 +612,12 @@ var visibilityWiring = map[string][]wiringRef{
 	"internal/media/thumb.go": {
 		{File: "internal/media/thumb.go", Func: "Thumb", Symbol: "h.thumbAccess("},
 		{File: "internal/media/thumb.go", Func: "thumbAccess", Symbol: "h.Store.readAllowed"},
+	},
+	// Job000131：实时转码兜底端点——判定与 Download 完全同源（handler 层 checkReadAccess）。
+	"internal/media/live_handlers.go": {
+		{File: "internal/media/live_handlers.go", Func: "MasterM3U8", Symbol: "h.Media.checkReadAccess("},
+		{File: "internal/media/live_handlers.go", Func: "Segment", Symbol: "h.Media.checkReadAccess("},
+		{File: "internal/media/write_handlers.go", Func: "checkReadAccess", Symbol: "h.Store.readAccessOf"},
 	},
 	"internal/media/detail.go": {
 		{File: "internal/media/write_handlers.go", Func: "Detail", Symbol: "h.checkReadAccess("},

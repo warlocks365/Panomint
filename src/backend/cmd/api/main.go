@@ -33,6 +33,7 @@ import (
 	"panoalbum/internal/geo"
 	"panoalbum/internal/health"
 	"panoalbum/internal/index"
+	"panoalbum/internal/live"
 	"panoalbum/internal/media"
 	"panoalbum/internal/middleware"
 	"panoalbum/internal/queue"
@@ -220,6 +221,19 @@ func main() {
 	authed.POST("/media/upload", permWrite, mediaH.Upload)
 	authed.POST("/media/batch", permWrite, mediaH.Batch) // Job000066 统一批量操作
 	authed.GET("/media/:id/download", permRead, mediaH.Download)
+	// Job000131 P1：HEVC 兼容播放（实时转码兜底）。用户显式点「兼容播放」才触发——
+	// 与「关闭自动 HLS 转码」语义兼容（不自动转码）。并发上限 1、720p 单档、
+	// 空闲 10min 自动回收；seek = 前端携带 pos 重建会话。query token 可用（GET /media/ 白名单）。
+	liveMgr := live.NewManager(live.Config{})
+	defer liveMgr.Stop()
+	liveReaperStop := liveMgr.StartReaper(30 * time.Second)
+	defer liveReaperStop()
+	liveH := &media.LiveHandler{Manager: liveMgr, Media: mediaH}
+	authed.GET("/media/:id/live/master.m3u8", permRead, liveH.MasterM3U8)
+	// 分片路由必须与 ffmpeg 清单的相对引用同构：清单写 seg_XXXXX.ts → 相对 master.m3u8
+	// 解析为 /media/:id/live/seg_XXXXX.ts（不是 /live/seg/seg_XXXXX.ts）。静态段优先于参数段，
+	// master.m3u8 不会被 :name 吞掉；validSegName 在 handler 内防路径穿越/非分片名。
+	authed.GET("/media/:id/live/:name", permRead, liveH.Segment)
 	authed.GET("/media/:id/thumb", permRead, mediaH.Thumb)
 	authed.POST("/media/:id/favorite", permWrite, mediaH.Favorite)
 	authed.POST("/media/:id/rate", permWrite, mediaH.Rate)

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getAccessToken } from '../utils/tokenStore'
 import { useAuthStore } from '../stores/auth'
 import { getSetupStatus } from '../api/setup'
+import { probeReady } from '../api/boot'
 import { safeInternalPath } from '../utils/url'
 
 // Job000125：setup 状态的模块级缓存（15s TTL）。
@@ -17,12 +18,28 @@ export function invalidateSetupCache() {
 
 async function setupInitialized() {
   if (setupCache && Date.now() < setupCache.expires) return setupCache.initialized
-  const st = await getSetupStatus()
+  const st = await getSetupStatusWithRetry()
   if (st && typeof st.initialized === 'boolean') {
     setupCache = { initialized: st.initialized, expires: Date.now() + SETUP_TTL }
     return st.initialized
   }
   return null // 状态形状异常：按不可达处理（不拦）
+}
+
+// Job000131（bug 修复）：setup 闸门失败时先重试一次再放行——
+// 后端未就绪（启动窗口/间歇抖动）时一次瞬断会把「未初始化」误判为「不可达」而放行，
+// 用户落在相册页却进不了向导。单次 800ms 重试消除瞬断，仍失败才保持可用性优先。
+async function getSetupStatusWithRetry() {
+  try {
+    return await getSetupStatus()
+  } catch {
+    await new Promise((r) => setTimeout(r, 800))
+    try {
+      return await getSetupStatus()
+    } catch {
+      return null
+    }
+  }
 }
 
 const routes = [
@@ -37,6 +54,13 @@ const routes = [
     path: '/register',
     name: 'register',
     component: () => import('../views/RegisterView.vue'),
+    meta: { public: true }
+  },
+  {
+    // Job000131 T3-B：启动等待页（BootGate 汇集点；ready 后自动回跳 redirect）
+    path: '/boot',
+    name: 'boot',
+    component: () => import('../views/BootView.vue'),
     meta: { public: true }
   },
   {
@@ -158,6 +182,16 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // Job000131 T3-B BootGate（守卫最前）：api 未就绪时全站（含 public 页——它们同样依赖
+  // api 数据）汇集到 /boot 等待页，就绪后自动回跳。这同时根治「未初始化访问相册不跳
+  // setup」：setup 判定不再撞上未就绪的瞬断（守卫顺序 = BootGate → setup 闸门 → 登录闸门）。
+  if (to.name !== 'boot') {
+    const st = await probeReady()
+    if (!st.ready) {
+      return { name: 'boot', query: { redirect: to.fullPath } }
+    }
+  }
+
   // 安装向导闸门（Job000107 首建；Job000125 增 15s 缓存）：未初始化时全站只放行 /setup；
   // 已初始化后 /setup 也不再出现。查询失败（null）时不拦 —— 可用性优先，
   // SetupView 提交时后端仍会 fail-closed 裁决。

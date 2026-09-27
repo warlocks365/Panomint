@@ -27,6 +27,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   const panoPhotoUrl = ref('') // 360 照片：原图 blob URL（球面贴图）
   const panoOriginalUrl = ref('') // Job000126：360 视频无 HLS 时的原始文件 blob URL（回退贴球面）
   const panoFallbackLoading = ref(false) // Job000126：原始回退 blob 拉取中（防止 TranscodePrompt 闪现）
+  const liveEligible = ref(false) // Job000131 P1：HEVC 编码且浏览器不支持 → 可提供实时转码兜底入口
   const transcode = ref({ jobId: '', status: '', starting: false, failed: false })
   // Job000120-r2：系统级「自动 HLS 转码」总闸门（false = 播放器不得发起转码，直接播原始文件）
   const transcodeDisabled = ref(false)
@@ -97,6 +98,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
     transcodeDisabled.value = false
     realtimeEnabled.value = false
     panoOriginalUrl.value = ''
+    liveEligible.value = false
     panoFallbackLoading.value = false
     pollFailCount = 0
 
@@ -134,6 +136,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
           const codec = (d.data && d.data.codec) || ''
           if (isHevcCodec(codec) && !hevcPlayable()) {
             error.value = '浏览器不支持该视频编码（HEVC），请开启 HLS 转码或换用支持的浏览器'
+            liveEligible.value = true
           } else {
             panoOriginalUrl.value = directDownloadUrl()
           }
@@ -193,6 +196,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
       // HEVC 先检测浏览器解码能力，不支持给显式编码提示）
       if (isHevcCodec(codec) && !hevcPlayable()) {
         error.value = '浏览器不支持该视频编码（HEVC），请开启 HLS 转码或换用支持的浏览器'
+        liveEligible.value = true
         return
       }
       v.src = directDownloadUrl()
@@ -261,6 +265,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
             if (panoOriginalUrl.value) {
               untrackBlob(panoOriginalUrl.value)
               panoOriginalUrl.value = ''
+    liveEligible.value = false
             }
           }
           return
@@ -299,7 +304,7 @@ export function usePlayerMedia(mediaId, plainVideoRef) {
   return {
     loading, error, detail, pano, mode, hlsUrl, photoUrl, panoPhotoUrl, transcode,
     transcodeDisabled, realtimeEnabled,
-    panoKind, panoSrc, panoReady, panoOriginalUrl, panoFallbackLoading,
+    panoKind, panoSrc, panoReady, panoOriginalUrl, panoFallbackLoading, liveEligible,
     load, startTranscode, cleanup
   }
 }

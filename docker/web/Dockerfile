@@ -49,6 +49,20 @@ server {
     gzip_types text/css application/javascript application/json image/svg+xml;
     gzip_min_length 1k;
 
+    # Job000131 T3-A：api upstream 不可达（启动迁移窗口/容器重建/间歇挂起）时的启动兜底页。
+    # 纯内联静态页 + sessionStorage 限频自动重试（5s 起步、40 次上限），与前端 BootGate
+    # 互补：JS 未加载完成时用户也能看到带样式的等待页而非浏览器裸错误。
+    error_page 502 503 504 = @boot;
+    location @boot {
+        internal;
+        default_type text/html;
+        # 只给页面导航返回等待页 HTML；API/探测请求（Accept 不含 text/html：axios/fetch/hls.js
+        # 默认 */*）必须保持 502 —— 否则前端 BootGate 的 /ready 探测会拿到 200 HTML 误判就绪
+        # （A 方案背刺 B 方案，实测缺陷），动态流与业务请求也应识别失败而非吞成 200。
+        if ($http_accept !~* "text/html") { return 502; }
+        return 200 '<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>系统启动中</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f7f7f5;font-family:system-ui,sans-serif}.c{max-width:420px;padding:32px;background:#fff;border-radius:12px;border:1px solid rgba(0,0,0,.08)}h1{margin:0 0 8px;font-size:20px;font-weight:500}p{margin:0;color:#666;font-size:14px}</style></head><body><div class="c"><h1>系统启动中</h1><p>服务正在启动，页面将自动重试；若长时间无响应请检查容器状态。</p></div><script>var n=+(sessionStorage.getItem("panomint_boot")||0);if(n<40){sessionStorage.setItem("panomint_boot",String(n+1));setTimeout(function(){location.reload()},5000)}</script></body></html>';
+    }
+
     # 分块上传（Stage 2 实测 9MB 块），HLS 大响应放宽超时
     client_max_body_size 100m;
 
