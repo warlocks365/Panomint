@@ -14,7 +14,9 @@
  * 上传类操作全部在前台页面上下文中完成（见 backupManager.js）。
  */
 
-const VERSION = 'v1'
+// Job000136：版本常量随构建注入 __APP_VERSION__——每次发版哈希变化 → install 触发 →
+// 新 SW 处于 waiting；页面侧探测到 waiting 后提示用户一键刷新。
+const VERSION = '__APP_VERSION__'
 const SHELL_CACHE = `pano-shell-${VERSION}`
 const ASSET_CACHE = `pano-asset-${VERSION}`
 
@@ -81,5 +83,13 @@ self.addEventListener('fetch', (event) => {
         return cached || network
       })
     )
+  }
+})
+
+// Job000136：页面通过 postMessage({type:'SKIP_WAITING'}) 通知新 SW 立即接管；
+// 接管后页面侧监听 controllerchange → reload，完成「新版本一键生效」。
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting()
   }
 })

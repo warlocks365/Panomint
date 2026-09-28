@@ -21,8 +21,27 @@ function copyMaplibreWorker() {
   }
 }
 
+import pkg from './package.json' with { type: 'json' }
+import { readFileSync, writeFileSync } from 'node:fs'
+
+// Job000136：构建后处理——public/sw.js 不经过 esbuild 转换，
+// 版本常量必须在此用「版本+构建时间戳」替换占位符（每次构建必变 → 浏览器 SW 探知更新 → 提示刷新）。
+const APP_VERSION = `${pkg.version}-${Date.now()}`
+function injectSwVersion() {
+  return {
+    name: 'inject-sw-version',
+    closeBundle() {
+      const f = 'dist/sw.js'
+      try {
+        const src = readFileSync(f, 'utf-8')
+        writeFileSync(f, src.replaceAll('__APP_VERSION__', APP_VERSION))
+      } catch { /* 构建异常时静默：不影响主产物 */ }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [vue(), copyMaplibreWorker()],
+  plugins: [vue(), copyMaplibreWorker(), injectSwVersion()],
   server: {
     port: 5173,
     // 前端默认同源相对路径调 API；dev 下把 API 路由代理到本机 8080 后端

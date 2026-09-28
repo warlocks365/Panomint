@@ -3,6 +3,18 @@
     <!-- 舞台区：按类型渲染核心（照片 / 普通视频 / 360 全景直接球面渲染） -->
     <div ref="stageRef" class="stage-area">
       <!-- Job000135：全屏/退出全屏（播放窗口内右上角浮动） -->
+      <!-- Job000136 实时码流显示开关 -->
+      <button
+        class="fs-btn br-btn"
+        data-testid="bitrate-toggle"
+        :class="{ on: showBitrate }"
+        :title="showBitrate ? '隐藏码流信息' : '显示码流信息'"
+        @click="toggleBitrate"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+          <path d="M4 18V10M10 18V6M16 18v-8M21 18H3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+      </button>
       <button
         class="fs-btn"
         data-testid="stage-fullscreen"
@@ -16,6 +28,26 @@
           <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
         </svg>
       </button>
+      <!-- Job000136：实时码流信息卡（开关控制） -->
+      <div v-if="showBitrate" class="bitrate-card" data-testid="bitrate-card">
+        <div class="br-row br-live">
+          <span class="br-label">实时码率</span>
+          <span class="br-value">{{ liveBitrate || '—' }}</span>
+        </div>
+        <div class="br-row">
+          <span class="br-label">视频码率</span>
+          <span class="br-value">{{ avgBitrate || '—' }}</span>
+        </div>
+        <div class="br-row">
+          <span class="br-label">缓冲余量</span>
+          <span class="br-value">{{ bufferSec != null ? bufferSec.toFixed(1) + ' s' : '—' }}</span>
+        </div>
+        <div class="br-row br-dim">
+          <span class="br-label">规格</span>
+          <span class="br-value">{{ specLine }}</span>
+        </div>
+      </div>
+
       <div v-if="media.loading.value" class="state">加载中…</div>
       <!-- Job000131 P1：HEVC 编码且浏览器不支持 → 错误态旁提供「兼容播放」（实时转码兜底，显式触发） -->
       <div v-else-if="media.error.value && !liveMode" class="state error">
@@ -212,6 +244,63 @@ function openShare() {
   shareOpen.value = true
 }
 
+// ---- Job000136：实时码流信息（performance 资源采样 + 元数据平均码率） ----
+const showBitrate = ref(false)
+const liveBitrate = ref('')
+const bufferSec = ref(null)
+const brTimer = ref(null)
+let brLastTotal = 0
+let brLastAt = 0
+function fmtMbps(bps) {
+  if (!bps || bps <= 0) return ''
+  return bps >= 1e6 ? (bps / 1e6).toFixed(2) + ' Mbps' : Math.round(bps / 1e3) + ' kbps'
+}
+const avgBitrate = computed(() => {
+  const d = media.detail.value
+  const dur = d?.video?.duration ?? d?.duration
+  if (!d?.filesize || !dur || dur <= 0) return ''
+  return fmtMbps((d.filesize * 8) / dur)
+})
+const specLine = computed(() => {
+  const d = media.detail.value
+  if (!d) return '—'
+  const parts = []
+  if (d.width && d.height) parts.push(d.width + '×' + d.height)
+  if (d.codec) parts.push(d.codec)
+  if (d.video?.fps) parts.push(d.video.fps + 'fps')
+  return parts.join(' · ') || '—'
+})
+function sampleBitrate() {
+  const v = stageRef.value && stageRef.value.querySelector('video')
+  if (!v || !v.currentSrc) { liveBitrate.value = ''; bufferSec.value = null; return }
+  const entries = performance.getEntriesByName(v.currentSrc)
+  const total = entries.reduce((sum, e) => sum + (e.transferSize || e.encodedBodySize || 0), 0)
+  const now = performance.now()
+  if (brLastAt && total >= brLastTotal) {
+    const dBytes = total - brLastTotal
+    const dSec = (now - brLastAt) / 1000
+    if (dSec > 0.5) liveBitrate.value = dBytes > 0 ? fmtMbps((dBytes * 8) / dSec) : '0 kbps'
+  }
+  brLastTotal = total
+  brLastAt = now
+  try {
+    bufferSec.value = v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : null
+  } catch { bufferSec.value = null }
+}
+function toggleBitrate() {
+  showBitrate.value = !showBitrate.value
+  if (showBitrate.value) {
+    brLastTotal = 0
+    brLastAt = 0
+    sampleBitrate()
+    brTimer.value = setInterval(sampleBitrate, 2000)
+  } else if (brTimer.value) {
+    clearInterval(brTimer.value)
+    brTimer.value = null
+  }
+}
+onBeforeUnmount(() => { if (brTimer.value) clearInterval(brTimer.value) })
+
 /* 退出（Job000102 抽 useBackNavigation，判定口径不变）：返回来源页（优先路由历史，直达链接则回时间轴） */
 function exit() {
   goBack({ name: 'timeline' })
@@ -279,6 +368,68 @@ onBeforeUnmount(() => {
 }
 .fs-btn:hover {
   background: rgba(0, 0, 0, 0.65);
+}
+/* Job000136：码率按钮在全屏按钮右侧 */
+.br-btn {
+  left: 54px;
+}
+.br-btn.on {
+  background: rgba(37, 99, 235, 0.85);
+}
+.bitrate-card {
+  position: absolute;
+  top: 56px;
+  left: 10px;
+  z-index: 30;
+  min-width: 168px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.7;
+  pointer-events: none;
+}
+.br-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+.br-label { color: rgba(255, 255, 255, 0.62); }
+.br-value { font-family: ui-monospace, monospace; font-weight: 600; }
+.br-live .br-value { color: #4ade80; }
+.br-dim .br-value { color: rgba(255, 255, 255, 0.72); font-weight: 400; }
+
+/* Job000136：移动端紧凑化——播放器控件缩小、信息抽屉全宽、内边距收紧 */
+@media (max-width: 768px) {
+  .fs-btn {
+    width: 32px;
+    height: 32px;
+    top: 8px;
+    left: 8px;
+  }
+  .br-btn {
+    left: 46px;
+  }
+  .bitrate-card {
+    top: 46px;
+    left: 8px;
+    min-width: 150px;
+    font-size: 11px;
+    padding: 8px 10px;
+  }
+  .exit-btn {
+    width: 32px;
+    height: 32px;
+  }
+  .drawer {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 12px 12px 0 0;
+  }
+  .drawer :deep(.info-panel) {
+    padding: 12px;
+  }
 }
 .stage-area {
   position: relative;
