@@ -114,7 +114,9 @@ func TestEAHookOrderGuard(t *testing.T) {
 	src := string(b)
 	iFind := strings.Index(src, "FindEAThumbs(e.Path)")
 	iConv := strings.Index(src, "ConvertEAThumbs(ctx, td, mediaID, thumbs)")
-	iRet := strings.Index(src, "return OutcomeInserted, nil\n\t\t\t\t}")
+	// Job000132：锚点更新——EA 复用成功的 return 位于 5 层嵌套（if td→thumbs→cerr→uerr），
+	// 守卫语义不变：复用成功分支必须早于 thumbnail 入队。
+	iRet := strings.Index(src, "if uerr == nil {")
 	iEnqueue := strings.Index(src, `x.q.Enqueue(ctx, queue.Job{Kind: "thumbnail"`)
 	if iFind < 0 || iConv < 0 || iRet < 0 || iEnqueue < 0 {
 		t.Fatalf("挂点环节缺失: find=%d conv=%d ret=%d enqueue=%d", iFind, iConv, iRet, iEnqueue)

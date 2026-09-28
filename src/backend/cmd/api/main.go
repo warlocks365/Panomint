@@ -113,6 +113,15 @@ func main() {
 	if err != nil {
 		log.Fatal("JWT 密钥配置错误", zap.Error(err))
 	}
+	// Job000132：孤儿任务回收——扫描跑在本进程 goroutine 内，api 重启即中断；
+	// 启动时所有 running 的 index_jobs 必为上次进程的中断残留，置 failed 供前端
+	// 提示「已中断，重新扫描可续」（哈希去重 + path 预检保证续扫幂等不重复）。
+	if _, err := pool.Exec(ctx,
+		`UPDATE index_jobs SET status='failed', current_file='', finished_at=now()
+		 WHERE status='running'`); err != nil {
+		log.Warn("孤儿扫描任务回收失败（非致命）", zap.Error(err))
+	}
+
 	authStore := &auth.Store{Pool: pool}
 	// 审计写入器在鉴权装配**之前**创建：登录与二次验证（启用/关闭）都要写审计，
 	// 而这几件事发生在整个 api 生命周期里最早的时刻，晚创建就漏记。

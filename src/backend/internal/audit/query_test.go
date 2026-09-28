@@ -292,8 +292,8 @@ func TestBuildJobsSQLShapesMatch(t *testing.T) {
 		sel := branch[strings.Index(branch, "SELECT"):strings.Index(branch, "FROM")]
 		// 顶层逗号数 + 1 = 列数；忽略 NULL::text 里的 :: 与函数调用（本查询没有）。
 		cols := strings.Count(sel, ",") + 1
-		if cols != 14 {
-			t.Fatalf("分支列数应为 14，实际 %d：\n%s", cols, sel)
+		if cols != 15 {
+			t.Fatalf("分支列数应为 15（Job000132），实际 %d：\n%s", cols, sel)
 		}
 	}
 	// 判别列必须存在。

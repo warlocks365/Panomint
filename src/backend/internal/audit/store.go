@@ -94,6 +94,7 @@ type Job struct {
 	StartedAt  *time.Time `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at"`
 	CreatedAt  time.Time  `json:"created_at"`
+	CurrentFile *string   `json:"current_file"` // Job000132：index 任务正在处理的文件名（仅 index 有）
 }
 
 // ---------------------------------------------------------------------------
@@ -343,7 +344,7 @@ func scanJob(row pgx.Row) (*Job, error) {
 	var j Job
 	if err := row.Scan(&j.JobType, &j.ID, &j.Kind, &j.Status, &j.UserID,
 		&j.MediaID, &j.NodeID, &j.Profile, &j.ResultPath,
-		&j.Total, &j.Processed, &j.StartedAt, &j.FinishedAt, &j.CreatedAt); err != nil {
+		&j.Total, &j.Processed, &j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.CurrentFile); err != nil {
 		return nil, fmt.Errorf("audit: 扫描任务行失败: %w", err)
 	}
 	j.Progress = jobProgress(j.Total, j.Processed)

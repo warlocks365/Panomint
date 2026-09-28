@@ -1,6 +1,8 @@
 package index
 
 import (
+	"regexp"
+	"unicode/utf8"
 	"bufio"
 	"bytes"
 	"context"
@@ -392,7 +394,103 @@ func ExtractVideoMeta(ctx context.Context, path string) (*Meta, error) {
 		}
 	}
 	m.Is360, m.Projection = detectVideo360(&p)
+
+	// Job000132：视频位置信息——ffprobe format.tags 的 GPS 载体（ISO6709 / DJI comment）。
+	// tags 键名含点（com.apple.quicktime.location.ISO6709）无法映射 struct 字段，二次解析为 map。
+	var rawTags struct {
+		Format struct {
+			Tags map[string]string `json:"tags"`
+		} `json:"format"`
+	}
+	if err := json.Unmarshal(out, &rawTags); err == nil {
+		applyVideoLocationTags(m, rawTags.Format.Tags)
+	}
 	return m, nil
+}
+
+// applyVideoLocationTags 从 ffprobe format.tags 提取视频 GPS 与地址信息。
+// 优先级：location（ISO6709，iPhone/DJI 主流）> com.apple.quicktime.location.ISO6709 >
+// comment 内嵌 drone-dji 坐标 XML。comment 为纯文本（非坐标）且 place 未取到时，
+// 截断写入 place 作为「地址信息」展示。
+func applyVideoLocationTags(m *Meta, tags map[string]string) {
+	if m.Lat != nil && m.Lng != nil {
+		return
+	}
+	get := func(k string) string {
+		if v, ok := tags[k]; ok {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	if lat, lng, ok := videoGPSFromTags(tags); ok {
+		m.Lat, m.Lng = &lat, &lng
+		return
+	}
+	// comment 纯文本地址：仅当尚未有地名时作为 place 兜底（截断防异常长串）。
+	if m.Place == "" {
+		if c := get("comment"); c != "" && !strings.ContainsAny(c, "<>") && utf8.RuneCountInString(c) <= 200 {
+			m.Place = c
+		}
+	}
+}
+
+// videoGPSFromTags 按优先级从 tags 提取坐标。ok=false 表示所有载体都未命中或非法。
+func videoGPSFromTags(tags map[string]string) (lat, lng float64, ok bool) {
+	get := func(k string) string {
+		if v, ok2 := tags[k]; ok2 {
+			return strings.TrimSpace(v)
+		}
+		return ""
+	}
+	if la, ln, ok2 := parseISO6709(get("location")); ok2 {
+		return la, ln, true
+	}
+	if la, ln, ok2 := parseISO6709(get("com.apple.quicktime.location.ISO6709")); ok2 {
+		return la, ln, true
+	}
+	if la, ln, ok2 := parseDJIXMLComment(get("comment")); ok2 {
+		return la, ln, true
+	}
+	return 0, 0, false
+}
+
+// parseISO6709 解析 ISO 6709 坐标串（±DD.DDDD±DDD.DDDD[/±HH.H/]），
+// 覆盖 iPhone（com.apple.quicktime.location.ISO6709）与 DJI/安卓的 location tag。
+func parseISO6709(s string) (lat, lng float64, ok bool) {
+	if s == "" {
+		return 0, 0, false
+	}
+	re := regexp.MustCompile(`^([+-]\d{1,3}(?:\.\d+)?)([+-]\d{1,3}(?:\.\d+)?)(?:/?[+-]\d+(?:\.\d+)?)?/?`)
+	mm := re.FindStringSubmatch(strings.TrimSpace(s))
+	if mm == nil {
+		return 0, 0, false
+	}
+	la, err1 := strconv.ParseFloat(mm[1], 64)
+	lng, err2 := strconv.ParseFloat(mm[2], 64)
+	if err1 != nil || err2 != nil || la < -90 || la > 90 || lng < -180 || lng > 180 {
+		return 0, 0, false
+	}
+	return la, lng, true
+}
+
+// parseDJIXMLComment 解析 DJI 系（Mavic/Mini/Air）写入 comment 的遥测 XML：
+// <drone-dji:latitude>27.1700</drone-dji:latitude><drone-dji:longitude>-80.0389</drone-dji:longitude>。
+func parseDJIXMLComment(s string) (lat, lng float64, ok bool) {
+	if s == "" || !strings.Contains(s, "drone-dji") {
+		return 0, 0, false
+	}
+	laRe := regexp.MustCompile(`drone-dji:latitude[>"]+\s*(-?\d+(?:\.\d+)?)`)
+	lngRe := regexp.MustCompile(`drone-dji:longitude[>"]+\s*(-?\d+(?:\.\d+)?)`)
+	laM, lngM := laRe.FindStringSubmatch(s), lngRe.FindStringSubmatch(s)
+	if laM == nil || lngM == nil {
+		return 0, 0, false
+	}
+	la, err1 := strconv.ParseFloat(laM[1], 64)
+	lng, err2 := strconv.ParseFloat(lngM[1], 64)
+	if err1 != nil || err2 != nil || la < -90 || la > 90 || lng < -180 || lng > 180 {
+		return 0, 0, false
+	}
+	return la, lng, true
 }
 
 // DetectByAspect 启发式回退：长宽比接近 2:1 且短边足够大时判定为等距柱状全景。

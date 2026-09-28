@@ -53,7 +53,7 @@ type FileEntry struct {
 	Kind     Kind      // photo|video
 	Size     int64     // 字节数
 	ModTime  time.Time // 文件 mtime（EXIF 缺失时回退为 taken_at）
-	Hash     string    // 内容 sha256（hex，64 字符，对齐 media.hash 宽度）
+	Hash     string    // 内容 sha256（hex）——由 indexOne 在处理时计算填充，遍历阶段为空
 }
 
 // HashFile 计算文件内容 sha256。
@@ -101,10 +101,9 @@ func ScanDir(ctx context.Context, root string) ([]FileEntry, error) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		hash, err := HashFile(path)
-		if err != nil {
-			return fmt.Errorf("哈希 %s: %w", path, err)
-		}
+		// Job000132：哈希**不再**在遍历阶段计算——全量读文件（4K 视频数 GB/个）曾把
+		// 「清点」拖成数小时的 0/0 假死。哈希移至 indexOne（逐文件处理时计算），
+		// 遍历只做 stat + 分类，秒级完成、total 立即可见。
 		out = append(out, FileEntry{
 			Path:     path,
 			Rel:      rel,
@@ -113,7 +112,6 @@ func ScanDir(ctx context.Context, root string) ([]FileEntry, error) {
 			Kind:     kind,
 			Size:     info.Size(),
 			ModTime:  info.ModTime(),
-			Hash:     hash,
 		})
 		return nil
 	})

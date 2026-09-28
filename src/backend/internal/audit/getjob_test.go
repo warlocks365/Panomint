@@ -108,8 +108,8 @@ func TestJobByIDSQLSharesShapeWithList(t *testing.T) {
 	inner := byID[strings.Index(byID, "(")+1 : strings.LastIndex(byID, ") j")]
 	for _, branch := range strings.Split(inner, "UNION ALL") {
 		sel := branch[strings.Index(branch, "SELECT"):strings.Index(branch, "FROM")]
-		if cols := strings.Count(sel, ",") + 1; cols != 14 {
-			t.Fatalf("分支列数应为 14，实际 %d：\n%s", cols, sel)
+		if cols := strings.Count(sel, ",") + 1; cols != 15 {
+			t.Fatalf("分支列数应为 15（Job000132 加 current_file），实际 %d：\n%s", cols, sel)
 		}
 	}
 }

@@ -62,6 +62,7 @@
       <p class="scan-status" data-testid="scan-status">
         <template v-if="job.status === 'running'">
           扫描中 {{ job.processed || 0 }} / {{ job.total || '…' }}
+          <span v-if="job.current_file" data-testid="scan-current">· 正在处理 {{ job.current_file }}</span>
         </template>
         <template v-else-if="job.status === 'done'">
           扫描完成：共处理 {{ job.total }} 个媒体文件（新导入的已入时间轴/相册，重复的按哈希跳过）
@@ -79,7 +80,7 @@
 // Job000117：目录树选择器（浏览…按钮）——选中目录回填输入框并自动触发扫描；
 // 手动输入路径保留可用，两种方式互不冲突（输入框始终可编辑，浏览只是另一种填法）。
 // 进度/终态唯一真源 = GET /admin/jobs/:id（admin:system），与后端 index_jobs 行一一对应；
-// index_jobs 只有 total/processed/status 三列，故"新导入 vs 重复"的明细不展示（后续增强）。
+// index_jobs 的 total/processed/status/current_file（Job000132），故"新导入 vs 重复"的明细不展示（后续增强）。
 // 竞态治理：seq 守卫——轮询期间用户再次触发/组件卸载，旧的轮询立即作废（范式见 MediaViewer）。
 import { computed, onUnmounted, ref } from 'vue'
 import { errMessage } from '../../stores/auth'

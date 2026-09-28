@@ -68,6 +68,14 @@ func EnsureSeedUser(ctx context.Context, db *pgxpool.Pool) (string, error) {
 	return id, nil
 }
 
+// pathIndexed 同一相对路径（media.path 唯一对应一次导入）是否已有未删除记录。
+func (x *Indexer) pathIndexed(ctx context.Context, rel string) (bool, error) {
+	var one bool
+	err := x.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM media WHERE path = $1 AND deleted_at IS NULL)`, rel).Scan(&one)
+	return one, err
+}
+
 // findByHash 查重：同 hash 且非副本的 media 是否已存在。
 func (x *Indexer) findByHash(ctx context.Context, hash string) (string, error) {
 	var id string
@@ -237,6 +245,9 @@ func (x *Indexer) scanWithJob(ctx context.Context, root, ownerID, prefix, jobID 
 	}
 
 	for i, e := range entries {
+		// Job000132：正在处理的文件实时可见（管理后台「N/M · 正在处理 xxx」）
+		_, _ = x.db.Exec(ctx,
+			`UPDATE index_jobs SET current_file=$1 WHERE id=$2`, e.Filename, jobID)
 		outcome, err := x.indexOne(ctx, ownerID, e)
 		switch {
 		case err != nil:
@@ -247,9 +258,9 @@ func (x *Indexer) scanWithJob(ctx context.Context, root, ownerID, prefix, jobID 
 		default:
 			st.Inserted++
 		}
-		// 每 10 个刷一次进度，最后一次由收尾统一更新
-		if (i+1)%10 == 0 {
-			_, _ = x.db.Exec(ctx, `UPDATE index_jobs SET processed=$1 WHERE id=$2`, i+1, jobID)
+		// 每个文件处理后即刷进度（0/0 假死的根源是旧版每 10 个才刷 + 遍历阶段无进度）
+		if _, err := x.db.Exec(ctx, `UPDATE index_jobs SET processed=$1 WHERE id=$2`, i+1, jobID); err != nil {
+			log.Printf("进度更新失败 job=%s: %v", jobID, err)
 		}
 	}
 
@@ -326,6 +337,23 @@ func (x *Indexer) IndexEntries(ctx context.Context, jobKind string, entries []Fi
 // indexOne 处理单个文件：去重判定 → 元数据 → 入库 → 缩略图任务入队。
 // 返回细分结果（inserted/duplicate）；error 非空即 failed。
 func (x *Indexer) indexOne(ctx context.Context, ownerID string, e FileEntry) (EntryOutcome, error) {
+	// Job000132 path 预检：同路径已入库（未删除）→ 直接跳过，**不读文件**。
+	// 重复扫描从「重读全部文件算哈希」（GB 级视频 × N = 小时级）降为「stat 全部文件」（秒级）；
+	// 内容变更的场景由调用方先删后扫。跨路径同内容仍走下方 hash 去重（正确性不变）。
+	exists, err := x.pathIndexed(ctx, e.Rel)
+	if err != nil {
+		return OutcomeFailed, err
+	}
+	if exists {
+		return OutcomeDuplicate, nil
+	}
+
+	hash, err := HashFile(e.Path)
+	if err != nil {
+		return OutcomeFailed, fmt.Errorf("哈希 %s: %w", e.Path, err)
+	}
+	e.Hash = hash
+
 	dupID, err := x.findByHash(ctx, e.Hash)
 	if err != nil {
 		return OutcomeFailed, err

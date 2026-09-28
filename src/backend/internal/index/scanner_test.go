@@ -101,8 +101,10 @@ func TestScanDir(t *testing.T) {
 		t.Errorf("根目录文件 Folder 应为空: %+v", entries[2])
 	}
 	for _, e := range entries {
-		if len(e.Hash) != 64 || e.Size == 0 {
-			t.Errorf("条目缺 hash/size: %+v", e)
+		// Job000132 契约变更：遍历阶段不再算哈希（GB 级视频曾把清点拖成小时级 0/0 假死），
+		// 哈希由 indexOne 在逐文件处理时计算。此处只验 size 与 hash 为空（延迟语义）。
+		if e.Hash != "" || e.Size == 0 {
+			t.Errorf("条目 hash 应为空（延迟到 indexOne）/size 必填: %+v", e)
 		}
 	}
 }

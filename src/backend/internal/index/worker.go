@@ -93,6 +93,11 @@ func (w *ThumbWorker) Handle(ctx context.Context, job queue.Job) error {
 	for _, size := range []ffmpeg.ThumbSize{ffmpeg.ThumbSM, ffmpeg.ThumbMD, ffmpeg.ThumbLG} {
 		out := w.thumbPath(mediaID, size)
 		args := ffmpeg.ThumbnailArgsEdited(input, out, size, seekUs, editFilter)
+		// Job000132 快速模式：INDEX_THUMB_FAST=1 时跳帧解码（-skip_frame nokey，只解关键帧），
+		// 4K HEVC 在纯 CPU 低配机（如 1.15 类 NAS）上抽帧速度提升数倍；画质取关键帧足够缩略图。
+		if os.Getenv("INDEX_THUMB_FAST") == "1" {
+			args = append(args[:2], append([]string{"-skip_frame", "nokey"}, args[2:]...)...)
+		}
 		if _, err := ffmpeg.New(args).Run(ctx); err != nil {
 			return fmt.Errorf("生成 %s 档缩略图: %w", size, err) // 普通错误走退避重试
 		}
