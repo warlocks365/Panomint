@@ -55,7 +55,7 @@ function buildUrl(pos) {
 
 function destroyHls() {
   if (hls) {
-    hls.destroy()
+    try { videoEl.value.__hls = null } catch {}; hls.destroy()
     hls = null
   }
 }
@@ -75,6 +75,8 @@ function attach(pos) {
     })
     hls.loadSource(buildUrl(pos))
     hls.attachMedia(v)
+    // Job000136-1.8.2：挂实例供码率采样
+    v.__hls = hls
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       startPos = pos
       hlsOffset = 0

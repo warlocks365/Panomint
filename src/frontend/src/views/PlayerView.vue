@@ -270,28 +270,72 @@ const specLine = computed(() => {
   if (d.video?.fps) parts.push(d.video.fps + 'fps')
   return parts.join(' · ') || '—'
 })
+// 三层采集：① hls.js bandwidthEstimate（MSE 权威数据源）→ ② ResourceTiming 字节增量（原片直出）
+// → ③ buffered 时间增量 × 平均码率（近似）→ 均不可用则明示「不支持」，不显示误导性的恒 0。
+let brBufLastSec = 0
+let brBufLastAt = 0
+function readBufferSec(v) {
+  try {
+    return v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : null
+  } catch { return null }
+}
 function sampleBitrate() {
   const v = stageRef.value && stageRef.value.querySelector('video')
-  if (!v || !v.currentSrc) { liveBitrate.value = ''; bufferSec.value = null; return }
+  if (!v) { liveBitrate.value = ''; bufferSec.value = null; return }
+  bufferSec.value = readBufferSec(v)
+  const now = performance.now()
+
+  // ① HLS/MSE：hls.js 自带带宽估算（组件把实例挂在 video.__hls）
+  const est = v.__hls && typeof v.__hls.bandwidthEstimate === 'number' ? v.__hls.bandwidthEstimate : 0
+  if (est > 0) {
+    liveBitrate.value = fmtMbps(est) + ' · HLS 估算'
+    brLastTotal = 0; brLastAt = 0; brBufLastSec = 0; brBufLastAt = 0
+    return
+  }
+
+  // ② 原片直出：同源 ResourceTiming 字节累计（SW 经手或跨源时 transferSize 恒 0 → 自动落入③）
   const entries = performance.getEntriesByName(v.currentSrc)
   const total = entries.reduce((sum, e) => sum + (e.transferSize || e.encodedBodySize || 0), 0)
-  const now = performance.now()
-  if (brLastAt && total >= brLastTotal) {
+  if (total > 0 && brLastAt && total >= brLastTotal) {
     const dBytes = total - brLastTotal
     const dSec = (now - brLastAt) / 1000
-    if (dSec > 0.5) liveBitrate.value = dBytes > 0 ? fmtMbps((dBytes * 8) / dSec) : '0 kbps'
+    if (dSec > 0.5) {
+      liveBitrate.value = dBytes > 0 ? fmtMbps((dBytes * 8) / dSec) : '0 kbps（无下载）'
+      brLastTotal = total; brLastAt = now
+      return
+    }
   }
-  brLastTotal = total
-  brLastAt = now
-  try {
-    bufferSec.value = v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : null
-  } catch { bufferSec.value = null }
+  if (total > 0) { brLastTotal = total; brLastAt = now; brBufLastSec = 0; brBufLastAt = 0; return }
+
+  // ③ buffered 时间增量 × 元数据平均码率（粗估：bytes/s = bufferedSec 增量 × filesize/duration）
+  const buf = readBufferSec(v)
+  const dur = media.detail.value?.video?.duration ?? media.detail.value?.duration
+  const fsz = media.detail.value?.filesize
+  if (buf != null && dur > 0 && fsz > 0) {
+    if (brBufLastAt && buf > brBufLastSec) {
+      const dSec = (now - brBufLastAt) / 1000
+      if (dSec > 0.5) {
+        const bytesPerSec = fsz / dur
+        liveBitrate.value = fmtMbps(((buf - brBufLastSec) * bytesPerSec * 8) / dSec) + ' · 缓冲估算'
+        brBufLastSec = buf; brBufLastAt = now
+        return
+      }
+    }
+    if (!brBufLastAt) { brBufLastSec = buf; brBufLastAt = now }
+    if (liveBitrate.value === '') liveBitrate.value = '缓冲估算中…'
+    return
+  }
+
+  // 兜底：该场景确实无法统计（如 Safari 原生 HLS）
+  liveBitrate.value = '当前场景不支持'
 }
 function toggleBitrate() {
   showBitrate.value = !showBitrate.value
   if (showBitrate.value) {
     brLastTotal = 0
     brLastAt = 0
+    brBufLastSec = 0
+    brBufLastAt = 0
     sampleBitrate()
     brTimer.value = setInterval(sampleBitrate, 2000)
   } else if (brTimer.value) {

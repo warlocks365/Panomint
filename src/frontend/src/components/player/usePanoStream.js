@@ -83,7 +83,7 @@ export function usePanoStream({ engine, props, showToast }) {
   function video() { return engine.getVideo() }
 
   function attachHls(url) {
-    if (hls) { hls.destroy(); hls = null }
+    if (hls) { try { video().__hls = null } catch {} ; hls.destroy(); hls = null }
     netRetries = 0; backoff = 1000
     if (Hls.isSupported()) {
       hls = new Hls({
@@ -104,6 +104,8 @@ export function usePanoStream({ engine, props, showToast }) {
       })
       hls.loadSource(url)
       hls.attachMedia(video())
+      // Job000136-1.8.2：hls 实例挂到 video 元素——码率采样读 bandwidthEstimate（MSE 场景唯一可靠数据源）
+      video().__hls = hls
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         const opts = []
         let maxAllowed = -1
