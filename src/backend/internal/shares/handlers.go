@@ -1,6 +1,7 @@
 package shares
 
 import (
+	"github.com/google/uuid"
 	"errors"
 	"fmt"
 	"net/http"
@@ -55,6 +56,35 @@ func errResp(c *gin.Context, status int, code, msg string) {
 
 // Create POST /shares {kind, target_id, title?, expire_at?, password?, is_wechat?, max_views?} → 201 {id, token, url}
 // is_wechat=true 时强制 allow_download=false（微信 H5 不给原文件，PRD 核心约束）。
+// AccessLog GET /shares/:id/access-log（Job000134）：最近 50 条访问记录（IP/时间/UA）。
+// 数据源 = share_access_log（RecordAccess 在公开访问时已逐条写入）。
+func (h *Handler) AccessLog(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if _, err := uuid.Parse(id); err != nil {
+		httperr.Envelope(c, http.StatusBadRequest, "INVALID_INPUT", "分享 id 格式错误")
+		return
+	}
+	rows, err := h.Store.Pool.Query(c.Request.Context(), `
+		SELECT ip, COALESCE(user_agent,''), at
+		FROM share_access_log WHERE share_id = $1
+		ORDER BY at DESC LIMIT 50`, id)
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "INTERNAL", "查询访问记录失败", err)
+		return
+	}
+	defer rows.Close()
+	items := []gin.H{}
+	for rows.Next() {
+		var ip, ua string
+		var at time.Time
+		if err := rows.Scan(&ip, &ua, &at); err != nil {
+			continue
+		}
+		items = append(items, gin.H{"ip": ip, "user_agent": ua, "at": at})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "limit": 50})
+}
+
 func (h *Handler) Create(c *gin.Context) {
 	var req struct {
 		Kind          string     `json:"kind"`

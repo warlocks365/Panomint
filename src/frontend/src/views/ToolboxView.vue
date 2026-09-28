@@ -56,6 +56,11 @@
 
     <!-- 扫描导入（Job000123）：管理员分配扫描根后，成员自助导入挂载目录里的媒体 -->
     <ToolboxScanPanel v-else-if="tab === 'scan'" />
+
+    <!-- Job000134：我的分享——列表/状态/观看统计/吊销/二维码（ShareManageList 内聚） -->
+    <div v-if="tab === 'shares'" class="tb-shares" data-testid="toolbox-my-shares">
+      <ShareManageList />
+    </div>
   </div>
 </template>
 
@@ -65,6 +70,7 @@ import { useRouter } from 'vue-router'
 import ToolboxDupPanel from './toolbox/DupPanel.vue'
 import ToolboxRestoredPanel from './toolbox/RestoredPanel.vue'
 import ToolboxScanPanel from './toolbox/ScanPanel.vue'
+import ShareManageList from '../components/shares/ShareManageList.vue'
 
 const router = useRouter()
 

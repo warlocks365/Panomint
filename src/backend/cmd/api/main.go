@@ -321,6 +321,7 @@ func main() {
 	authed.POST("/shares", permShare, sharesH.Create)
 	authed.GET("/shares", permShare, sharesH.List)
 	authed.DELETE("/shares/:id", permShare, sharesH.Delete)
+	authed.GET("/shares/:id/access-log", permShare, sharesH.AccessLog) // Job000134：观看记录（IP/时间）
 
 	// Phase 4 P1：带宽（契约 §15）。GET 读生效带宽（manual 优先，否则最近自测）；
 	// PATCH 手动指定；probe/self-test 为登录态自测探针（与分享侧共用同一探针实现）。

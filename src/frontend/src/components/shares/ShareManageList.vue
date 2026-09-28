@@ -29,6 +29,9 @@
           </td>
           <td class="op-cell">
             <button class="link-btn" @click="copyLink(s)">复制链接</button>
+            <button class="link-btn" data-testid="share-detail" @click="toggleDetail(s)">
+              {{ detailId === s.id ? '收起' : '详情' }}
+            </button>
             <button
               class="link-btn danger"
               :disabled="statusOf(s).key !== 'active' || revokingId === s.id"
@@ -36,6 +39,27 @@
             >
               {{ revokingId === s.id ? '吊销中…' : '吊销' }}
             </button>
+          </td>
+        </tr>
+        <tr v-if="detailId === s.id" class="detail-row">
+          <td colspan="6" class="detail-cell">
+            <div class="detail-grid">
+              <div class="qr-box">
+                <canvas :ref="(el) => setQrCanvas(s.id, el)" class="qr-canvas" data-testid="share-qr"></canvas>
+                <p class="qr-tip">扫码打开</p>
+              </div>
+              <div class="log-box">
+                <p class="log-title">最近观看记录（{{ accessItems.length }}）</p>
+                <p v-if="logLoading" class="tip">加载中…</p>
+                <p v-else-if="!accessItems.length" class="tip">暂无访问记录</p>
+                <ul v-else class="log-list" data-testid="share-access-log">
+                  <li v-for="(a, i) in accessItems" :key="i" class="log-item">
+                    <code class="log-ip">{{ a.ip || '未知IP' }}</code>
+                    <span class="log-time">{{ formatAt(a.at) }}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </td>
         </tr>
       </tbody>
@@ -62,7 +86,8 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { errMsg, listShares, revokeShare, shareLink } from './shareApi'
+import QRCode from 'qrcode'
+import { errMsg, listShares, revokeShare, shareLink, fetchAccessLog } from './shareApi'
 
 const shares = ref([])
 const loading = ref(false)
@@ -101,6 +126,45 @@ async function refresh() {
   } finally {
     loading.value = false
   }
+}
+
+// Job000134：详情展开——二维码（qrcode 渲染）+ 最近观看记录
+const detailId = ref('')
+const accessItems = ref([])
+const logLoading = ref(false)
+const qrEls = {}
+function setQrCanvas(id, el) {
+  if (el) qrEls[id] = el
+}
+async function toggleDetail(s) {
+  if (detailId.value === s.id) {
+    detailId.value = ''
+    return
+  }
+  detailId.value = s.id
+  accessItems.value = []
+  logLoading.value = true
+  const canvas = qrEls[s.id]
+  if (canvas) {
+    try {
+      await QRCode.toCanvas(canvas, shareLink(s.token), { width: 140, margin: 1 })
+    } catch {
+      /* 渲染失败静默：二维码为辅助功能 */
+    }
+  }
+  try {
+    const r = await fetchAccessLog(s.id)
+    accessItems.value = r.items || []
+  } catch {
+    accessItems.value = []
+  } finally {
+    logLoading.value = false
+  }
+}
+function formatAt(at) {
+  if (!at) return '—'
+  const d = new Date(at)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
 }
 
 async function copyLink(s) {
@@ -294,5 +358,54 @@ defineExpose({ refresh })
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.detail-row .detail-cell {
+  background: rgba(0, 0, 0, 0.02);
+}
+.detail-grid {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.qr-box {
+  text-align: center;
+}
+.qr-canvas {
+  border: 1px solid var(--color-border, #ddd);
+  border-radius: 6px;
+}
+.qr-tip {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary, #666);
+}
+.log-box {
+  flex: 1;
+  min-width: 0;
+}
+.log-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.log-item {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+.log-ip {
+  font-family: monospace;
+}
+.log-time {
+  color: var(--color-text-secondary, #666);
 }
 </style>

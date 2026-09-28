@@ -25,3 +25,8 @@ export function shareLink(token) {
 export function errMsg(e, fallback = '操作失败') {
   return e.response?.data?.error?.message || (e.response ? `HTTP ${e.response.status}` : '网络不可达') || fallback
 }
+
+// Job000134：分享访问记录（最近 50 条：IP/时间/UA）。
+export async function fetchAccessLog(id) {
+  return http.get(`/shares/${id}/access-log`).then((r) => r.data)
+}
