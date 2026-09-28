@@ -1,7 +1,21 @@
 <template>
   <div class="player-view">
     <!-- 舞台区：按类型渲染核心（照片 / 普通视频 / 360 全景直接球面渲染） -->
-    <div class="stage-area">
+    <div ref="stageRef" class="stage-area">
+      <!-- Job000135：全屏/退出全屏（播放窗口内右上角浮动） -->
+      <button
+        class="fs-btn"
+        data-testid="stage-fullscreen"
+        :title="isFs ? '退出全屏' : '全屏'"
+        @click="toggleFullscreen"
+      >
+        <svg v-if="!isFs" viewBox="0 0 24 24" width="18" height="18" fill="none">
+          <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="none">
+          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+      </button>
       <div v-if="media.loading.value" class="state">加载中…</div>
       <!-- Job000131 P1：HEVC 编码且浏览器不支持 → 错误态旁提供「兼容播放」（实时转码兜底，显式触发） -->
       <div v-else-if="media.error.value && !liveMode" class="state error">
@@ -115,6 +129,7 @@
       :detail="media.detail.value"
       :loading="media.loading.value"
       :show-close="false"
+      @share="openShare"
       @deleted="exit"
     />
 
@@ -125,11 +140,22 @@
           :media-id="mediaId"
           :detail="media.detail.value"
           :loading="media.loading.value"
+          @share="openShare"
           @close="drawerOpen = false"
           @deleted="exit"
         />
       </div>
     </div>
+
+    <!-- Job000135：创建分享（kind=media；Job000134 扩展「我的分享」管理页与二维码） -->
+    <ShareCreateDialog
+      v-if="shareOpen"
+      kind="media"
+      :target-id="mediaId"
+      :default-title="media.detail.value?.filename || ''"
+      @cancel="shareOpen = false"
+      @created="shareOpen = false"
+    />
   </div>
 </template>
 
@@ -145,6 +171,7 @@ import { useResponsive } from '../composables/useResponsive'
 import { useBackNavigation } from '../composables/useBackNavigation'
 import Player360 from '../components/player/360Player.vue'
 import LivePlayer from '../components/player/LivePlayer.vue'
+import ShareCreateDialog from '../components/shares/ShareCreateDialog.vue'
 import MediaInfoPanel from '../components/player/MediaInfoPanel.vue'
 import PlaysetNav from '../components/player/PlaysetNav.vue'
 import TranscodePrompt from '../components/player/TranscodePrompt.vue'
@@ -161,6 +188,29 @@ const media = usePlayerMedia(mediaId, plainVideoRef)
 const nav = usePlaysetNav(mediaId)
 const drawerOpen = ref(false)
 const liveMode = ref(false) // Job000131 P1：HEVC 兼容播放（用户显式触发实时转码兜底）
+
+// ---- Job000135：全屏/退出全屏 + 分享对话框 ----
+const stageRef = ref(null)
+const isFs = ref(false)
+function toggleFullscreen() {
+  const el = stageRef.value
+  if (!el) return
+  if (document.fullscreenElement) {
+    document.exitFullscreen()
+  } else {
+    el.requestFullscreen().catch(() => {})
+  }
+}
+function onFsChange() {
+  isFs.value = !!document.fullscreenElement
+}
+onMounted(() => document.addEventListener('fullscreenchange', onFsChange))
+onBeforeUnmount(() => document.removeEventListener('fullscreenchange', onFsChange))
+
+const shareOpen = ref(false)
+function openShare() {
+  shareOpen.value = true
+}
 
 /* 退出（Job000102 抽 useBackNavigation，判定口径不变）：返回来源页（优先路由历史，直达链接则回时间轴） */
 function exit() {
@@ -211,6 +261,25 @@ onBeforeUnmount(() => {
   display: flex;
 }
 
+.fs-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  cursor: pointer;
+}
+.fs-btn:hover {
+  background: rgba(0, 0, 0, 0.65);
+}
 .stage-area {
   position: relative;
   flex: 1;

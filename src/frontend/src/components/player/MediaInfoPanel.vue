@@ -65,6 +65,16 @@
       </section>
 
       <section class="info-section actions">
+        <!-- Job000135：分享按钮——emit 给 PlayerView 打开创建分享对话框（Job000134 扩展管理页） -->
+        <button class="action-btn" data-testid="info-share" @click="emit('share')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+            <circle cx="6" cy="12" r="2.4" stroke="currentColor" stroke-width="1.6" />
+            <circle cx="17.5" cy="5.5" r="2.4" stroke="currentColor" stroke-width="1.6" />
+            <circle cx="17.5" cy="18.5" r="2.4" stroke="currentColor" stroke-width="1.6" />
+            <path d="M8.2 10.9l7.1-4M8.2 13.1l7.1 4" stroke="currentColor" stroke-width="1.6" />
+          </svg>
+          分享
+        </button>
         <button class="action-btn" :class="{ active: detail.favorite }" @click="toggleFavorite">
           <svg viewBox="0 0 24 24" width="16" height="16" :fill="detail.favorite ? 'currentColor' : 'none'">
             <path
@@ -105,7 +115,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   showClose: { type: Boolean, default: true }
 })
-const emit = defineEmits(['close', 'deleted'])
+const emit = defineEmits(['share', 'close', 'deleted'])
 
 const deleting = ref(false)
 
