@@ -43,8 +43,8 @@ docker pull warlocks/panomint-web:1.8.2   # 本版仅 web 镜像有变更
 
 回滚：换回 `1.8.1` 重建 web。
 
-## 镜像 digest（发布当日 Hub 实测，回填）
+## 镜像 digest（2026-09-29 Hub 实测，115 出口独立查询，1.8.2 = latest 逐字一致）
 
 | 镜像 | 1.8.2 = latest digest |
 | --- | --- |
-| warlocks/panomint-web | 待回填 |
+| warlocks/panomint-web | `sha256:cf3a3d0a…` |
