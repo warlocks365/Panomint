@@ -264,8 +264,8 @@ onBeforeUnmount(() => {
 .fs-btn {
   position: absolute;
   top: 10px;
-  right: 10px;
-  z-index: 5;
+  left: 10px;
+  z-index: 30; /* 高于 360 播放器控制层（z10/20）与 PlaysetNav（z25），与退出/信息按钮同惯例层 */
   width: 36px;
   height: 36px;
   display: flex;
