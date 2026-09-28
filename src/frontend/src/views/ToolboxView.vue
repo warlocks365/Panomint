@@ -38,6 +38,14 @@
       >
         扫描导入
       </button>
+      <button
+        class="tb-tab"
+        :class="{ active: tab === 'shares' }"
+        data-testid="toolbox-tab-shares"
+        @click="tab = 'shares'"
+      >
+        我的分享
+      </button>
     </div>
 
     <ToolboxDupPanel v-if="tab === 'dup'" />
