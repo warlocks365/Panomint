@@ -41,10 +41,10 @@ docker pull warlocks/panomint-web:1.8.0
 - 迁移 00045 自动执行（仅加四列）；回滚换回 `1.7.3` 重建即可；
 - 低配设备延续建议：index-worker 环境变量 `INDEX_THUMB_FAST=1`。
 
-## 三、镜像 digest（发布当日 Hub 实测，回填）
+## 三、镜像 digest（2026-09-28 Hub 实测，115 出口独立查询，1.8.0 = latest 逐字一致）
 
 | 镜像 | 1.8.0 = latest digest |
 | --- | --- |
-| warlocks/panomint-app | 待回填 |
-| warlocks/panomint-worker | 待回填 |
-| warlocks/panomint-web | 待回填 |
+| warlocks/panomint-app | `sha256:75ef73f0…`（含构建提交 40e266a） |
+| warlocks/panomint-worker | `sha256:76cd61a9…` |
+| warlocks/panomint-web | `sha256:edb23b80…` |
