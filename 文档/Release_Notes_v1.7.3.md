@@ -53,7 +53,7 @@ docker pull warlocks/panomint-index-worker:1.7.3   # 本版 index-worker 镜像�
 
 | 镜像 | 1.7.3 = latest digest |
 | --- | --- |
-| warlocks/panomint-app | 待回填 |
-| warlocks/panomint-index-worker | 待回填 |
-| warlocks/panomint-worker | 待回填 |
-| warlocks/panomint-web | 待回填 |
+| warlocks/panomint-app | `sha256:c5becebb…`（含构建提交 b3ebcfb） |
+| warlocks/panomint-worker | `sha256:f3cc2719…`（index-worker/transcode-worker 共用本镜像，本版 indexctl 有变更） |
+| warlocks/panomint-web | `sha256:75264565…` |
+| warlocks/panomint-db | `sha256:fdc2262f…`（与 1.7.2 相同——db 层未变更） |
