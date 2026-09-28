@@ -172,13 +172,14 @@ type JobQuery struct {
 const (
 	indexJobBranch = `SELECT 'index'::text AS job_type, id::text AS id, kind, status, user_id::text AS user_id,
        NULL::text AS media_id, NULL::text AS node_id, NULL::text AS profile, NULL::text AS result_path,
-       total, processed, started_at, finished_at, created_at, current_file
+       total, processed, started_at, finished_at, created_at, current_file,
+       dir, result_inserted, result_duplicate, result_failed
 FROM index_jobs`
 
 	transcodeJobBranch = `SELECT 'transcode'::text AS job_type, id::text AS id, kind, status, NULL::text AS user_id,
        media_id::text AS media_id, node_id::text AS node_id, profile, result_path,
        NULL::int AS total, NULL::int AS processed, NULL::timestamptz AS started_at, NULL::timestamptz AS finished_at, created_at,
-       NULL::text AS current_file
+       NULL::text AS current_file, NULL::text AS dir, NULL::int AS result_inserted, NULL::int AS result_duplicate, NULL::int AS result_failed
 FROM transcode_jobs`
 )
 

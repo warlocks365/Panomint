@@ -55,6 +55,11 @@ export function listJobs(params = {}) {
   return http.get('/admin/jobs', { params }).then((r) => r.data)
 }
 
+// Job000133：扫描任务控制——action ∈ pause|resume|cancel。
+export function controlJob(id, action) {
+  return http.post(`/admin/jobs/${id}/${action}`).then((r) => r.data)
+}
+
 // GET /admin/jobs/:id → Job
 export function getJob(id) {
   return http.get(`/admin/jobs/${id}`).then((r) => r.data)

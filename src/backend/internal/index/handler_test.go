@@ -22,6 +22,22 @@ type fakeScanner struct {
 	returnErr error
 	jobID     string
 	calls     int
+	paused    string
+	canceled  string
+	resumed   string
+	pauseOK   bool
+	cancelOK  bool
+	resumeOK  bool
+	resumeJobID string
+}
+
+// Job000133 接口扩展：控制方法的假实现（记录调用，供控制端点测试断言）。
+func (f *fakeScanner) PauseScan(jobID string) bool  { f.paused = jobID; return f.pauseOK }
+func (f *fakeScanner) CancelScan(jobID string) bool { f.canceled = jobID; return f.cancelOK }
+
+func (f *fakeScanner) ResumeScan(_ context.Context, jobID, ownerID string) (string, bool, error) {
+	f.resumed = jobID
+	return f.resumeJobID, f.resumeOK, nil
 }
 
 func (f *fakeScanner) ScanAsync(_ context.Context, root, ownerID string, onDone func(error)) (string, error) {

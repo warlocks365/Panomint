@@ -585,6 +585,10 @@ func main() {
 	indexer := newIndexer(cfg, pool, mediaQ)
 	indexH := &index.Handler{Indexer: indexer, MediaRoot: cfg.MediaRoot, Pool: pool}
 	authed.POST("/admin/scan", auth.RequirePerm(authStore, "admin:system"), indexH.Scan)
+	// Job000133：扫描任务控制——暂停（进度保留可恢复）/恢复（断点续跑）/取消（终态）。
+	authed.POST("/admin/jobs/:id/pause", auth.RequirePerm(authStore, "admin:system"), indexH.PauseJob)
+	authed.POST("/admin/jobs/:id/resume", auth.RequirePerm(authStore, "admin:system"), indexH.ResumeJob)
+	authed.POST("/admin/jobs/:id/cancel", auth.RequirePerm(authStore, "admin:system"), indexH.CancelJob)
 	// ===== Job000117 目录树选择器数据源：GET /admin/fs/tree（懒加载单层列举）=====
 	// 扫描面板的「浏览」按钮逐级展开媒体库层级；权限/防穿越与 /admin/scan 完全同级，
 	// nginx 前缀不变（/admin 在纯 API 组内）。

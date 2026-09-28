@@ -16,6 +16,7 @@ package index
 // ⚠️ nginx 前缀同步：/admin 已在 docker/web/Dockerfile 的「纯 API 组」正则内，无需改 nginx。
 
 import (
+	"strings"
 	"context"
 	"errors"
 	"net/http"
@@ -31,6 +32,10 @@ import (
 // asyncScanner ScanAsync 的最小抽象：*Indexer 天然实现；抽成接口只为 handler 单测能替身。
 type asyncScanner interface {
 	ScanAsync(ctx context.Context, root, ownerID string, onDone func(error)) (string, error)
+	// Job000133：任务控制（*Indexer 实现；测试用假实现需同步补齐）
+	PauseScan(jobID string) bool
+	CancelScan(jobID string) bool
+	ResumeScan(ctx context.Context, jobID, ownerID string) (string, bool, error)
 }
 
 // Handler POST /admin/scan 管理端扫描导入；成员端三端点（Job000123）同结构体，见 member_scan.go。
@@ -149,6 +154,44 @@ func (h *Handler) runScan(c *gin.Context, absDir, absBoundary, rootDisplay strin
 		"root":   rootDisplay,
 		"dir":    dirscope.RelDisplay(absBoundary, absDir),
 	})
+}
+
+// CancelJob POST /admin/jobs/:id/cancel（Job000133）：取消进行中的扫描任务。
+func (h *Handler) CancelJob(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if !h.Indexer.CancelScan(id) {
+		httperr.Envelope(c, http.StatusConflict, "JOB_NOT_RUNNING", "任务不在进行中（可能已完成或已取消）")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "status": "canceled"})
+}
+
+// PauseJob POST /admin/jobs/:id/pause（Job000133）：暂停进行中的扫描任务（进度保留，可恢复）。
+func (h *Handler) PauseJob(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if !h.Indexer.PauseScan(id) {
+		httperr.Envelope(c, http.StatusConflict, "JOB_NOT_RUNNING", "任务不在进行中（可能已完成或已暂停）")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "status": "paused"})
+}
+
+// ResumeJob POST /admin/jobs/:id/resume（Job000133）：恢复 paused 任务——
+// 以原 dir 触发新扫描（path 预检从断点续跑，绝不重复入库）。
+func (h *Handler) ResumeJob(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	ownerID := c.GetString("user_id")
+	jobID2, ok, err := h.Indexer.ResumeScan(c.Request.Context(), id, ownerID)
+	if err != nil {
+		httperr.Envelope(c, http.StatusBadRequest, "JOB_NOT_RESUMABLE", "任务不可恢复（非暂停状态或缺少扫描目录）")
+		return
+	}
+	_ = jobID2
+	if !ok {
+		httperr.Fail(c, http.StatusInternalServerError, "INTERNAL", "恢复扫描失败", err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"job_id": jobID2, "status": "running", "resumed_from": id})
 }
 
 // clearRunning 释放扫描互斥（onDone 回调用）。

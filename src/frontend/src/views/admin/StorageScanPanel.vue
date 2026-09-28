@@ -84,7 +84,7 @@
 // 竞态治理：seq 守卫——轮询期间用户再次触发/组件卸载，旧的轮询立即作废（范式见 MediaViewer）。
 import { computed, onUnmounted, ref } from 'vue'
 import { errMessage } from '../../stores/auth'
-import { scanImport, getJob } from '../../api/admin'
+import { listJobs,  scanImport, getJob } from '../../api/admin'
 import DirectoryTreeDialog from './DirectoryTreeDialog.vue'
 
 const dir = ref('')
@@ -141,7 +141,7 @@ function poll(jobID) {
     try {
       const j = await getJob(jobID)
       if (mySeq !== seq) return // 已被更新的触发/卸载取代
-      job.value = { id: j.id, status: j.status, total: j.total, processed: j.processed }
+      job.value = { id: j.id, status: j.status, total: j.total, processed: j.processed, current_file: j.current_file }
       if (j.status === 'done' || j.status === 'failed') {
         stopPolling()
         running.value = false
@@ -150,6 +150,23 @@ function poll(jobID) {
       // 轮询失败不致命：下一轮再试；连续失败由运维面任务表兜底
     }
   }, 1500)
+}
+
+// Job000133 扫描防重入：挂载时恢复进行中任务的进度显示（切换页面后回到本面板，
+// running 任务仍在服务端跑——按钮不得复位为可点，否则会重复触发扫描）。
+onMounted(recoverRunning)
+async function recoverRunning() {
+  try {
+    const r = await listJobs({ job_type: 'index', status: 'running', limit: 1 })
+    const j = (r.items || [])[0]
+    if (j && j.id) {
+      running.value = true
+      job.value = { id: j.id, status: j.status, total: j.total, processed: j.processed, current_file: j.current_file }
+      poll(j.id)
+    }
+  } catch {
+    // 恢复查询失败不阻塞面板使用（触发扫描时后端 409 仍兜底）
+  }
 }
 
 onUnmounted(() => {

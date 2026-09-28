@@ -1,6 +1,7 @@
 package index
 
 import (
+	"sync"
 	"context"
 	"errors"
 	"fmt"
@@ -41,6 +42,14 @@ type Indexer struct {
 	db       *pgxpool.Pool
 	q        *queue.Queue
 	geocoder Geocoder // 可为 nil，表示不启用逆地理编码
+
+	// Job000133：活跃扫描注册表——jobID → 取消函数与期望终态（paused|canceled）。
+	activeMu    sync.Mutex
+	active      map[string]*activeScan
+}
+type activeScan struct {
+	cancel      context.CancelFunc
+	finalStatus string // paused | canceled
 }
 
 // New 创建索引器（不启用逆地理编码）。
@@ -171,7 +180,7 @@ func (x *Indexer) ScanAs(ctx context.Context, root, ownerID string) (*ScanStats,
 // MEDIA_ROOT，否则按 folder_path 浏览/拼路径时全链错位（文件在 _imports/<id8>/x，
 // 库里记成 x——浏览按 /data/media/x 找文件找不到）。prefix 形态如 "_imports/<id8>"。
 func (x *Indexer) ScanAsPrefixed(ctx context.Context, root, ownerID, prefix string) (*ScanStats, error) {
-	jobID, err := x.createScanJob(ctx, ownerID)
+	jobID, err := x.createScanJob(ctx, ownerID, root)
 	if err != nil {
 		return nil, err
 	}
@@ -185,12 +194,24 @@ func (x *Indexer) ScanAsPrefixed(ctx context.Context, root, ownerID, prefix stri
 // 后台刻意改用 context.Background()：扫描是长任务，不得随触发它的 HTTP 请求取消
 // 而中断半截（进度/终态由 scanWithJob 写回 index_jobs，可断点观察）。
 func (x *Indexer) ScanAsync(ctx context.Context, root, ownerID string, onDone func(error)) (string, error) {
-	jobID, err := x.createScanJob(ctx, ownerID)
+	jobID, err := x.createScanJob(ctx, ownerID, root)
 	if err != nil {
 		return "", err
 	}
 	go func() {
-		_, serr := x.scanWithJob(context.Background(), root, ownerID, "", jobID)
+		scanCtx, cancel := context.WithCancel(context.Background())
+		x.activeMu.Lock()
+		if x.active == nil {
+			x.active = map[string]*activeScan{}
+		}
+		x.active[jobID] = &activeScan{cancel: cancel, finalStatus: "canceled"}
+		x.activeMu.Unlock()
+		defer func() {
+			x.activeMu.Lock()
+			delete(x.active, jobID)
+			x.activeMu.Unlock()
+		}()
+		_, serr := x.scanWithJob(scanCtx, root, ownerID, "", jobID)
 		if serr != nil {
 			log.Printf("异步扫描失败 job=%s root=%s: %v", jobID, root, serr)
 		}
@@ -202,14 +223,48 @@ func (x *Indexer) ScanAsync(ctx context.Context, root, ownerID string, onDone fu
 }
 
 // createScanJob 建 index_jobs 任务行（running），返回任务 id（建行的同步/异步路径共用）。
-func (x *Indexer) createScanJob(ctx context.Context, ownerID string) (string, error) {
+func (x *Indexer) createScanJob(ctx context.Context, ownerID, root string) (string, error) {
 	var jobID string
 	if err := x.db.QueryRow(ctx,
-		`INSERT INTO index_jobs (kind, user_id, status, started_at)
-		 VALUES ('full', $1, 'running', now()) RETURNING id`, ownerID).Scan(&jobID); err != nil {
+		`INSERT INTO index_jobs (kind, user_id, status, started_at, dir)
+		 VALUES ('full', $1, 'running', now(), $2) RETURNING id`, ownerID, root).Scan(&jobID); err != nil {
 		return "", fmt.Errorf("建 index_jobs: %w", err)
 	}
 	return jobID, nil
+}
+
+// PauseScan 暂停进行中的扫描：取消执行体并置 paused（processed 保留）。
+// 恢复 = ResumeScan 以同 dir 重开新任务，path 预检自动跳过已入库文件（断点续跑）。
+func (x *Indexer) PauseScan(jobID string) bool { return x.signalScan(jobID, "paused") }
+
+// CancelScan 取消进行中的扫描：置 canceled 终态。
+func (x *Indexer) CancelScan(jobID string) bool { return x.signalScan(jobID, "canceled") }
+
+func (x *Indexer) signalScan(jobID, finalStatus string) bool {
+	x.activeMu.Lock()
+	defer x.activeMu.Unlock()
+	as, ok := x.active[jobID]
+	if !ok {
+		return false
+	}
+	as.finalStatus = finalStatus
+	as.cancel()
+	return true
+}
+
+// ResumeScan 恢复 paused 任务：以原 dir 触发新扫描（新 job 行，path 预检从断点续跑）。
+func (x *Indexer) ResumeScan(ctx context.Context, jobID, ownerID string) (string, bool, error) {
+	var dir string
+	err := x.db.QueryRow(ctx,
+		`SELECT dir FROM index_jobs WHERE id=$1 AND kind='full' AND status='paused'`, jobID).Scan(&dir)
+	if err != nil {
+		return "", false, err
+	}
+	if dir == "" {
+		return "", false, fmt.Errorf("任务缺少扫描目录，无法恢复（旧版本创建的任务）")
+	}
+	jobID2, err := x.ScanAsync(ctx, dir, ownerID, nil)
+	return jobID2, err == nil, err
 }
 
 // scanWithJob 在既有任务行上执行扫描：逐文件提取元数据、hash 去重入库、派发缩略图任务，
@@ -245,6 +300,21 @@ func (x *Indexer) scanWithJob(ctx context.Context, root, ownerID, prefix, jobID 
 	}
 
 	for i, e := range entries {
+		// Job000133：暂停/取消检查——每文件边界响应，processed 保留（恢复时 path 预检续跑）
+		if cerr := ctx.Err(); cerr != nil {
+			x.activeMu.Lock()
+			as := x.active[jobID]
+			final := "canceled"
+			if as != nil {
+				final = as.finalStatus
+			}
+			x.activeMu.Unlock()
+			_, _ = x.db.Exec(ctx,
+				`UPDATE index_jobs SET status=$1, current_file='', finished_at=now(),
+				 result_inserted=$2, result_duplicate=$3, result_failed=$4 WHERE id=$5`,
+				final, st.Inserted, st.Duplicate, st.Failed, jobID)
+			return st, nil
+		}
 		// Job000132：正在处理的文件实时可见（管理后台「N/M · 正在处理 xxx」）
 		_, _ = x.db.Exec(ctx,
 			`UPDATE index_jobs SET current_file=$1 WHERE id=$2`, e.Filename, jobID)
@@ -265,8 +335,9 @@ func (x *Indexer) scanWithJob(ctx context.Context, root, ownerID, prefix, jobID 
 	}
 
 	_, err = x.db.Exec(ctx,
-		`UPDATE index_jobs SET status='done', processed=$1, finished_at=now() WHERE id=$2`,
-		st.Total, jobID)
+		`UPDATE index_jobs SET status='done', processed=$1, finished_at=now(),
+		 result_inserted=$2, result_duplicate=$3, result_failed=$4 WHERE id=$5`,
+		st.Total, st.Inserted, st.Duplicate, st.Failed, jobID)
 	if err != nil {
 		return fail(err)
 	}

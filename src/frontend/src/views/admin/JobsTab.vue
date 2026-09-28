@@ -42,7 +42,8 @@
             <th>媒体</th>
             <th>开始时间</th>
           </tr>
-        </thead>
+                    <th>操作</th>
+          </thead>
         <tbody>
           <tr v-for="j in items" :key="j.job_type + j.id" :data-testid="`job-${j.id}`">
             <td>{{ j.job_type }}</td>
@@ -51,12 +52,30 @@
               <span class="state" :class="stateClass(j.status)">{{ j.status }}</span>
             </td>
             <td>
-              <template v-if="j.progress != null">{{ Math.round(j.progress * 100) }}%</template>
+              <template v-if="j.progress != null">
+                {{ Math.round(j.progress * 100) }}%
+                <div v-if="j.current_file" class="cur-file" data-testid="job-current-file">{{ j.current_file }}</div>
+              </template>
               <template v-else-if="j.total != null">{{ j.processed ?? 0 }}/{{ j.total }}</template>
               <template v-else>—</template>
             </td>
             <td class="col-id">{{ j.media_id || '—' }}</td>
             <td>{{ formatTime(j.started_at) }}</td>
+            <td>
+              <!-- Job000133：运行中可暂停/取消；paused 可恢复；done/failed 展示结果统计 -->
+              <template v-if="j.job_type === 'index' && j.status === 'running'">
+                <button class="btn btn--ghost btn--sm" data-testid="job-pause" @click="pauseJob(j)">暂停</button>
+                <button class="btn btn--ghost btn--sm btn--danger" data-testid="job-cancel" @click="cancelJob(j)">取消</button>
+              </template>
+              <template v-else-if="j.job_type === 'index' && j.status === 'paused'">
+                <button class="btn btn--ghost btn--sm" data-testid="job-resume" @click="resumeJob(j)">恢复</button>
+                <button class="btn btn--ghost btn--sm btn--danger" data-testid="job-cancel" @click="cancelJob(j)">取消</button>
+              </template>
+              <span v-else-if="j.result_inserted != null" class="result-stat" data-testid="job-result">
+                新增 {{ j.result_inserted }} · 重复 {{ j.result_duplicate }} · 失败 {{ j.result_failed }}
+              </span>
+              <span v-else>—</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -68,7 +87,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { errMessage } from '../../stores/auth'
-import { listJobs } from '../../api/admin'
+import { listJobs, controlJob } from '../../api/admin'
 
 const items = ref([])
 const loading = ref(false)
@@ -110,6 +129,18 @@ async function load() {
     loading.value = false
   }
 }
+
+async function controlJobAction(j, action) {
+  try {
+    await controlJob(j.id, action)
+    await load()
+  } catch (e) {
+    err.value = errMessage(e, '操作失败')
+  }
+}
+const pauseJob = (j) => controlJobAction(j, 'pause')
+const resumeJob = (j) => controlJobAction(j, 'resume')
+const cancelJob = (j) => controlJobAction(j, 'cancel')
 
 onMounted(load)
 </script>
@@ -223,5 +254,14 @@ select {
 .btn--ghost {
   border-color: transparent;
   color: var(--color-primary);
+}
+.cur-file {
+  font-size: 12px;
+  color: var(--color-text-secondary, #666);
+  margin-top: 2px;
+}
+.result-stat {
+  font-size: 12px;
+  color: var(--color-text-secondary, #666);
 }
 </style>

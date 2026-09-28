@@ -149,7 +149,12 @@ async function start() {
     job.value = { id: accepted.job_id, status: 'running', total: 0, processed: 0 }
     poll(accepted.job_id)
   } catch (e) {
-    err.value = errMessage(e, '发起扫描失败')
+    if (e?.response?.status === 409) {
+      // Job000133 防重入：后端进程内互斥 409——如实提示，避免误以为可重复触发
+      err.value = '已有扫描任务进行中，请等待完成后再试（进度见管理后台任务页）'
+    } else {
+      err.value = errMessage(e, '发起扫描失败')
+    }
   }
 }
 
