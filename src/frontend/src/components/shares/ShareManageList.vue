@@ -19,49 +19,52 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="s in shares" :key="s.id">
-          <td class="title-cell" :title="s.title">{{ s.title || '未命名分享' }}</td>
-          <td>{{ kindLabel(s.kind) }}</td>
-          <td>{{ s.access_count ?? s.view_count ?? 0 }}</td>
-          <td>{{ expireLabel(s) }}</td>
-          <td>
-            <span class="status-tag" :class="statusOf(s).cls">{{ statusOf(s).text }}</span>
-          </td>
-          <td class="op-cell">
-            <button class="link-btn" @click="copyLink(s)">复制链接</button>
-            <button class="link-btn" data-testid="share-detail" @click="toggleDetail(s)">
-              {{ detailId === s.id ? '收起' : '详情' }}
-            </button>
-            <button
-              class="link-btn danger"
-              :disabled="statusOf(s).key !== 'active' || revokingId === s.id"
-              @click="confirmTarget = s"
-            >
-              {{ revokingId === s.id ? '吊销中…' : '吊销' }}
-            </button>
-          </td>
-        </tr>
-        <tr v-if="detailId === s.id" class="detail-row">
-          <td colspan="6" class="detail-cell">
-            <div class="detail-grid">
-              <div class="qr-box">
-                <canvas :ref="(el) => setQrCanvas(s.id, el)" class="qr-canvas" data-testid="share-qr"></canvas>
-                <p class="qr-tip">扫码打开</p>
+        <template v-for="s in shares" :key="s.id">
+          <tr>
+            <td class="title-cell" :title="s.title">{{ s.title || '未命名分享' }}</td>
+            <td>{{ kindLabel(s.kind) }}</td>
+            <td>{{ s.access_count ?? s.view_count ?? 0 }}</td>
+            <td>{{ expireLabel(s) }}</td>
+            <td>
+              <span class="status-tag" :class="statusOf(s).cls">{{ statusOf(s).text }}</span>
+            </td>
+            <td class="op-cell">
+              <button class="link-btn" @click="copyLink(s)">复制链接</button>
+              <button class="link-btn" data-testid="share-detail" @click="toggleDetail(s)">
+                {{ detailId === s.id ? '收起' : '详情' }}
+              </button>
+              <button
+                class="link-btn danger"
+                :disabled="statusOf(s).key !== 'active' || revokingId === s.id"
+                @click="confirmTarget = s"
+              >
+                {{ revokingId === s.id ? '吊销中…' : '吊销' }}
+              </button>
+            </td>
+          </tr>
+          <!-- 详情展开行必须在 v-for 作用域内（template 包裹），否则 s 未定义致整表崩溃 -->
+          <tr v-if="detailId === s.id" class="detail-row">
+            <td colspan="6" class="detail-cell">
+              <div class="detail-grid">
+                <div class="qr-box">
+                  <canvas :ref="(el) => setQrCanvas(s.id, el)" class="qr-canvas" data-testid="share-qr"></canvas>
+                  <p class="qr-tip">扫码打开</p>
+                </div>
+                <div class="log-box">
+                  <p class="log-title">最近观看记录（{{ accessItems.length }}）</p>
+                  <p v-if="logLoading" class="tip">加载中…</p>
+                  <p v-else-if="!accessItems.length" class="tip">暂无访问记录</p>
+                  <ul v-else class="log-list" data-testid="share-access-log">
+                    <li v-for="(a, i) in accessItems" :key="i" class="log-item">
+                      <code class="log-ip">{{ a.ip || '未知IP' }}</code>
+                      <span class="log-time">{{ formatAt(a.at) }}</span>
+                    </li>
+                  </ul>
+                </div>
               </div>
-              <div class="log-box">
-                <p class="log-title">最近观看记录（{{ accessItems.length }}）</p>
-                <p v-if="logLoading" class="tip">加载中…</p>
-                <p v-else-if="!accessItems.length" class="tip">暂无访问记录</p>
-                <ul v-else class="log-list" data-testid="share-access-log">
-                  <li v-for="(a, i) in accessItems" :key="i" class="log-item">
-                    <code class="log-ip">{{ a.ip || '未知IP' }}</code>
-                    <span class="log-time">{{ formatAt(a.at) }}</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </td>
-        </tr>
+            </td>
+          </tr>
+        </template>
       </tbody>
     </table>
 
