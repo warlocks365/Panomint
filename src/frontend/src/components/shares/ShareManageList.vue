@@ -88,7 +88,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref } from 'vue'
 import QRCode from 'qrcode'
 import { errMsg, listShares, revokeShare, shareLink, fetchAccessLog } from './shareApi'
 
@@ -147,6 +147,7 @@ async function toggleDetail(s) {
   detailId.value = s.id
   accessItems.value = []
   logLoading.value = true
+  await nextTick() // 等展开行渲染完成，ref 回调登记 canvas 后再画二维码
   const canvas = qrEls[s.id]
   if (canvas) {
     try {
