@@ -49,11 +49,11 @@ docker pull warlocks/panomint-app:1.8.4   # stream 端点在后端
 
 回滚：换回 `1.8.3` 重建 web + app。
 
-## 镜像 digest（发布当日 Hub 实测，回填）
+## 镜像 digest（2026-09-29 Hub 实测，115 出口独立查询，1.8.4 = latest 逐字一致）
 
 | 镜像 | 1.8.4 = latest digest |
 | --- | --- |
-| warlocks/panomint-web | 待回填 |
-| warlocks/panomint-app | 待回填 |
-| warlocks/panomint-worker | 待回填 |
-| warlocks/panomint-db | 待回填 |
+| warlocks/panomint-web | `sha256:74fb5a77…` |
+| warlocks/panomint-app | `sha256:a0020860…`（stream 端点） |
+| warlocks/panomint-worker | `sha256:aba058b9…` |
+| warlocks/panomint-db | `sha256:fdc2262f…` |
