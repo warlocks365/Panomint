@@ -28,7 +28,7 @@
 // SharePublicView 拆解（Job000084）：360 全景查看器（照片/视频统一球面渲染）。
 // 照片取 lg 缩略图贴球面立即就绪；视频先做带宽自测（有上界），据测速值让 360Player
 // 选初始档位。测速在途时关闭：作废 seq 防回填重新挂载。
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'  // Job000139-fix：panoAppendQuery 仍用 computed，此前误删 import 致运行时 ReferenceError
 import Player360 from '../player/360Player.vue'
 import { measureShareBandwidth, publicHlsUrl, publicStreamUrl, publicThumbUrl } from './publicApi'
 
