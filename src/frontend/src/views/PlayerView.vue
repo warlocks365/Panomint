@@ -548,7 +548,8 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: rgba(20, 24, 29, 0.6);
   color: var(--color-text-on-dark);
-  backdrop-filter: blur(6px);
+  /* Job000137：移除 backdrop-filter——移动端浏览器在抽屉遮罩移除后不重绘带毛玻璃的 absolute 控件，
+     导致「关闭信息栏后控制按钮全部消失」；纯色背景可读性一致且无此渲染缺陷 */
 }
 
 .exit-btn:hover {
