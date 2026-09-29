@@ -28,9 +28,9 @@
 // SharePublicView 拆解（Job000084）：360 全景查看器（照片/视频统一球面渲染）。
 // 照片取 lg 缩略图贴球面立即就绪；视频先做带宽自测（有上界），据测速值让 360Player
 // 选初始档位。测速在途时关闭：作废 seq 防回填重新挂载。
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import Player360 from '../player/360Player.vue'
-import { measureShareBandwidth, publicHlsUrl, publicThumbUrl } from './publicApi'
+import { measureShareBandwidth, publicHlsUrl, publicStreamUrl, publicThumbUrl } from './publicApi'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -49,14 +49,28 @@ const BW_HINT_TIMEOUT_MS = 1500
 let panoSeq = 0
 let alive = true
 
-const panoSrc = computed(() => {
-  if (props.item.type === 'photo') return publicThumbUrl(props.token, props.item.id, 'lg', props.password)
-  return publicHlsUrl(props.token, props.item.id, props.password)
-})
+// Job000139：视频源探测——未转码的视频没有 HLS（404），回退原片在线播放（与登录端 PlayerView 的
+// hlsUrl||panoOriginalUrl 同一策略；此前分享端只连 HLS，未转码视频必黑屏失败）。
+const panoSrc = ref('')
+const panoFallback = ref(false)
+async function resolvePanoSrc() {
+  if (props.item.type === 'photo') {
+    panoSrc.value = publicThumbUrl(props.token, props.item.id, 'lg', props.password)
+    return
+  }
+  const hls = publicHlsUrl(props.token, props.item.id, props.password)
+  try {
+    const r = await fetch(hls, { method: 'HEAD' })
+    if (r.ok) { panoSrc.value = hls; return }
+  } catch { /* 网络异常按无 HLS 处理 */ }
+  panoFallback.value = true
+  panoSrc.value = publicStreamUrl(props.token, props.item.id, props.password)
+}
 // 密码分享的 HLS ts 切片请求不继承 master URL 查询串，需逐请求补挂
 const panoAppendQuery = computed(() => (props.password ? `password=${encodeURIComponent(props.password)}` : ''))
 
 async function prepare() {
+  await resolvePanoSrc()
   panoBandwidthKbps.value = 0
   if (props.item.type === 'photo') {
     panoReady.value = true

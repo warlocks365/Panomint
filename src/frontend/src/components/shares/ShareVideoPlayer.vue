@@ -20,7 +20,7 @@
 // 关闭/卸载即销毁 hls 实例并复位 video 元素。
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import Hls from 'hls.js'
-import { publicHlsUrl } from './publicApi'
+import { publicHlsUrl, publicStreamUrl } from './publicApi'
 
 const props = defineProps({
   item: { type: Object, required: true },
@@ -32,6 +32,7 @@ const emit = defineEmits(['close'])
 const playerError = ref('')
 const videoEl = ref(null)
 let hls = null
+let triedFallback = false
 
 function destroyPlayer() {
   if (hls) {
@@ -68,7 +69,17 @@ onMounted(async () => {
       }
     })
     hls.on(Hls.Events.ERROR, (_evt, data) => {
-      if (data?.fatal) playerError.value = '视频加载失败，请稍后重试'
+      if (!data?.fatal) return
+      // Job000139：HLS 不存在（未转码）→ 回退原片在线播放（inline 流，Range 拖动可用）
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !triedFallback) {
+        triedFallback = true
+        hls.destroy()
+        hls = null
+        v.src = publicStreamUrl(props.token, props.item.id, props.password)
+        v.play().catch(() => {})
+        return
+      }
+      playerError.value = '视频加载失败，请稍后重试'
     })
     hls.loadSource(url)
     hls.attachMedia(v)

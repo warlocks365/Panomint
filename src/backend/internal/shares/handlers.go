@@ -4,6 +4,7 @@ import (
 	"github.com/google/uuid"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -500,4 +501,76 @@ func (h *Handler) PublicDownload(c *gin.Context) {
 		name = *filename
 	}
 	c.FileAttachment(abs, name)
+}
+
+// PublicStream GET /public/shares/:token/media/:id/stream
+// Job000139：HLS 缺失时分享页的「原片在线播放」回退端点。
+// 与 download 的区别：①inline 服务（Content-Disposition: inline + video/* MIME，
+// 浏览器内联播放而非触发下载）——微信 H5 分享禁的是"下载原文件"，在线播放原片
+// 不属于下载（UI 无下载入口），故不受 allow_download/is_wechat 限制；
+// ②http.ServeContent 原生支持 Range（拖动进度必需），c.File 系不支持。
+// 配额/审计口径与 download 相同（计一次访问 + 审计动作 share.play）。
+func (h *Handler) PublicStream(c *gin.Context) {
+	sh := h.guardPublic(c)
+	if sh == nil {
+		return
+	}
+	ctx := c.Request.Context()
+	mediaID := c.Param("id")
+	ok, err := h.Store.MediaInShare(ctx, sh, mediaID)
+	if errors.Is(err, ErrTargetLost) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "分享目标已删除")
+		return
+	}
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	if !ok {
+		errResp(c, http.StatusForbidden, "FORBIDDEN", "该媒体不属于此分享")
+		return
+	}
+	rel, _, err := h.Store.MediaOriginal(ctx, mediaID)
+	if errors.Is(err, ErrTargetLost) {
+		errResp(c, http.StatusNotFound, "NOT_FOUND", "分享目标已删除")
+		return
+	}
+	if err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
+	abs := rel
+	if !filepath.IsAbs(rel) {
+		root := h.MediaRoot
+		if root == "" {
+			root = "./data/media"
+		}
+		abs = filepath.Join(root, filepath.FromSlash(rel))
+	}
+	st, err := os.Stat(abs)
+	if err != nil || st.IsDir() {
+		errResp(c, http.StatusNotFound, "FILE_MISSING", "文件不在磁盘上")
+		return
+	}
+	if err := h.Store.RecordAccess(ctx, sh.ID, c.ClientIP(), c.Request.UserAgent()); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "LOG_FAILED", "记录访问失败", err)
+		return
+	}
+	h.record(c, audit.ActionSharePlay, audit.TargetShare, sh.ID,
+		map[string]any{"media_id": mediaID, "bytes": st.Size()})
+	// inline + 按扩展名给 MIME；ServeContent 按 If-Modified-Since/Range 处理条件请求。
+	mime := mime.TypeByExtension(strings.ToLower(filepath.Ext(abs)))
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	c.Header("Content-Disposition", "inline")
+	c.Header("Content-Type", mime)
+	f, err := os.Open(abs)
+	if err != nil {
+		errResp(c, http.StatusNotFound, "FILE_MISSING", "文件不在磁盘上")
+		return
+	}
+	defer f.Close()
+	// *os.File 实现 io.ReadSeeker：ServeContent 原生处理 If-Modified-Since / Range（拖动进度必需）
+	http.ServeContent(c.Writer, c.Request, st.Name(), st.ModTime(), f)
 }

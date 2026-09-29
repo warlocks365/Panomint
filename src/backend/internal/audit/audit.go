@@ -111,6 +111,8 @@ const (
 	// ActionShareDownload 公开侧原文件下载（Job000053）。
 	// 只记 allow_download=true 的兑现下载；占位拒绝（403）不写 —— 拒绝是常态防御不是事件。
 	ActionShareDownload = "share.download"
+	// ActionSharePlay 公开侧原片在线播放（Job000139：HLS 缺失回退，inline 流）。
+	ActionSharePlay = "share.play"
 
 	// ActionMediaDelete 移入回收站。
 	ActionMediaDelete = "media.delete"

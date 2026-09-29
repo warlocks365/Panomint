@@ -431,6 +431,7 @@ func main() {
 	r.GET("/public/shares/:token/media/:id/thumb", sharesH.PublicThumb)
 	r.GET("/public/shares/:token/media/:id/hls/*file", sharesH.PublicHLS)
 	r.GET("/public/shares/:token/media/:id/download", sharesH.PublicDownload) // Job000053：allow_download=true 兑现原文件（含审计+访问配额）
+	r.GET("/public/shares/:token/media/:id/stream", sharesH.PublicStream)    // Job000139：HLS 缺失回退原片在线播放（inline，不受下载开关限制）
 
 	// Phase 4 P1：分享页 OG 封面（服务端渲染最简 HTML；社交抓取器不执行 JS，只看初始 HTML）。
 	// 绝对 URL 由请求 Host 动态拼出，不写死域名；受密码保护的分享只返回中性卡片（不泄露标题与缩略图）。

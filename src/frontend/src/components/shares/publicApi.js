@@ -41,6 +41,11 @@ export function publicThumbUrl(token, id, size = 'md', password = '') {
 }
 
 // 公开 HLS 主播放列表 URL（hls.js / 原生 HLS 直接用，免 token）
+// Job000139：HLS 缺失时的原片在线播放（inline 流，后端不受 allow_download 限制）
+export function publicStreamUrl(token, id, password = '') {
+  return withPassword(`/public/shares/${token}/media/${id}/stream`, password)
+}
+
 export function publicHlsUrl(token, id, password = '') {
   return withPassword(`${API_BASE}/public/shares/${token}/media/${id}/hls/master.m3u8`, password)
 }
