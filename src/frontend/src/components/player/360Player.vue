@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px;
   background: var(--p-panel);
-  backdrop-filter: blur(8px);
+  /* Job000137：移除 backdrop-filter（移动端不重绘缺陷，同 PlayerView） */
   transition: opacity 0.3s;
 }
 .bar.hidden { opacity: 0; pointer-events: none; }

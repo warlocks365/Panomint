@@ -41,7 +41,7 @@ defineEmits(['go'])
   border-radius: 50%;
   background: rgba(20, 24, 29, 0.5);
   color: var(--color-text-on-dark);
-  backdrop-filter: blur(6px);
+  /* Job000137：移除 backdrop-filter（移动端不重绘缺陷，同 PlayerView） */
 }
 
 .nav-arrow:hover:not(:disabled) {
@@ -74,6 +74,6 @@ defineEmits(['go'])
   color: var(--color-text-on-dark);
   font-size: var(--font-size-sm);
   font-variant-numeric: tabular-nums;
-  backdrop-filter: blur(6px);
+  /* Job000137：移除 backdrop-filter（移动端不重绘缺陷，同 PlayerView） */
 }
 </style>
