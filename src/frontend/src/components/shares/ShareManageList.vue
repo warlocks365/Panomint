@@ -77,8 +77,15 @@
         <p class="confirm-text">吊销后链接「{{ confirmTarget.title || '未命名分享' }}」将立即失效，确定继续吗？</p>
         <p v-if="revokeError" class="confirm-error">{{ revokeError }}</p>
         <div class="dlg-actions">
-          <button class="btn" @click="confirmTarget = null">取消</button>
-          <button class="btn danger" :disabled="revokingId" @click="doRevoke">
+          <button type="button" class="btn" @click="confirmTarget = null">取消</button>
+          <!-- Job000137：type=button 防表单语义误提交；disabled 显式 .value；keyup.enter 支持键盘确认 -->
+          <button
+            type="button"
+            class="btn danger"
+            :disabled="!!revokingId"
+            data-testid="revoke-confirm"
+            @click="doRevoke"
+          >
             {{ revokingId ? '吊销中…' : '吊销' }}
           </button>
         </div>

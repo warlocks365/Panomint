@@ -186,7 +186,7 @@
       :target-id="mediaId"
       :default-title="media.detail.value?.filename || ''"
       @cancel="shareOpen = false"
-      @created="shareOpen = false"
+      @created="onShareCreated"
     />
   </div>
 </template>
@@ -242,6 +242,12 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', onFsChang
 const shareOpen = ref(false)
 function openShare() {
   shareOpen.value = true
+}
+
+// Job000137：创建成功后保持对话框打开——内嵌 ShareCreatedPanel 展示链接+一键复制（复制时按钮变「已复制」），
+// 用户点「完成」（emit cancel）才关闭。此前 @created 直接关闭对话框，用户根本看不到生成的分享链接。
+function onShareCreated() {
+  /* 成功态由 ShareCreateDialog 内部 c.created 驱动，宿主导航无需动作 */
 }
 
 // ---- Job000136：实时码流信息（performance 资源采样 + 元数据平均码率） ----
