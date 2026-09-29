@@ -452,17 +452,19 @@ onBeforeUnmount(() => {
 
 /* Job000136：移动端紧凑化——播放器控件缩小、信息抽屉全宽、内边距收紧 */
 @media (max-width: 768px) {
+  /* Job000138：按钮整体下移——手机系统/浏览器的左上角返回手势条与悬浮返回键会遮挡
+     贴顶的控制按钮（fs/br），下移到安全区以下；信息卡随按钮联动 */
   .fs-btn {
     width: 32px;
     height: 32px;
-    top: 8px;
+    top: 52px;
     left: 8px;
   }
   .br-btn {
     left: 46px;
   }
   .bitrate-card {
-    top: 46px;
+    top: 92px;
     left: 8px;
     min-width: 150px;
     font-size: 11px;

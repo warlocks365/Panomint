@@ -29,7 +29,7 @@
       </select>
       <button :class="{ active: gyro.gyroOn.value }" @click="gyro.toggleGyro">陀螺仪 {{ gyro.gyroOn.value ? '开' : '关' }}</button>
       <button @click="gyro.calibrate">校准</button>
-      <button :disabled="!stream.vrSupported.value" @click="stream.enterVr">VR 模式</button>
+      <button :disabled="!stream.vrSupported.value" :title="stream.vrSupported.value ? '' : '当前浏览器不支持 WebXR（微信内置浏览器不支持），请用 Chrome/Edge 打开'" @click="stream.enterVr">VR 模式</button>
       <span class="fov-label">FOV</span>
       <input type="range" class="fov" min="45" max="100" v-model="fovValue" @input="onFovInput">
     </div>

@@ -6,7 +6,9 @@
       </svg>
     </button>
     <div class="player-box">
-      <video ref="videoEl" class="player-video" controls autoplay playsinline webkit-playsinline></video>
+      <!-- Job000138：加 muted——移动端浏览器（Chrome/Safari/微信）静默阻止「带声 autoplay」，分享页视频因此黑屏不播；
+     muted 后自动起播成立，声音由用户经原生控制条开启 -->
+    <video ref="videoEl" class="player-video" controls autoplay muted playsinline webkit-playsinline></video>
       <p v-if="playerError" class="player-error">{{ playerError }}</p>
     </div>
   </div>

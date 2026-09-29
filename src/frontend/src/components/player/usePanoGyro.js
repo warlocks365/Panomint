@@ -84,7 +84,7 @@ export function usePanoGyro({ engine, showToast }) {
         armGyroWatchdog(GYRO_SWAP_MS)
         return
       }
-      gyroOff(isWeChat ? '微信浏览器未提供陀螺仪数据，已降级为拖拽模式' : '未检测到陀螺仪数据，已降级为拖拽模式')
+      gyroOff(isWeChat ? '微信陀螺仪受限：点右上角「···」选「在浏览器打开」后可用' : '未检测到陀螺仪数据，已降级为拖拽模式')
     }, ms)
   }
   function attachGyroListeners() {
@@ -98,8 +98,8 @@ export function usePanoGyro({ engine, showToast }) {
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
       try {
         const res = await DeviceOrientationEvent.requestPermission()
-        if (res !== 'granted') { gyroOff('权限被拒，已降级为拖拽模式'); return }
-      } catch { gyroOff('权限请求失败，已降级为拖拽模式'); return }
+        if (res !== 'granted') { gyroOff(isWeChat ? '微信拒绝了动作权限：可在微信「设置-通用-开启横竖屏/动作」或改用系统浏览器' : '权限被拒，已降级为拖拽模式'); return }
+      } catch { gyroOff(isWeChat ? '微信限制了权限申请，建议用系统浏览器打开' : '权限请求失败，已降级为拖拽模式'); return }
     }
     attachGyroListeners()
     // R6：置 gyroOn 之前先把插值目标对齐当前视角，「开启瞬间」与「首个样本到达」两时刻视角都连续
