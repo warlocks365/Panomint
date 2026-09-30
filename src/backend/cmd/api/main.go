@@ -418,6 +418,16 @@ func main() {
 	r.GET("/debug/channel/:channel_id", debugH.Channel) // 无 JWT：Bearer 密钥认证
 	go debugH.StartReaper(ctx)                          // 到期巡检：踢连 4001 + 审计
 
+	// Agent 语义接口 HTTP 命令面（Job000140 Phase 1，设计 §4/§5）：与 WSS 命令面共用
+	// commands_core.go 实现，互不挤占 WSS 单连接槽；admin:system 同一把锁。
+	agentCmdH := &debug.AgentCmdHandler{
+		Pool:   pool,
+		TransQ: transQ,
+		Audit:  auditRec,
+		RL:     q.NewRateLimiter(),
+	}
+	authed.POST("/admin/agent/cmd", auth.RequirePerm(authStore, "admin:system"), agentCmdH.Cmd)
+
 	// 契约 §7：模糊地理搜索 + 可用底图（读 media:read）。
 	// ⚠️ 该端点会打上游（中国走高德 / 国际走 Nominatim）并按 q 落 geo_cache ——
 	// 注意上游配额（高德按 Key 计 QPS、Nominatim 条款要求 ≥1 req/s），详见 internal/geo/mapsearch.go 文件头。
