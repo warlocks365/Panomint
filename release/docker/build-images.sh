@@ -30,8 +30,10 @@ echo "[images] 版本=$V → 标签=$TAG（测试通道，不发布 latest）"
 cd "$ROOT"
 
 echo "[images] 1/4 app（api + AI 工具链，CGO/ORT，含模型资产，版本经 build-arg 注入）"
+# 测试通道：APP_VERSION 注入 $TAG（test<版本号>）——/version 与设置页版本卡直接显示
+# test1.8.4，让测试构建在产品 UI 上可辨识（与正式通道 1.8.4 明确区分）。
 DOCKER_BUILDKIT=1 docker build \
-  --build-arg "APP_VERSION=$V" \
+  --build-arg "APP_VERSION=$TAG" \
   --build-arg "APP_COMMIT=${APP_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}" \
   --build-arg "APP_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -f docker/api/Dockerfile -t "panomint/app:$TAG" .
@@ -61,9 +63,9 @@ if [ -n "$STALE" ]; then
 fi
 DOCKER_BUILDKIT=1 docker build -f docker/web/Dockerfile -t "panomint/web:$TAG" src/frontend
 
-echo "[images] 版本注入核验（app 镜像内二进制的版本串）"
+echo "[images] 版本注入核验（app 镜像内二进制的版本串 = $TAG）"
 docker run --rm --entrypoint sh "panomint/app:$TAG" -c \
-  "grep -a -m1 -q "$V" /usr/local/bin/api && echo IMAGE_VERSION_OK"
+  "grep -a -m1 -q "$TAG" /usr/local/bin/api && echo IMAGE_VERSION_OK"
 
 docker images | grep -E "panomint/(app|worker|db|web)" | grep "$TAG"
 echo "[images] 完成（标签=$TAG，未打 latest）。分发：docker save panomint/app:$TAG panomint/worker:$TAG panomint/db:$TAG panomint/web:$TAG | gzip > images-$TAG.tar.gz"
