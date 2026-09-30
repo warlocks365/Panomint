@@ -106,6 +106,27 @@ type Creds struct {
 	Domain string `json:"domain,omitempty"`
 }
 
+// EncryptString 通用字符串加密（Job000140：agent_llm_config.api_key 等敏感单值复用
+// 同一密钥体系与同款 AES-256-GCM 形态）。无密钥 → ErrNoCipherKey（调用方 FailClosed）。
+func EncryptString(plaintext string) (string, error) {
+	if plaintext == "" {
+		return "", nil
+	}
+	return encrypt([]byte(plaintext))
+}
+
+// DecryptString EncryptString 的逆操作。空串 → 空串；密文坏 → ErrCiphertext。
+func DecryptString(enc string) (string, error) {
+	if enc == "" {
+		return "", nil
+	}
+	pt, err := decrypt(enc)
+	if err != nil {
+		return "", err
+	}
+	return string(pt), nil
+}
+
 // EncryptCreds 凭据明文 → 密文。无凭据（全空）→ 空串（无凭据挂载）。
 func EncryptCreds(c *Creds) (string, error) {
 	if c == nil || (c.User == "" && c.Pass == "" && c.Domain == "") {

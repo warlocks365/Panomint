@@ -21,6 +21,7 @@ import (
 	"go.uber.org/zap"
 
 	"panoalbum/internal/albums"
+	"panoalbum/internal/agentllm"
 	"panoalbum/internal/audit"
 	"panoalbum/internal/auth"
 	"panoalbum/internal/compute"
@@ -427,6 +428,15 @@ func main() {
 		RL:     q.NewRateLimiter(),
 	}
 	authed.POST("/admin/agent/cmd", auth.RequirePerm(authStore, "admin:system"), agentCmdH.Cmd)
+
+	// Agent 语义接口 LLM 上游配置与代理（Job000140 Phase 2，设计 §4/§5/§9）：
+	// api_key 列级加密入库、永不回显；代理让 page-agent 以同源 baseURL 调 LLM，
+	// 真实上游 key 只存在服务端。
+	agentLlmH := &agentllm.Handler{Pool: pool, Audit: auditRec}
+	authed.GET("/admin/agent/llm-config", auth.RequirePerm(authStore, "admin:system"), agentLlmH.GetConfig)
+	authed.PUT("/admin/agent/llm-config", auth.RequirePerm(authStore, "admin:system"), agentLlmH.PutConfig)
+	authed.POST("/admin/agent/llm-config/test", auth.RequirePerm(authStore, "admin:system"), agentLlmH.TestConfig)
+	authed.POST("/agent/llm/v1/chat/completions", auth.RequirePerm(authStore, "admin:system"), agentLlmH.ProxyChat)
 
 	// 契约 §7：模糊地理搜索 + 可用底图（读 media:read）。
 	// ⚠️ 该端点会打上游（中国走高德 / 国际走 Nominatim）并按 q 落 geo_cache ——
