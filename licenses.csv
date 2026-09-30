@@ -4,3 +4,7 @@ go.uber.org/atomic,https://github.com/uber-go/atomic/blob/v1.11.0/LICENSE.txt,MI
 golang.org/x/sys/cpu,https://cs.opensource.google/go/x/sys/+/v0.30.0:LICENSE,BSD-3-Clause
 panoalbum/internal/ffmpeg,Unknown,Unknown
 panoalbum/internal/queue,Unknown,Unknown
+page-agent@1.12.4,https://github.com/alibaba/page-agent/blob/main/LICENSE,MIT (Copyright (c) 2026 SimonLuvRamen + Alibaba Group Holding Limited；DOM 组件与 prompt 衍生自 browser-use MIT，声明块见上游 README Acknowledgments，须随分发保留)
+chalk@6.0.1,https://github.com/chalk/chalk/blob/main/LICENSE,MIT
+zod@4.6.5,https://github.com/colinhacks/zod/blob/main/LICENSE,MIT
+ai-motion@0.4.8,https://github.com/gaomeng1900/ai-motion/blob/HEAD/LICENSE,MIT
