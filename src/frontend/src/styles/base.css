@@ -13,8 +13,11 @@ body,
 body {
   font-family: var(--font-family);
   font-size: var(--font-size-md);
+  font-weight: 300;
+  letter-spacing: 0.01em;
   color: var(--color-text-primary);
   background-color: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -29,4 +32,19 @@ button {
 
 input {
   font-family: inherit;
+}
+
+/* ---- AI 面板（page-agent Panel）主题对齐：雾蓝 Morandi ----
+   官方 Panel 无主题配置项；ai-motion 光效 canvas 为紫粉（P0-2 视觉红线）——
+   隐藏 canvas，层级与边界由 wrapper 承担，内卡保持白底。 */
+#page-agent-runtime_agent-panel {
+  border-radius: 14px;
+  overflow: hidden;
+}
+#page-agent-runtime_agent-panel canvas {
+  display: none;
+}
+#page-agent-runtime_agent-panel > div {
+  border: 1px solid #ddd8d0;
+  box-shadow: 0 1px 3px rgba(65, 64, 60, 0.05), 0 10px 34px rgba(65, 64, 60, 0.07);
 }
