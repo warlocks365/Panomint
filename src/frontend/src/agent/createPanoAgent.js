@@ -106,7 +106,7 @@ export async function createPanoAgent(opts = {}) {
     }
   }
 
-  return new PageAgent({
+  const agent = new PageAgent({
     // model/baseURL 指向同源代理；真实上游模型与 key 由服务端 agent_llm_config 决定，
     // 客户端 model 字段仅占位（代理透传请求体，服务端不改写 model——上游以服务端配置为准）。
     model: 'server-managed',
@@ -118,4 +118,8 @@ export async function createPanoAgent(opts = {}) {
     instructions: { system: SYSTEM_RULES, getPageInstructions },
     transformPageContent: maskSensitive,
   })
+  // 官方 Panel 构造后默认 display:none 收起态——必须显式 show()，否则
+  // 页面上「球消失 + 面板不可见」（用户实测踩坑）。
+  agent.panel.show()
+  return agent
 }
