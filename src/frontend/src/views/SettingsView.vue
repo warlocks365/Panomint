@@ -70,6 +70,9 @@
     <!-- 转码远程调试（Job000121）：无 admin:system 权限时整卡不渲染（与服务端同一把锁） -->
     <DebugSettingsCard />
 
+    <!-- Agent 语义接口 · LLM 上游（Job000140 Phase 2）：权限门同调试卡 -->
+    <AgentLlmCard />
+
     <!-- 操作手册（Job000119）：应用内帮助，使用方法 + 原理深入 -->
     <section class="card">
       <h2 class="card-title">帮助与操作手册</h2>
@@ -92,6 +95,7 @@ import MfaSettingsCard from './settings/MfaSettingsCard.vue'
 import AppPasswordCard from './settings/AppPasswordCard.vue'
 import VersionCard from './settings/VersionCard.vue'
 import DebugSettingsCard from './settings/DebugSettingsCard.vue'
+import AgentLlmCard from './settings/AgentLlmCard.vue'
 
 const auth = useAuthStore()
 const router = useRouter()

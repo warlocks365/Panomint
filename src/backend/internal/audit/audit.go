@@ -152,6 +152,13 @@ const (
 	ActionDebugAuthFail = "debug.auth_fail"
 	// ActionDebugLocked 认证失败锁定触发。
 	ActionDebugLocked = "debug.locked"
+
+	// ActionAgentCmd HTTP 命令面每条命令（Agent 语义接口，Job000140；管理员本人 actor）。
+	ActionAgentCmd = "agent.cmd"
+	// ActionAgentLLM LLM 代理每次转发（只记 model/status/耗时/usage 数字，不含内容）。
+	ActionAgentLLM = "agent.llm"
+	// ActionAgentLLMConfig LLM 上游配置的保存/探活。
+	ActionAgentLLMConfig = "agent.llm_config"
 )
 
 // 目标类型登记表（写入 target_type 的推荐取值；空表示无特定对象）。
@@ -164,6 +171,7 @@ const (
 	TargetComputeNode  = "compute_node"
 	TargetAuditLog     = "audit_log"
 	TargetDebugChannel = "debug_channel" // Job000121 调试通道（target_id=channel_fp）
+	TargetAgentCmd     = "agent_cmd"     // Job000140 HTTP 命令面（target_id=命令名）
 )
 
 // ---------------------------------------------------------------------------

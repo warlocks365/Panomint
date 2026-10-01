@@ -2,5 +2,6 @@
 import { chapters as basics } from './content-basics'
 import { chapters as storage } from './content-storage'
 import { chapters as admin } from './content-admin'
+import { chapters as agent } from './content-agent'
 
-export const manualChapters = [...basics, ...storage, ...admin]
+export const manualChapters = [...basics, ...storage, ...admin, ...agent]

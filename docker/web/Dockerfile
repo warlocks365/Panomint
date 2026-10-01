@@ -119,7 +119,7 @@ server {
     #   漏配则成员扫描刷新/直连拿到 index.html 或 405）
     # debug 不在此列——WS Upgrade/长超时需要独立 location，见上方 ^/debug/ 块
     # setup 不在此列——它同时是前端路由，已移入上面的导航判别组
-    location ~ ^/(auth|media|transcode|shares|public|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes|dav|storage|version|scan|fs|jobs)(/|$) {
+    location ~ ^/(auth|media|transcode|shares|public|health|ready|metrics|geo|tiles|preferences|user|ai|bandwidth|compute-nodes|dav|storage|version|scan|fs|jobs|agent)(/|$) {
         proxy_pass http://api:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

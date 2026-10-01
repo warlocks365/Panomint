@@ -1,16 +1,14 @@
 package debug
 
-// 命令实现（设计 §5.4 白名单 8 类）。底层绑定产品既有转码控制面
-// （internal/transcode/control.go，Job000121 补出的包级函数），不平行造第二套。
+// 命令实现（设计 §5.4 白名单 8 类）。Job000140 Phase 1 起实现体抽入 commands_core.go
+// （包级函数、依赖显式注入），WSS 与 HTTP（POST /admin/agent/cmd）两个命令面共用；
+// 本文件保留会话层包装：订阅推送（job.state）等 WS 会话态逻辑。
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"regexp"
 	"time"
 
-	"panoalbum/internal/transcode"
 	"panoalbum/internal/version"
 )
 
@@ -29,7 +27,7 @@ func (s *session) exec(env envelope) (map[string]any, string, error) {
 		return map[string]any{"ok": true}, "", nil
 
 	case msgPing:
-		return map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339)}, "", nil
+		return cmdPingCore()
 
 	case msgSnapshot:
 		return s.cmdSnapshot()
@@ -81,128 +79,32 @@ func (s *session) sayHelloAt(seq int, hp helloPayload) {
 // cmdSnapshot 全量转码现状（设计 §5.4：活动任务 + 队列深度）。
 // worker 最近心跳：本地 transcodectl worker 无心跳表，以队列 processing 深度代替说明。
 func (s *session) cmdSnapshot() (map[string]any, string, error) {
-	jobs, err := transcode.ActiveJobs(context.Background(), s.h.Pool)
-	if err != nil {
-		return nil, "", errf("INTERNAL", "查询活动任务失败")
-	}
-	depth, err := transcode.Depth(context.Background(), s.h.TransQ)
-	if err != nil {
-		return nil, "", errf("INTERNAL", "查询队列深度失败")
-	}
-	return map[string]any{
-		"jobs":        jobs,
-		"queue":       depth,
-		"server_time": time.Now().UTC().Format(time.RFC3339),
-	}, "", nil
+	return cmdSnapshotCore(context.Background(), s.h.Pool, s.h.TransQ)
 }
 
 func (s *session) cmdQueueStats() (map[string]any, string, error) {
-	depth, err := transcode.Depth(context.Background(), s.h.TransQ)
-	if err != nil {
-		return nil, "", errf("INTERNAL", "查询队列深度失败")
-	}
-	return map[string]any{"queue": depth}, "", nil
+	return cmdQueueStatsCore(context.Background(), s.h.TransQ)
 }
 
 // cmdJobControl pause/resume/cancel（设计 §5.4：绑定转码控制面，每条单独审计）。
+// 实现在 cmdJobControlCore（与 HTTP 命令面共用）；本层只做订阅事件推送。
 func (s *session) cmdJobControl(env envelope) (map[string]any, string, error) {
-	var p struct {
-		JobID string `json:"job_id"`
-	}
-	if err := jsonUnmarshal(env.Data, &p); err != nil || !jobIDRe.MatchString(p.JobID) {
-		return nil, "", errf("INVALID_PARAMS", "payload.job_id 需为 UUID")
-	}
-	ctx := context.Background()
-	var err error
-	var status string
-	switch env.Type {
-	case msgJobPause:
-		err = transcode.PauseJob(ctx, s.h.Pool, s.h.TransQ, p.JobID)
-		status = "paused"
-	case msgJobResume:
-		err = transcode.ResumeJob(ctx, s.h.Pool, s.h.TransQ, p.JobID)
-		status = "pending"
-	case msgJobCancel:
-		err = transcode.CancelJob(ctx, s.h.Pool, s.h.TransQ, p.JobID)
-		status = "canceled"
-	}
+	payload, jobID, err := cmdJobControlCore(context.Background(), s.h.Pool, s.h.TransQ, env.Type, env.Data)
 	if err != nil {
-		switch {
-		case errors.Is(err, transcode.ErrJobNotFound):
-			return nil, p.JobID, errf("JOB_NOT_FOUND", "任务不存在")
-		case errors.Is(err, transcode.ErrJobInvalidState):
-			return nil, p.JobID, errf("INVALID_STATE", "任务当前状态不允许该操作（running 任务请在终态后处置）")
-		default:
-			return nil, p.JobID, errf("INTERNAL", "控制操作失败")
-		}
+		return payload, jobID, err
 	}
 	// 订阅推送 job.state（设计 §5.4 事件流）。
 	s.mu.Lock()
 	sub := s.subJobs
 	s.mu.Unlock()
 	if sub {
-		s.pushEvent(map[string]any{"job_id": p.JobID, "status": status, "ts": time.Now().UTC().Format(time.RFC3339)})
+		s.pushEvent(map[string]any{"job_id": jobID, "status": payload["status"], "ts": time.Now().UTC().Format(time.RFC3339)})
 	}
-	return map[string]any{"job_id": p.JobID, "status": status}, p.JobID, nil
+	return payload, jobID, nil
 }
 
 // cmdJobLogTail 有界任务档案（设计 §5.4：lines ≤ 500，不提供 follow）。
-// 产品无 per-job 日志文件（worker 输出在容器 stdout），本命令返回该任务的结构化档案：
-// 任务行 + 该任务相关的最近审计事件（debug.cmd 等 detail.job_id 命中的行）。
+// 实现在 cmdJobLogTailCore（与 HTTP 命令面共用）：任务行 + 该任务相关的最近审计事件。
 func (s *session) cmdJobLogTail(env envelope) (map[string]any, string, error) {
-	var p struct {
-		JobID string `json:"job_id"`
-		Lines int    `json:"lines"`
-	}
-	if err := jsonUnmarshal(env.Data, &p); err != nil || !jobIDRe.MatchString(p.JobID) {
-		return nil, "", errf("INVALID_PARAMS", "payload.job_id 需为 UUID")
-	}
-	if p.Lines <= 0 {
-		p.Lines = 100
-	}
-	if p.Lines > maxLogTailLines {
-		p.Lines = maxLogTailLines
-	}
-	ctx := context.Background()
-
-	var job map[string]any
-	var status, profile, resultPath, createdAt string
-	err := s.h.Pool.QueryRow(ctx,
-		`SELECT status, COALESCE(profile, ''), COALESCE(result_path, ''), created_at::text
-		 FROM transcode_jobs WHERE id = $1`, p.JobID).
-		Scan(&status, &profile, &resultPath, &createdAt)
-	if err != nil {
-		return nil, p.JobID, errf("JOB_NOT_FOUND", "任务不存在")
-	}
-	job = map[string]any{
-		"id": p.JobID, "status": status, "created_at": createdAt,
-	}
-	if profile != "" {
-		job["profile"] = profile
-	}
-	if resultPath != "" {
-		job["result_path"] = resultPath
-	}
-
-	rows, err := s.h.Pool.Query(ctx,
-		`SELECT action, created_at::text, detail::text
-		 FROM audit_log WHERE detail->>'job_id' = $1
-		 ORDER BY created_at DESC LIMIT $2`, p.JobID, p.Lines)
-	if err != nil {
-		return nil, p.JobID, errf("INTERNAL", "查询任务审计失败")
-	}
-	defer rows.Close()
-	tail := make([]map[string]any, 0, p.Lines)
-	for rows.Next() {
-		var action, at, detailText string
-		if err := rows.Scan(&action, &at, &detailText); err != nil {
-			return nil, p.JobID, errf("INTERNAL", "读取任务审计失败")
-		}
-		var detail any
-		if json.Unmarshal([]byte(detailText), &detail) != nil {
-			detail = detailText
-		}
-		tail = append(tail, map[string]any{"action": action, "at": at, "detail": detail})
-	}
-	return map[string]any{"job": job, "audit_tail": tail}, p.JobID, nil
+	return cmdJobLogTailCore(context.Background(), s.h.Pool, env.Data)
 }
