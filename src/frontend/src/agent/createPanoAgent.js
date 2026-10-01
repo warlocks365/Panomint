@@ -15,6 +15,7 @@ function zodFromParams(params) {
   for (const [k, desc] of Object.entries(params || {})) {
     if (k === 'job_id') shape[k] = z.string().describe(desc)
     else if (k === 'lines') shape[k] = z.number().int().positive().max(500).optional().describe(desc)
+    else if (k === 'auto_transcode' || k === 'realtime_transcode') shape[k] = z.boolean().optional().describe(desc)
     else shape[k] = z.string().optional().describe(desc)
   }
   return z.object(shape)
@@ -29,6 +30,34 @@ const SYSTEM_RULES = [
   '4. 与系统无关的闲聊请求，礼貌说明你的职责范围。',
   '5. 全程使用简体中文回复。',
 ].join('\n')
+
+// 页面语义指引（Phase 3，设计 §6.3）：按路由为 GUI 兜底层注入该页可做什么/什么别做。
+const PAGE_INSTRUCTIONS = {
+  '/timeline': '时间轴页：按日期浏览媒体，可点击缩略图打开播放器。',
+  '/albums': '相册页：相册卡片列表；可点「新建相册」创建，点卡片进入详情。',
+  '/albums/:id': '相册详情页：媒体网格；支持多选批量（分享/删除）、点击单个媒体查看。',
+  '/map': '地图页：媒体地理位置分布；支持地名搜索与地点聚合。',
+  '/places': '地点页：按地点聚合的照片列表。',
+  '/people': '人物页：人脸聚类的人物列表，点人物看其照片。',
+  '/tags': '标签页：标签列表与管理。',
+  '/spaces': '共享空间页：空间与成员权限管理。',
+  '/folders': '文件夹页：虚拟目录树（注意：虚拟目录不是物理存储目录）。',
+  '/toolbox': '工具箱页：导入扫描、存储挂载、转码控制等运维工具入口。',
+  '/upload': '上传页：批量上传媒体文件。',
+  '/search': '语义搜索页：自然语言搜图（本地 AI 语义检索）。',
+  '/settings': '设置页：账号安全、LLM 上游、调试通道等敏感配置卡。本页多数为敏感配置——凡语义工具已覆盖的操作（如转码配置）禁止用 DOM 点击完成；查看类 DOM 操作允许。',
+  '/admin': '管理后台：用户管理、账号策略、审计日志、扫描任务管理。',
+}
+function getPageInstructions(url) {
+  try {
+    const path = new URL(url).pathname
+    if (PAGE_INSTRUCTIONS[path]) return PAGE_INSTRUCTIONS[path]
+    if (/^\/albums\/[^/]+/.test(path)) return PAGE_INSTRUCTIONS['/albums/:id']
+    if (/^\/player\//.test(path)) return '播放器页：全景/普通视频播放器，支持陀螺仪与 VR 模式。'
+    if (/^\/share\//.test(path)) return '公开分享页：访客视图，请勿在此页执行管理操作。'
+  } catch (e) { /* url 解析失败忽略 */ }
+  return undefined
+}
 
 // 出站脱敏：DOM 提取文本送 LLM 前，抹掉凭据形态的字符串。
 function maskSensitive(content) {
@@ -61,6 +90,10 @@ export async function createPanoAgent(opts = {}) {
           if (!allowed) return `用户取消了该操作，未执行任何变更。如用户仍需要，请再次确认后重新调用。`
         }
         try {
+          if (tool.run) {
+            const r = await tool.run(input || {})
+            return r.text
+          }
           const resp = await import('../api/agent').then((m) => m.postAgentCmd(tool.cmd, tool.payload(input || {})))
           return tool.render(resp.result)
         } catch (e) {
@@ -82,7 +115,7 @@ export async function createPanoAgent(opts = {}) {
     language: 'zh-CN',
     maxSteps: 30,
     customTools,
-    instructions: { system: SYSTEM_RULES },
+    instructions: { system: SYSTEM_RULES, getPageInstructions },
     transformPageContent: maskSensitive,
   })
 }
