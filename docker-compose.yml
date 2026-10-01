@@ -71,7 +71,7 @@ services:
   # ---- API 服务（cmd/api）：经 web 反代对外，不直接暴露宿主机端口 ----
   api:
     # 显式镜像名：embed-worker 复用同一镜像（含 CLIP 模型与 onnxruntime），避免重复构建
-    image: panomint-app:test1.8.7
+    image: panomint-app:latest
     build:
       # 上下文=仓库根：镜像需打包 assets/{models,lib}（CLIP 模型 + ONNX Runtime，Job000010）
       context: .
@@ -137,7 +137,7 @@ services:
   # 清扫式补算：周期性扫描「embedding 为空且已有缩略图」的媒体并补算。
   # 与 index-worker 解耦（不阻塞缩略图生成），天然幂等、自动重试历史失败项。
   embed-worker:
-    image: panomint-app:test1.8.7
+    image: panomint-app:latest
     container_name: pano-embed-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/embedgen", "-mode", "watch", "-interval", "30"]
@@ -160,7 +160,7 @@ services:
   # 清扫式补打标：周期性扫描「已向量化但未 AI 打标」的媒体并零样本打标。
   # ⚠️ 必须与 api/embed-worker 同一模型族，否则标签向量与媒体向量不在同一空间。
   tag-worker:
-    image: panomint-app:test1.8.7
+    image: panomint-app:latest
     container_name: pano-tag-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/taggen", "-mode", "watch", "-interval", "60"]
@@ -196,7 +196,7 @@ services:
   # 也因此不需要挂 EMBED_*/FACE_* 那一堆配置。
   # MD（宽 640）已是 pHash 的充足输入（内部只缩到 32×32），无需 LG。
   phash-worker:
-    image: panomint-app:test1.8.7
+    image: panomint-app:latest
     container_name: pano-phash-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/phashgen", "-mode", "watch", "-interval", "30"]
@@ -217,7 +217,7 @@ services:
   # ⚠️ 模型缺失会直接 log.Fatalf 退出，restart: unless-stopped 下形成崩溃循环，
   #    故模型必须随镜像固化（见 docker/api/Dockerfile 的 COPY assets/models/faces）。
   faces-worker:
-    image: panomint-app:test1.8.7
+    image: panomint-app:latest
     container_name: pano-faces-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/facesgen", "-mode", "watch", "-interval", "30"]

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # build-images.sh —— 构建 Docker 形态发布镜像并打版本 tag（v1.1.0-feature，测试通道）
 #
-# 【feature/agent-semantic-fusion 发布通道】本分支镜像标签一律为 `test<版本号>`
-# （VERSION=1.8.4 → panomint/app:test1.8.4），且**永不打/推 latest**——正式通道
-# （无前缀 + latest）只在 main 分支维护，本文件随分支合并时不得带回 main。
+# 【双发布通道】（1.9.0 起合并自 feature/agent-semantic-fusion）：
+#   · TAG_PREFIX 缺省 = **正式通道**：TAG=<版本号>（如 1.9.0），镜像内版本串=版本号；
+#     正式 latest 推送由发版链 push 环节负责（docker tag warlocks/panomint-app:latest && push）。
+#   · TAG_PREFIX=test = **测试通道**：TAG=test<版本号>（如 test1.8.7），镜像内版本串=TAG
+#     （设置页版本卡可辨识 test 前缀）；分发只走 push-images.sh（结构性禁 latest）。
 #
 # 在**有完整仓库 + 资产**的机器上执行（CI/打包机），产物镜像可 docker save 离线分发：
 #   docker save panomint/app:test1.8.4 panomint/web:test1.8.4 panomint/db:test1.8.4 panomint/worker:test1.8.4 \
@@ -17,23 +19,29 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 V="${1:-$(tr -d '[:space:]' < "$ROOT/VERSION")}"
 [ -n "$V" ] || { echo "版本号为空" >&2; exit 1; }
 
-# 测试通道标签（feature 分支策略）：固定 test 前缀，TAG=test<版本号>，如 test1.8.4。
-# TAG_PREFIX 仅允许 'test'：空串/latest/其他值一律拒绝——本分支永不产出 latest 标签。
-TAG_PREFIX="${TAG_PREFIX:-test}"
+# 通道标签：TAG_PREFIX 仅允许空（正式）或 test；其他值一律拒绝。
+TAG_PREFIX="${TAG_PREFIX:-}"
 case "$TAG_PREFIX" in
-  test) : ;;
-  *) echo "[images] 拒绝：TAG_PREFIX 仅允许 'test'（本分支禁发 latest/正式标签）" >&2; exit 1 ;;
+  ""|test) : ;;
+  *) echo "[images] 拒绝：TAG_PREFIX 仅允许空（正式）或 test" >&2; exit 1 ;;
 esac
 TAG="${TAG_PREFIX}${V}"
+if [ "$TAG_PREFIX" = "test" ]; then
+  APP_VERSION_VALUE="$TAG"
+  CHANNEL_NOTE='测试通道，不发布 latest'
+else
+  APP_VERSION_VALUE="$V"
+  CHANNEL_NOTE='正式通道'
+fi
 
-echo "[images] 版本=$V → 标签=$TAG（测试通道，不发布 latest）"
+echo "[images] 版本=$V → 标签=$TAG（$CHANNEL_NOTE）"
 cd "$ROOT"
 
 echo "[images] 1/4 app（api + AI 工具链，CGO/ORT，含模型资产，版本经 build-arg 注入）"
 # 测试通道：APP_VERSION 注入 $TAG（test<版本号>）——/version 与设置页版本卡直接显示
 # test1.8.4，让测试构建在产品 UI 上可辨识（与正式通道 1.8.4 明确区分）。
 DOCKER_BUILDKIT=1 docker build \
-  --build-arg "APP_VERSION=$TAG" \
+  --build-arg "APP_VERSION=$APP_VERSION_VALUE" \
   --build-arg "APP_COMMIT=${APP_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}" \
   --build-arg "APP_BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -f docker/api/Dockerfile -t "panomint/app:$TAG" .
@@ -63,10 +71,10 @@ if [ -n "$STALE" ]; then
 fi
 DOCKER_BUILDKIT=1 docker build -f docker/web/Dockerfile -t "panomint/web:$TAG" src/frontend
 
-echo "[images] 版本注入核验（app 镜像内二进制的版本串 = $TAG）"
+echo "[images] 版本注入核验（app 镜像内二进制的版本串 = $APP_VERSION_VALUE）"
 docker run --rm --entrypoint sh "panomint/app:$TAG" -c \
-  "grep -a -m1 -q "$TAG" /usr/local/bin/api && echo IMAGE_VERSION_OK"
+  "grep -a -m1 -q "$APP_VERSION_VALUE" /usr/local/bin/api && echo IMAGE_VERSION_OK"
 
 docker images | grep -E "panomint/(app|worker|db|web)" | grep "$TAG"
-echo "[images] 完成（标签=$TAG，未打 latest）。分发：docker save panomint/app:$TAG panomint/worker:$TAG panomint/db:$TAG panomint/web:$TAG | gzip > images-$TAG.tar.gz"
+echo "[images] 完成（标签=$TAG，通道=$CHANNEL_NOTE）。分发：docker save panomint/app:$TAG panomint/worker:$TAG panomint/db:$TAG panomint/web:$TAG | gzip > images-$TAG.tar.gz"
 echo "[images] 推送 Hub：bash release/docker/push-images.sh $V"

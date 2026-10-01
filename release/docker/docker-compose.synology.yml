@@ -1,6 +1,6 @@
 # ============================================================================
-# Panomint 全景相册系统 · 群晖 DSM Container Manager 部署编排（v1.8.4，测试通道）
-# 镜像：warlocks/panomint-{app,worker,db,web}:test1.8.4（Docker Hub 公开仓库）
+# Panomint 全景相册系统 · 群晖 DSM Container Manager 部署编排（v1.9.0）
+# 镜像：warlocks/panomint-{app,worker,db,web}:1.9.0（Docker Hub 公开仓库）
 # 用法：Container Manager → 项目 → 新增 → 项目路径选 /volume1/docker/panomint → 粘贴本文件
 # 访问：http://群晖IP:8088 —— 首次访问进入初始化向导
 # 改值：仅 2 处【必填】——数据库口令（须与 7 条 PG_DSN 同值）、JWT 密钥
@@ -12,7 +12,7 @@ services:
 
   # ---- 数据库（PostgreSQL 16 + PostGIS 3 + pgvector）----
   db:
-    image: warlocks/panomint-db:test1.8.4
+    image: warlocks/panomint-db:1.9.0
     container_name: panomint-db
     restart: unless-stopped
     environment:
@@ -48,7 +48,7 @@ services:
 
   # ---- API 主服务（启动自动建库迁移；仅经 web 反代访问，不直接映射端口）----
   api:
-    image: warlocks/panomint-app:test1.8.4
+    image: warlocks/panomint-app:1.9.0
     container_name: panomint-api
     restart: unless-stopped
     environment:
@@ -82,7 +82,7 @@ services:
 
   # ---- AI 工作器×4（语义搜索/自动打标/重复清理/人物识别；内存紧张可整段删除）----
   embed-worker:
-    image: warlocks/panomint-app:test1.8.4
+    image: warlocks/panomint-app:1.9.0
     container_name: panomint-embed-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/embedgen", "-mode", "watch", "-interval", "30"]
@@ -101,7 +101,7 @@ services:
         condition: service_healthy
 
   tag-worker:
-    image: warlocks/panomint-app:test1.8.4
+    image: warlocks/panomint-app:1.9.0
     container_name: panomint-tag-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/taggen", "-mode", "watch", "-interval", "60"]
@@ -120,7 +120,7 @@ services:
         condition: service_healthy
 
   phash-worker:
-    image: warlocks/panomint-app:test1.8.4
+    image: warlocks/panomint-app:1.9.0
     container_name: panomint-phash-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/phashgen", "-mode", "watch", "-interval", "30"]
@@ -136,7 +136,7 @@ services:
         condition: service_healthy
 
   faces-worker:
-    image: warlocks/panomint-app:test1.8.4
+    image: warlocks/panomint-app:1.9.0
     container_name: panomint-faces-worker
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/facesgen", "-mode", "watch", "-interval", "30"]
@@ -158,7 +158,7 @@ services:
 
   # ---- 重活工作器×2（缩略图索引 + 视频转 HLS；只存照片可删 transcode-worker）----
   index-worker:
-    image: warlocks/panomint-worker:test1.8.4
+    image: warlocks/panomint-worker:1.9.0
     container_name: panomint-index-worker
     restart: unless-stopped
     environment:
@@ -183,7 +183,7 @@ services:
         condition: service_healthy
 
   transcode-worker:
-    image: warlocks/panomint-worker:test1.8.4
+    image: warlocks/panomint-worker:1.9.0
     container_name: panomint-transcode-worker
     restart: unless-stopped
     environment:
@@ -207,7 +207,7 @@ services:
 
   # ---- Web 入口（nginx 前端 + API 反代；对外唯一端口）----
   web:
-    image: warlocks/panomint-web:test1.8.4
+    image: warlocks/panomint-web:1.9.0
     container_name: panomint-web
     restart: unless-stopped
     ports:
