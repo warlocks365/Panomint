@@ -1,26 +1,27 @@
 :root {
-  /* 色彩 */
-  --color-bg: #f5f6f8;
-  --color-surface: #ffffff;
-  --color-surface-hover: #f0f1f4;
-  --color-border: #e2e4e9;
-  --color-text-primary: #1f2329;
-  --color-text-secondary: #646a73;
-  --color-text-disabled: #a8acb3;
-  --color-primary: #2563eb;
-  --color-primary-hover: #1d4ed8;
-  --color-primary-active-bg: #e8effd;
-  --color-danger: #dc2626;
-  --color-success: #16a34a;
-  --color-warning-bg: #fef3c7;
-  --color-warning-text: #92400e;
-  --color-success-bg: #e8f7ee;      /* 成功态浅底（状态角标） */
+  /* 色彩 —— 方案 H「晨雾 Morandi」（feature/ui-morandi）：全站饱和度封顶 25%，无纯黑纯白，
+     层级靠明度与 hairline 而非阴影/描边强度。回滚 = revert 本文件 + base.css/index.html 对应 commit。 */
+  --color-bg: #e9e4de;              /* 暖灰底（雾面） */
+  --color-surface: #f4f1ed;         /* 卡片（亮一层） */
+  --color-surface-hover: #efebe5;
+  --color-border: #ddd8d0;          /* hairline 暖灰线 */
+  --color-text-primary: #41403c;    /* 最深仅到「炭灰」，无纯黑 */
+  --color-text-secondary: #7d7a73;
+  --color-text-disabled: #a5a29a;
+  --color-primary: #4a5a6a;         /* 深雾蓝 —— AI 动作/主按钮 */
+  --color-primary-hover: #3d4b58;
+  --color-primary-active-bg: rgba(143, 163, 173, 0.16);
+  --color-danger: #b0685c;          /* 陶土红（低饱和） */
+  --color-success: #6e8a72;         /* 灰绿 */
+  --color-warning-bg: rgba(217, 164, 101, 0.14);
+  --color-warning-text: #8a6d3d;
+  --color-success-bg: rgba(110, 138, 114, 0.14);  /* 成功态浅底（状态角标） */
 
-  /* 时间轴统计图例四类别色（颜色即数据：照片/视频/全景照片/全景视频） */
-  --stat-photo: #3b82f6;
-  --stat-video: #8b5cf6;
-  --stat-pano-photo: #f59e0b;
-  --stat-pano-video: #ef4444;
+  /* 时间轴统计图例四类别色（莫兰迪化：雾蓝/灰紫褐/燕麦/陶土，颜色即数据） */
+  --stat-photo: #7d95a8;
+  --stat-video: #9a8aa0;
+  --stat-pano-photo: #c4a57a;
+  --stat-pano-video: #b0766a;
 
   /* 尺寸 */
   --sidebar-width: 220px;
@@ -31,11 +32,11 @@
   /* 移动端地图页内容区内边距归零：画布需要满屏（390px 宽下 24px 占 12%，375px 高下吃掉 48px 高度） */
   --content-padding-mobile: 0px;
   --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
 
-  /* 字体 */
-  --font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  /* 字体 —— Outfit 几何无衬线 + Noto Sans SC；全站字重 300 主导（base.css body），层级靠字距与明度 */
+  --font-family: "Outfit", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-size-sm: 13px;
   --font-size-md: 14px;
   --font-size-lg: 16px;
@@ -50,6 +51,6 @@
   --player-danger: #ff9b9b;          /* 播放器暗底上的危险色 */
   --player-error-text: #fca5a5;      /* 播放器/分享页暗底上的错误文案 */
 
-  /* 阴影 */
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.08);
+  /* 阴影 —— 双层漫射（近影 + 远影），无描边强度依赖 */
+  --shadow-card: 0 1px 3px rgba(65, 64, 60, 0.05), 0 10px 34px rgba(65, 64, 60, 0.07);
 }
