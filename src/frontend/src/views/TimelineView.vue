@@ -1,5 +1,5 @@
 <template>
-  <div class="timeline-page">
+  <div ref="rootEl" class="timeline-page">
     <header class="tl-toolbar">
       <select v-model="typeFilter" class="type-select" title="类型筛选">
         <option value="">全部类型</option>
@@ -74,9 +74,20 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useGSAP } from '@gsap/react'
+import gsap from 'gsap'
 import TimelineGrid from '../components/timeline/TimelineGrid.vue'
 import MediaViewer from '../components/viewer/MediaViewer.vue'
 import TrashPanel from '../components/timeline/TrashPanel.vue'
+
+const rootEl = ref(null)
+// DESIGN.md §8 page-enter：工具栏 y24 淡入（reduced-motion 降级；scope 限定本页根元素）
+useGSAP(() => {
+  const mm = gsap.matchMedia()
+  mm.add('(prefers-reduced-motion: no-preference)', () => {
+    gsap.from('.tl-toolbar', { y: 24, opacity: 0, duration: 0.6, ease: 'power2.out' })
+  })
+}, { scope: rootEl })
 
 const route = useRoute()
 const router = useRouter()

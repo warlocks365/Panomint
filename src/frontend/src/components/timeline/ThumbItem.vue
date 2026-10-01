@@ -9,6 +9,8 @@
       />
     </label>
     <img v-if="url" :src="url" :alt="item.filename" class="thumb-img" loading="lazy" />
+    <!-- 晨雾 veil（DESIGN.md §4 媒体卡）：顶部薄雾让媒体「沉」进暖灰界面 -->
+    <div v-if="url" class="thumb-veil" aria-hidden="true"></div>
     <div v-else class="thumb-placeholder">
       <svg viewBox="0 0 24 24" width="28" height="28" fill="none">
         <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" />
@@ -137,8 +139,25 @@ function formatDuration(sec) {
   display: block;
 }
 
+/* 晨雾 veil（DESIGN.md §4）：只盖照片，不拦截交互 */
+.thumb-veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(233, 228, 222, 0.16), transparent 34%);
+  pointer-events: none;
+}
+
+.thumb {
+  transition: box-shadow 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.thumb:hover {
+  box-shadow: 0 2px 6px rgba(65, 64, 60, 0.06), 0 14px 40px rgba(65, 64, 60, 0.12);
+  z-index: 1;
+}
+
 .thumb:hover .thumb-img {
-  filter: brightness(0.92);
+  filter: brightness(0.96);
 }
 
 .thumb-placeholder {

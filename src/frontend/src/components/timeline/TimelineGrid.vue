@@ -90,9 +90,10 @@
 // - useTimelineGrouping：月日分组（flat/offsets/monthIndex）
 // - useTimelineSeek：日期滑块双向同步（rAF 节流二分 + seekTo 按需翻页跳转）
 // 宿主保留：布局列宽/行高、空态文案、虚拟滚动 DOM 生命周期（RO/IO/scroller 换绑/清理）。
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+import gsap from 'gsap'
 import ThumbItem from './ThumbItem.vue'
 import DateSlider from './DateSlider.vue'
 import BatchBar from '../media/BatchBar.vue'
@@ -136,6 +137,33 @@ const cellSize = computed(() => {
 const rowHeight = computed(() => cellSize.value + GAP)
 
 const pager = useTimelinePager(props)
+
+// DESIGN.md §8 grid-stagger（虚拟滚动安全版）：仅对**首屏首批**渲染的缩略图做一次瀑布进入，
+// 后续滚动加载不做动画（DynamicScroller DOM 复用会让重复动画错位）；clearProps 防残留 transform。
+let firstStaggerDone = false
+watch(
+  () => pager.items.length,
+  async (n) => {
+    if (n > 0 && !firstStaggerDone) {
+      firstStaggerDone = true
+      await nextTick()
+      requestAnimationFrame(() => {
+        const mm = gsap.matchMedia()
+        mm.add('(prefers-reduced-motion: no-preference)', () => {
+          gsap.from('.grid-wrap .row .thumb', {
+            y: 24,
+            opacity: 0,
+            duration: 0.55,
+            ease: 'power2.out',
+            stagger: 0.05,
+            clearProps: 'transform,opacity'
+          })
+        })
+      })
+    }
+  }
+)
+
 const grouping = useTimelineGrouping(pager.items, cols, rowHeight)
 const seek = useTimelineSeek({
   flat: grouping.flat,
