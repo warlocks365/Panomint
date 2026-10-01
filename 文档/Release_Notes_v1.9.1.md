@@ -27,11 +27,11 @@ docker pull warlocks/panomint-app:1.9.1
 # worker 内容同 1.9.0（tag 递增）；db 零变化
 ```
 
-## 镜像 digest（2026-10-02 Hub 实测，1.9.1 = latest 逐字一致）
+## 镜像 digest（2026-10-02 Hub 实测，115 出口独立查询，1.9.1 = latest 逐字一致）
 
 | 镜像 | 1.9.1 = latest digest |
 | --- | --- |
-| warlocks/panomint-web | `sha256:（待回填）` |
-| warlocks/panomint-app | `sha256:（待回填）` |
-| warlocks/panomint-worker | `sha256:（待回填）` |
-| warlocks/panomint-db | `sha256:（待回填）` |
+| warlocks/panomint-web | `sha256:9bafc7f5ceedd…`（Morandi dist + agent 前缀） |
+| warlocks/panomint-app | `sha256:d5e952a862434…`（版本串 1.9.1） |
+| warlocks/panomint-worker | `sha256:716c895a24235…`（同 1.9.0 内容） |
+| warlocks/panomint-db | `sha256:fdc2262f9d420…`（同 1.9.0 内容） |
