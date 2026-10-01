@@ -47,11 +47,11 @@ docker pull warlocks/panomint-db:1.9.0      # 本版 db 镜像含 goose 到 v46�
 - 升级后到 **设置 → Agent 语义接口 · LLM 上游** 配置 OpenAI 兼容上游并启用，AI 助手才可用（不配置不影响系统其余功能）
 - 测试通道（可选）：`TAG_PREFIX=test bash release/docker/build-images.sh <版本>` 产出 `test<版本>` 标签镜像（版本串可辨识 test 前缀），分发走 `release/docker/push-images.sh`（结构性禁 latest），与正式通道完全隔离
 
-## 镜像 digest（Hub push 后回填）
+## 镜像 digest（2026-10-01 Hub 实测，115 出口独立查询，1.9.0 = latest 逐字一致）
 
 | 镜像 | 1.9.0 = latest digest |
 | --- | --- |
-| warlocks/panomint-web | `sha256:（待回填）` |
-| warlocks/panomint-app | `sha256:（待回填）` |
-| warlocks/panomint-worker | `sha256:（待回填）` |
-| warlocks/panomint-db | `sha256:（待回填）` |
+| warlocks/panomint-web | `sha256:9e23c784f0b69…` |
+| warlocks/panomint-app | `sha256:496e715764a23…`（Agent 语义接口） |
+| warlocks/panomint-worker | `sha256:716c895a24235…` |
+| warlocks/panomint-db | `sha256:fdc2262f9d420…`（v46 迁移） |
