@@ -47,7 +47,7 @@ docker pull warlocks/panomint-app:1.9.2
 
 | 镜像 | 1.9.2 = latest digest |
 | --- | --- |
-| warlocks/panomint-web | 回填 |
-| warlocks/panomint-app | 回填 |
-| warlocks/panomint-worker | 回填 |
-| warlocks/panomint-db | 回填 |
+| warlocks/panomint-web | `sha256:c3092cda9627…`（深化 dist + 限流豁免前端） |
+| warlocks/panomint-app | `sha256:4cec9097e1c5…`（版本串 1.9.2 + 缩略图限流豁免） |
+| warlocks/panomint-worker | `sha256:ee6358df14b3…`（同 1.9.1 内容） |
+| warlocks/panomint-db | `sha256:53f4e33716b0…`（同 1.9.1 内容） |
