@@ -1,7 +1,9 @@
 <template>
   <div class="setup-page">
+    <span class="wordmark">PANOMINT</span>
     <div class="setup-card">
       <template v-if="!done">
+        <p class="setup-eyebrow">PANOMINT · 首次初始化</p>
         <h1 class="setup-title">欢迎使用全景相册</h1>
         <p class="setup-subtitle">
           首次使用需要创建一个管理员账号<span v-if="version">（{{ version }}）</span>
@@ -64,6 +66,7 @@
       </template>
 
       <template v-else>
+        <p class="setup-eyebrow">PANOMINT · 首次初始化</p>
         <h1 class="setup-title">初始化完成</h1>
         <p class="setup-subtitle">管理员账号已创建，现在可以登录了。</p>
         <button class="submit-btn" data-testid="setup-done" type="button" @click="goLogin">
@@ -71,11 +74,13 @@
         </button>
       </template>
     </div>
+    <span class="vermark">SETUP WIZARD · 仅首启可达</span>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import gsap from 'gsap'
 import { useRouter } from 'vue-router'
 import { errCode, errMessage } from '../stores/auth'
 import { getSetupStatus, invalidateSetupStatus, runSetup } from '../api/setup'
@@ -107,6 +112,14 @@ onMounted(async () => {
   } catch {
     // 状态查询失败不阻塞：表单照常渲染，提交由后端裁决
   }
+})
+
+// DESIGN.md §8 card-in：初始化卡 y16 淡入（reduced-motion 跳过）
+onMounted(() => {
+  const mm = gsap.matchMedia()
+  mm.add('(prefers-reduced-motion: no-preference)', () => {
+    gsap.from('.setup-card', { y: 16, opacity: 0, duration: 0.55, ease: 'power2.out', clearProps: 'transform,opacity' })
+  })
 })
 
 async function onSubmit() {
@@ -149,7 +162,40 @@ function goLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   background-color: var(--color-bg);
+  /* mist-wash：双团超淡雾色（对齐登录页氛围） */
+  background-image: radial-gradient(900px 420px at 12% -8%, rgba(244, 241, 237, 0.55), transparent 60%),
+    radial-gradient(760px 380px at 92% 108%, rgba(74, 90, 106, 0.06), transparent 60%);
+}
+
+.wordmark {
+  position: absolute;
+  top: 18px;
+  left: 36px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--color-text-disabled);
+}
+
+.vermark {
+  position: absolute;
+  bottom: 16px;
+  right: 36px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-disabled);
+}
+
+.setup-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-align: center;
+  color: var(--color-text-disabled);
+  margin-bottom: 10px;
 }
 
 .setup-card {

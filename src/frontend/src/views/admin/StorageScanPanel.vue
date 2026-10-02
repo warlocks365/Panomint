@@ -82,7 +82,7 @@
 // 进度/终态唯一真源 = GET /admin/jobs/:id（admin:system），与后端 index_jobs 行一一对应；
 // index_jobs 的 total/processed/status/current_file（Job000132），故"新导入 vs 重复"的明细不展示（后续增强）。
 // 竞态治理：seq 守卫——轮询期间用户再次触发/组件卸载，旧的轮询立即作废（范式见 MediaViewer）。
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { errMessage } from '../../stores/auth'
 import { listJobs,  scanImport, getJob } from '../../api/admin'
 import DirectoryTreeDialog from './DirectoryTreeDialog.vue'

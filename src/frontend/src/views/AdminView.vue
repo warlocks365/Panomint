@@ -1,7 +1,10 @@
 <template>
   <div class="admin-page">
     <header class="page-head">
-      <h1 class="page-title">管理后台</h1>
+      <div class="ph-heading">
+        <span class="ph-eyebrow">11</span>
+        <h1 class="page-title">管理后台</h1>
+      </div>
       <p class="page-sub">用户、角色、任务、审计与系统配置</p>
     </header>
 
@@ -45,8 +48,9 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import gsap from 'gsap'
 import { getStats, listUsers } from '../api/admin'
 import OverviewTab from './admin/OverviewTab.vue'
 import UsersTab from './admin/UsersTab.vue'
@@ -106,6 +110,22 @@ onMounted(async () => {
   }
   await probePerm()
 })
+
+// DESIGN.md §8 panel-fade：页签切换 y12 淡入（v-show 面板 keep-alive 语义保留；
+// 对全部面板 fromTo——display:none 的无视觉副作用；clearProps 还原；reduced-motion 跳过）
+watch(activeTab, async () => {
+  await nextTick()
+  requestAnimationFrame(() => {
+    const mm = gsap.matchMedia()
+    mm.add('(prefers-reduced-motion: no-preference)', () => {
+      gsap.fromTo(
+        '.admin-page [data-testid^="panel-"]',
+        { y: 12, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.35, ease: 'power2.out', clearProps: 'transform,opacity' }
+      )
+    })
+  })
+})
 </script>
 
 <style scoped>
@@ -116,46 +136,67 @@ onMounted(async () => {
 .page-head {
   margin-bottom: 16px;
 }
+/* 页头规范（DESIGN.md §5） */
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
+}
 .page-title {
   margin: 0;
   font-size: var(--font-size-lg);
+  letter-spacing: 0.12em;
   color: var(--color-text-primary);
 }
 .page-sub {
   margin: 4px 0 0;
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
 }
+/* 胶囊分段 tabs（对齐工具箱/空间页语言；11 页签 wrap） */
 .tabs {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--color-border);
+  gap: 2px;
+  padding: 3px;
+  background-color: var(--color-surface);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(65, 64, 60, 0.06);
+  margin-bottom: 18px;
 }
 .tab {
-  padding: 8px 14px;
+  padding: 6px 15px;
   border: none;
-  background: none;
-  font-size: var(--font-size-md);
+  border-radius: 999px;
+  background: transparent;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  font-family: var(--font-family);
+  transition: background-color 0.5s cubic-bezier(0.32, 0.72, 0, 1), color 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .tab:hover {
   color: var(--color-text-primary);
 }
 .tab--active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
-  font-weight: 600;
+  background-color: var(--color-primary);
+  color: #eef1f4;
+  font-weight: 500;
 }
 .card {
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: none;
   border-radius: var(--radius-md);
   padding: 20px;
+  box-shadow: var(--shadow-card);
 }
 .msg {
   margin: 0;
