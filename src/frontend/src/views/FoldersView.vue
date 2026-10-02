@@ -1,6 +1,9 @@
 <template>
   <div class="folders-view">
-    <h1 class="page-title">文件夹</h1>
+    <div class="ph-heading">
+      <span class="ph-eyebrow">07</span>
+      <h1 class="page-title">文件夹</h1>
+    </div>
 
     <div v-if="page.loadError.value" class="error-banner">{{ page.loadError.value }}</div>
 
@@ -71,8 +74,24 @@ function openItem(m) {
 
 .page-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  color: var(--color-text-primary);
+}
+
+/* 页头规范（DESIGN.md §5） */
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
 }
 
 .error-banner {
@@ -84,7 +103,9 @@ function openItem(m) {
 }
 
 .folders-body {
-  display: flex;
+  /* 树导航 : 网格 ≈ 1 : 2.5 不对称（DESIGN.md 深化稿 VIEW.07；禁三等分横排） */
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
   gap: 20px;
   min-height: 0;
   flex: 1;

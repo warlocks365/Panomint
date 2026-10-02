@@ -105,10 +105,9 @@ function onRowClick(row) {
 <style scoped>
 /* 样式逐字迁移自 FoldersView（Job000063 拆分），未改一条声明 */
 .tree-panel {
-  width: 260px;
-  flex-shrink: 0;
+  /* 宽度由宿主 grid 轨道（minmax(220px, 280px) 1fr）控制，此处不再定宽 */
+  width: auto;
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   padding: 8px;
@@ -182,7 +181,9 @@ function onRowClick(row) {
 }
 
 .tree-count {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
   color: var(--color-text-disabled);
 }
 

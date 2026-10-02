@@ -34,7 +34,7 @@
           删除目录
         </button>
       </template>
-      <span v-if="!mediaLoading" class="muted">{{ count }} 项</span>
+      <span v-if="!mediaLoading" class="muted count-mono">{{ count }} 项</span>
       <router-link
         class="btn-upload"
         data-testid="folder-upload"
@@ -63,6 +63,12 @@ defineEmits(['select', 'manage'])
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+}
+
+.count-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 .crumbs {

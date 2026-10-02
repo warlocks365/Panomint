@@ -116,7 +116,7 @@
 | AdminView | `/admin` | ⏳ 排队 | tokens 已生效 | |
 | MapView / PlacesView | `/map` `/places` | ⏳ 排队 | tokens 已生效 | 地图瓦片底色需单独调和 |
 | PeopleView / TagsView | `/people` `/tags` | ✅ 确认 | ✅ 实装 | 圆形头像卡体系/聚类虚线卡/磨砂云 chip/cloud-in |
-| SpacesView / FoldersView | `/spaces` `/folders` | ⏳ 排队 | tokens 已生效 | |
+| SpacesView / FoldersView | `/spaces` `/folders` | ✅ 确认 | ✅ 实装 | 2:1 空间双卡/胶囊分段/树导航 1:2.5/cards-in |
 | ToolboxView / UploadView | `/toolbox` `/upload` | ⏳ 排队 | tokens 已生效 | |
 | SearchResultsView | `/search` | ⏳ 排队 | tokens 已生效 | |
 | PlayerView / SharePublicView | `/player/:id` `/share/:token` | ⏳ 排队 | 独立暗底不受影响 | 播放器保持暗底 |

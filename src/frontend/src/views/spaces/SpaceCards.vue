@@ -14,6 +14,7 @@
         </span>
         <span v-else class="space-meta muted">加载中…</span>
       </span>
+      <span v-if="activeSpace === 'personal'" class="space-badge">ACTIVE</span>
     </button>
 
     <button
@@ -29,6 +30,7 @@
           {{ shared.length > 0 ? shared.length + ' 个空间' : '暂无共享空间' }}
         </span>
       </span>
+      <span v-if="activeSpace === 'shared'" class="space-badge">ACTIVE</span>
     </button>
   </div>
 
@@ -60,49 +62,57 @@ const icons = {
 </script>
 
 <style scoped>
+/* 空间卡（DESIGN.md 深化稿 VIEW.06）：2:1 不对称双卡（禁三等分）、无边框米白面、
+   双层漫射阴影，hover 升 lift；active 雾蓝描边 + ACTIVE mono 徽标 */
 .space-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: 2fr 1fr;
   gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .space-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 .space-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
+  gap: 16px;
+  padding: 20px 22px;
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: 1.5px solid transparent;
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   cursor: pointer;
   text-align: left;
   font-family: var(--font-family);
+  transition: box-shadow 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .space-card:hover {
-  background-color: var(--color-surface-hover);
+  box-shadow: var(--shadow-lift);
 }
 
 .space-card--active {
   border-color: var(--color-primary);
-  background-color: var(--color-primary-active-bg);
 }
 
 .space-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-md);
-  background-color: var(--color-bg);
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background-color: rgba(74, 90, 106, 0.1);
   color: var(--color-primary);
   flex-shrink: 0;
 }
 
 .space-card--active .space-icon {
-  background-color: var(--color-surface);
+  background-color: rgba(74, 90, 106, 0.16);
 }
 
 .space-info {
@@ -113,14 +123,28 @@ const icons = {
 }
 
 .space-name {
-  font-size: var(--font-size-lg);
-  font-weight: 600;
+  font-size: var(--font-size-md);
+  font-weight: 500;
   color: var(--color-text-primary);
 }
 
 .space-meta {
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
+}
+
+.space-badge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--color-primary);
+  border: 1px solid rgba(74, 90, 106, 0.35);
+  border-radius: 999px;
+  padding: 3px 10px;
+  flex-shrink: 0;
 }
 
 .muted {

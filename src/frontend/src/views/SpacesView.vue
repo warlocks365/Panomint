@@ -1,6 +1,9 @@
 <template>
   <div class="spaces-view">
-    <h1 class="page-title">空间</h1>
+    <div class="ph-heading">
+      <span class="ph-eyebrow">06</span>
+      <h1 class="page-title">空间</h1>
+    </div>
 
     <div v-if="page.loadError.value" class="error-banner">{{ page.loadError.value }}</div>
 
@@ -76,8 +79,9 @@
 // 空间页面宿主（Job000093：数据编排走 useSpacesPage，空间卡片+空态拆 SpaceCards；
 // Job000101：增个人空间「按相册分组」视图切换与分组面板装配）。
 // 宿主职责：页级布局、媒体网格/分组面板容器装配、openItem 跳转 player（router 属视图职责）。
-import { onBeforeUnmount } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import gsap from 'gsap'
 import MediaTileGrid from '../components/media/MediaTileGrid.vue'
 import SpaceCards from './spaces/SpaceCards.vue'
 import AlbumGroupsPanel from './spaces/AlbumGroupsPanel.vue'
@@ -85,6 +89,31 @@ import { useSpacesPage } from './spaces/useSpacesPage'
 
 const router = useRouter()
 const page = useSpacesPage()
+
+// DESIGN.md §8 cards-in：空间卡首屏一次性瀑布（personal 数据就绪后触发；clearProps 还原）
+let cardsDone = false
+watch(
+  () => page.personal.value,
+  async (p) => {
+    if (p && !cardsDone) {
+      cardsDone = true
+      await nextTick()
+      requestAnimationFrame(() => {
+        const mm = gsap.matchMedia()
+        mm.add('(prefers-reduced-motion: no-preference)', () => {
+          gsap.from('.space-cards .space-card', {
+            y: 24,
+            opacity: 0,
+            duration: 0.55,
+            ease: 'power2.out',
+            stagger: 0.08,
+            clearProps: 'transform,opacity'
+          })
+        })
+      })
+    }
+  }
+)
 
 // 视图偏好防抖窗口内离开页面 → 补写一次（不 await，与地图侧同范式）
 onBeforeUnmount(() => page.flushOnUnmount())
@@ -108,8 +137,24 @@ function goAlbum(albumId) {
 
 .page-title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  color: var(--color-text-primary);
+}
+
+/* 页头规范（DESIGN.md §5） */
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
 }
 
 .error-banner {
@@ -131,7 +176,8 @@ function goAlbum(albumId) {
 .section-title {
   margin: 0;
   font-size: var(--font-size-lg);
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: 0.04em;
 }
 
 .header-tools {
@@ -140,32 +186,35 @@ function goAlbum(albumId) {
   gap: 12px;
 }
 
-/* Job000101 分段切换钮：时间轴 | 按相册 */
+/* Job000101 分段切换钮：时间轴 | 按相册 —— 胶囊形态（DESIGN.md 深化稿 VIEW.06） */
 .view-toggle {
   display: inline-flex;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
+  background-color: var(--color-surface);
+  border-radius: 999px;
+  padding: 3px;
+  box-shadow: 0 1px 3px rgba(65, 64, 60, 0.06);
 }
 
 .toggle-btn {
-  padding: 6px 14px;
+  padding: 6px 16px;
   border: none;
-  background-color: var(--color-surface);
+  border-radius: 999px;
+  background-color: transparent;
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   cursor: pointer;
   font-family: var(--font-family);
+  transition: background-color 0.5s cubic-bezier(0.32, 0.72, 0, 1), color 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .toggle-btn + .toggle-btn {
-  border-left: 1px solid var(--color-border);
+  border-left: none;
 }
 
 .toggle-btn--active {
-  background-color: var(--color-surface-hover);
-  color: var(--color-text-primary);
-  font-weight: 600;
+  background-color: var(--color-primary);
+  color: #eef1f4;
+  font-weight: 500;
 }
 
 .muted {
