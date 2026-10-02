@@ -102,6 +102,10 @@ func (h *Handler) Tree(c *gin.Context) {
 		}
 		counts[p] = n
 	}
+	if err := rows.Err(); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
 	rows.Close()
 
 	// 注册目录合并（Job000069）：空目录在 folder_path 派生中不存在，需 UNION 注册表；
@@ -137,6 +141,10 @@ func (h *Handler) Tree(c *gin.Context) {
 			_ = json.Unmarshal([]byte(gtext), &gs)
 		}
 		registered[p] = regMeta{owner: own, grants: gs}
+	}
+	if err := regRows.Err(); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
 	}
 
 	tree := BuildTree(counts)

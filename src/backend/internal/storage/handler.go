@@ -304,6 +304,10 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		out = append(out, *m)
 	}
+	if err := rows.Err(); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"mounts": out})
 }
 

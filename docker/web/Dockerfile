@@ -196,5 +196,25 @@ server {
         add_header Vary Accept always;
         try_files $uri $uri/ /index.html;
     }
+
+    # ===== 安全响应头（Job000141，审查报告 L-1）=====
+    # 放在 server 块末尾：nginx 的 add_header 在**子块内**会覆盖父块继承，
+    # 所以放最后、且用 always 让 4xx/5xx 也带上（否则错误页裸奔）。
+    # 逐条理由：
+    #   nosniff            —— 禁 MIME 嗅探，配合本项目严格 serve 的静态产物
+    #   SAMEORIGIN         —— 禁第三方 iframe 嵌入（点击劫持）。
+    #                        /public/shares/:token 是**无鉴权公开页**，最需要这条
+    #   Referrer-Policy    —— URL 里带 ?at=<access_token>（Job000129 的 video 读路径），
+    #                        严格来源可避免 token 经 Referer 外泄到第三方站
+    #   Permissions-Policy —— 显式关闭不需要的传感器（geolocation 仅自用）
+    #
+    # ⚠️ **未启用 CSP** 是刻意的：maplibre-gl worker、瓦片请求、内联样式在收紧
+    #    CSP 后会连带失败（已实测踩坑模式：nginx 前缀漏配 → SPA 假 200）。
+    #    待单独窗口按最小可用集逐步放开（script-src 'self' → 再放开 connect-src），
+    #    放开后必须走 headless CDP e2e 真实打开全部 15 条路由验证。
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
 }
 EOF

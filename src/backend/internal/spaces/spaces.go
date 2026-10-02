@@ -61,5 +61,9 @@ func (h *Handler) Get(c *gin.Context) {
 		}
 		shared = append(shared, r)
 	}
+	if err := rows.Err(); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"personal": p, "shared": shared})
 }

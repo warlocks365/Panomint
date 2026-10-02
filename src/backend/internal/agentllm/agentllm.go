@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -48,11 +49,17 @@ type Handler struct {
 	HTTP  *http.Client    // 上游探活/转发客户端（可注入测试；nil 用默认）
 }
 
+// client 上游 HTTP 客户端。
+//
+// ⚠️ 默认走 guardedClient（netguard.go）：出站拨号前判定目标 IP，
+// 阻断本机/内网/链路本地（含云元数据 169.254.169.254）。
+// 注入的 h.HTTP（测试用）**不受**该防线约束 —— 测试要能连 httptest 的
+// 127.0.0.1，守卫会拦掉；生产路径永远是 h.HTTP == nil 走 guardedClient。
 func (h *Handler) client() *http.Client {
 	if h.HTTP != nil {
 		return h.HTTP
 	}
-	return &http.Client{Timeout: 120 * time.Second}
+	return guardedClient
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +139,16 @@ func (h *Handler) PutConfig(c *gin.Context) {
 		httperr.Envelope(c, http.StatusBadRequest, "BAD_REQUEST", "启用时 base_url 与 model 必填")
 		return
 	}
+	// SSRF 防线（netguard.go H-1）：非空 base_url 必须是 http/https 且不指向
+	// 本机/内网。放在**保存前**而不是只在出站前 —— 让配置错误在写入时就
+	// 被明确拒绝（400 + 可操作文案），而不是等到探活/代理时才发现连不上。
+	if b.BaseURL != "" {
+		if _, err := validateUpstreamURL(b.BaseURL); err != nil {
+			httperr.Envelope(c, http.StatusBadRequest, "BAD_URL",
+				"base_url 非法：仅允许 http/https，且不得指向本机或内网地址（"+err.Error()+"）")
+			return
+		}
+	}
 
 	// 旧 key 保留语义：api_key=null → 沿用；"" → 清除；非空 → 加密更新。
 	newKeyEnc := ""
@@ -192,6 +209,14 @@ func (h *Handler) TestConfig(c *gin.Context) {
 		httperr.Envelope(c, http.StatusBadRequest, "BAD_REQUEST", "base_url 为空")
 		return
 	}
+	// SSRF 防线（netguard.go H-1）：出站前再校验一次。
+	// 必须在**每次**出站前校验而不只保存时：库里的 base_url 可能是在本次
+	// 修复之前写入的（存量数据），且 DNS 解析结果随时会变（重绑定）。
+	if _, err := validateUpstreamURL(baseURL); err != nil {
+		httperr.Envelope(c, http.StatusBadRequest, "BAD_URL",
+			"base_url 非法：仅允许 http/https，且不得指向本机或内网地址（"+err.Error()+"）")
+		return
+	}
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, baseURL+"/models", nil)
 	if err != nil {
@@ -204,7 +229,11 @@ func (h *Handler) TestConfig(c *gin.Context) {
 	resp, err := h.client().Do(req)
 	if err != nil {
 		h.recordAudit(c, audit.ActionAgentLLMConfig, map[string]any{"op": "test", "ok": false})
-		c.JSON(http.StatusOK, gin.H{"ok": false, "error": "上游不可达：" + err.Error()})
+		// 完整错误只进服务端日志（httperr 包文档的既定分工）：err 内含目标 URL
+		// 与底层网络细节，直接回显等于给 SSRF 探测提供「内网端口是否开放」的
+		// 观测通道（连拒绝 vs 超时 vs DNS 失败能区分出版本拓扑）。
+		log.Printf("[agentllm] 上游探活失败: %v", err)
+		c.JSON(http.StatusOK, gin.H{"ok": false, "error": "上游不可达，请检查 base_url 与网络"})
 		return
 	}
 	defer resp.Body.Close()
@@ -249,6 +278,15 @@ func (h *Handler) ProxyChat(c *gin.Context) {
 	}
 
 	upstream := r.BaseURL + "/chat/completions"
+	// SSRF 防线（netguard.go H-1）：每次转发前校验，覆盖「修复前写入的存量
+	// base_url」与「DNS 重绑定」两种情况 —— 库里的值不是可信输入的免检凭证。
+	if _, err := validateUpstreamURL(r.BaseURL); err != nil {
+		log.Printf("[agentllm] 上游地址被 SSRF 防线拒绝: %v", err)
+		// 对外同形：与「未配置」一致的 404 视角，不告诉调用者「地址存在但被拦」
+		// —— 调用方就是 admin 自己的浏览器，但保持响应面不泄露库内配置细节。
+		httperr.Envelope(c, http.StatusNotFound, "AGENT_LLM_NOT_CONFIGURED", "LLM 上游未配置")
+		return
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstream, bytes.NewReader(body))
 	if err != nil {
 		httperr.Envelope(c, http.StatusBadRequest, "BAD_URL", "上游地址非法")

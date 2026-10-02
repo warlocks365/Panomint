@@ -280,7 +280,7 @@ func main() {
 
 	// Phase 3 空间 / 文件夹 / 转码
 	spacesH := &spaces.Handler{Pool: pool}
-	authed.GET("/spaces", spacesH.Get)
+	authed.GET("/spaces", permRead, spacesH.Get) // Job000141：原未挂 permRead，与其余媒体类读端点对齐（handler 内已按 user_id 过滤，无越权）
 	foldersH := &folders.Handler{Pool: pool}
 	authed.GET("/folders/tree", permRead, foldersH.Tree)
 	authed.POST("/folders", permWrite, foldersH.Create)
@@ -364,13 +364,15 @@ func main() {
 	authed.GET("/geo/places-overview", permRead, geoH.PlacesOverview) // Job000062 地点页聚合
 	authed.GET("/tiles/amap/:z/:x/:y", permRead, geoH.Tiles.Serve) // Key 服务端注入，前端不持 Key
 	authed.GET("/preferences/map", permRead, geoH.GetMapIconPref)  // Job000009 图标配置（账户级）
-	authed.PUT("/preferences/map", permRead, geoH.PutMapIconPref)
+	// Job000141：改的是**调用者自己的**账户级偏好（user_id 取自 token 上下文，非请求体），
+	// 与 /user/password、/user/app-password 同惯例。挂 permRead 会让「只读成员」也能写。
+	authed.PUT("/preferences/map", geoH.PutMapIconPref)
 
 	// 契约 §7：用户地图 UI 偏好（账户级，需登录）+ 系统地图配置（管理端）。
 	// ⚠️ `/user` 是**新前缀**，已同步加进 docker/web/Dockerfile 的纯 API 正则组 ——
 	// 漏配的话浏览器直连该路径会拿到 index.html（本项目已因此踩坑三次）。
 	authed.GET("/user/ui-prefs", permRead, geoH.GetUIPrefs) // {map_slider_pos,map_filter_side,map_default_provider,map_default_zoom}
-	authed.PUT("/user/ui-prefs", permRead, geoH.PutUIPrefs)
+	authed.PUT("/user/ui-prefs", geoH.PutUIPrefs)  // Job000141：同上，账户级偏好不挂写权限位
 	// Job000034 用户自助改密：只要求已登录（对自己的口令不需要额外权限），
 	// handler 内部会验证旧口令 + 吊销全部会话。/user 前缀已在 nginx 反代组内，无需改 nginx。
 	authed.PUT("/user/password", authH.ChangePassword)

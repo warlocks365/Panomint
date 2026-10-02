@@ -83,6 +83,10 @@ func (h *Handler) AccessLog(c *gin.Context) {
 		}
 		items = append(items, gin.H{"ip": ip, "user_agent": ua, "at": at})
 	}
+	if err := rows.Err(); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "INTERNAL", "查询访问记录失败", err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "limit": 50})
 }
 

@@ -31,6 +31,9 @@ func (s *Store) batchOwnedIDs(ctx context.Context, ids []string, userID string) 
 		}
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, []map[string]any{{"id": "*", "reason": "查询失败"}}
+	}
 	for _, id := range ids {
 		if !ok[id] {
 			failed = append(failed, map[string]any{"id": id, "reason": "不存在或无权操作"})

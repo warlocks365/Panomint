@@ -141,6 +141,9 @@ func cmdJobLogTailCore(ctx context.Context, pool *pgxpool.Pool, data json.RawMes
 		}
 		tail = append(tail, map[string]any{"action": action, "at": at, "detail": detail})
 	}
+	if err := rows.Err(); err != nil {
+		return nil, "", errf("INTERNAL", "读取任务审计失败")
+	}
 	return map[string]any{"job": job, "audit_tail": tail}, p.JobID, nil
 }
 

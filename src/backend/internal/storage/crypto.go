@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 )
 
 // ErrNoCipherKey 未配置 STORAGE_CIPHER_KEY 却尝试加密凭据。
@@ -25,23 +26,27 @@ var ErrNoCipherKey = errors.New("STORAGE_CIPHER_KEY 未配置")
 // ErrCiphertext 密文形态非法（解密失败/被篡改/密钥轮换后旧密文）。
 var ErrCiphertext = errors.New("凭据密文不可解密")
 
-// cipherKey 进程级缓存的密钥（惰性加载一次）。
-var cipherKey []byte
+// cipherKey 进程级缓存的密钥（惰性加载一次，加载后只读）。
+var (
+	cipherKeyOnce sync.Once
+	cipherKey     []byte
+)
 
 // loadCipherKey 从 env 读取并解码 32 字节密钥（hex）。未配置或长度错→nil。
+// sync.Once 保证并发首次调用只加载一次（消除 data race）；结果为 nil（未配置/
+// 长度错）时同样视为已完成，语义与旧的「nil 表示未配置」保持一致。
 func loadCipherKey() []byte {
-	if cipherKey != nil {
-		return cipherKey
-	}
-	raw := os.Getenv("STORAGE_CIPHER_KEY")
-	if raw == "" {
-		return nil
-	}
-	k, err := hex.DecodeString(raw)
-	if err != nil || len(k) != 32 {
-		return nil
-	}
-	cipherKey = k
+	cipherKeyOnce.Do(func() {
+		raw := os.Getenv("STORAGE_CIPHER_KEY")
+		if raw == "" {
+			return
+		}
+		k, err := hex.DecodeString(raw)
+		if err != nil || len(k) != 32 {
+			return
+		}
+		cipherKey = k
+	})
 	return cipherKey
 }
 

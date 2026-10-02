@@ -43,6 +43,10 @@ func (h *Handler) ListPermMeta(c *gin.Context) {
 			byPerm[m.Perm] = m
 		}
 	}
+	if err := rows.Err(); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
+	}
 	out := []gin.H{}
 	known := map[string]bool{}
 	for _, p := range knownPerms {
@@ -126,6 +130,10 @@ func (h *Handler) ListUserPerms(c *gin.Context) {
 		if err := rows.Scan(&p); err == nil {
 			perms = append(perms, p)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		httperr.Fail(c, http.StatusInternalServerError, "QUERY_FAILED", "查询失败", err)
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user_id": userID, "perms": perms})
 }

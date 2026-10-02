@@ -3,17 +3,24 @@ package storage
 import (
 	"os"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // 固定测试密钥（32 字节 hex）——只用于单测进程，绝不与生产密钥同值。
 const testKeyHex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 
+// resetCipherKey 清空进程级密钥缓存与 sync.Once，使下一个用例能重新读 env。
+func resetCipherKey() {
+	cipherKeyOnce = sync.Once{}
+	cipherKey = nil
+}
+
 func withKey(t *testing.T) {
 	t.Helper()
 	t.Setenv("STORAGE_CIPHER_KEY", testKeyHex)
-	cipherKey = nil // 重置缓存
-	t.Cleanup(func() { cipherKey = nil })
+	resetCipherKey()
+	t.Cleanup(resetCipherKey)
 }
 
 func TestEncryptDecrypt_RoundTrip(t *testing.T) {
@@ -58,7 +65,8 @@ func TestEncryptCreds_NilAndEmpty(t *testing.T) {
 
 func TestEncrypt_NoKey_FailClosed(t *testing.T) {
 	t.Setenv("STORAGE_CIPHER_KEY", "")
-	cipherKey = nil
+	resetCipherKey()
+	t.Cleanup(resetCipherKey)
 	_, err := EncryptCreds(&Creds{User: "a", Pass: "b"})
 	if err != ErrNoCipherKey {
 		t.Fatalf("无密钥必须 ErrNoCipherKey，实际 %v", err)
@@ -72,7 +80,8 @@ func TestEncrypt_NoKey_FailClosed(t *testing.T) {
 
 func TestEncrypt_BadKeyLength(t *testing.T) {
 	t.Setenv("STORAGE_CIPHER_KEY", "aabb") // 非 32 字节
-	cipherKey = nil
+	resetCipherKey()
+	t.Cleanup(resetCipherKey)
 	if CipherKeyConfigured() {
 		t.Fatal("长度错误的密钥不得视为已配置")
 	}
@@ -101,7 +110,7 @@ func TestDecrypt_WrongKey(t *testing.T) {
 	enc, _ := EncryptCreds(&Creds{User: "a", Pass: "b"})
 	// 换密钥（模拟密钥轮换后旧密文）。
 	t.Setenv("STORAGE_CIPHER_KEY", "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100")
-	cipherKey = nil
+	resetCipherKey()
 	if _, err := DecryptCreds(enc); err == nil {
 		t.Fatal("异密钥解密必须失败")
 	}
@@ -138,6 +147,6 @@ func TestCredsMask_Constant(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	// 保险：单测进程绝不留缓存密钥。
-	cipherKey = nil
+	resetCipherKey()
 	os.Exit(m.Run())
 }

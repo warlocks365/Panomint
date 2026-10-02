@@ -97,3 +97,4 @@ runs/
 文档/Docker_1.7.0_初始化故障排查手册_v1.0.md
 文档/系统启动状态检测改进方案_v1.0.md
 文档/HEVC大视频实时播放技术调研报告_v1.0.md
+src/backend/.workbuddy_test_bin/

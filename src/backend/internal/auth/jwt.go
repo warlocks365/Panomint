@@ -14,7 +14,17 @@ import (
 )
 
 const (
-	AccessTTL  = 15 * time.Minute
+	// AccessTTL 访问令牌有效期。
+	//
+	// Job000141 由 15min 收紧到 5min：access token 是自证的纯 JWT，服务端
+	// **不查库**（ParseAccess 只验签与过期），所以「禁用用户/改密」这类操作
+	// 无法让已签发的 token 立即失效——原先要等最长 15 分钟。收紧到 5 分钟把
+	// 暴露窗口压到 1/3，配合前端已有的自动续期（src/utils/tokenStore.js +
+	// api/http.js 的 refresh 链）对用户无感。
+	//
+	// 想彻底解决需引入 session_ver（写进 claims 并在鉴权时比对），代价是
+	// 每请求多一次校验；当前自托管单实例的负载下，5min TTL 是性价比最高的取舍。
+	AccessTTL  = 5 * time.Minute
 	RefreshTTL = 7 * 24 * time.Hour
 )
 
