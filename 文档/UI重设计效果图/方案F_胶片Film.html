@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>方案 F · 胶片 Film — Panomint UI 重设计</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#1c1917;--panel:#262220;--panel2:#2e2925;--line:rgba(255,235,205,.1);--line2:rgba(255,235,205,.18);
+--tx:#efe7dc;--tx2:#a89a8a;--tx3:#6b5f52;--amber:#e87603;--amber2:#f5a623;--lcd:#a3e635;--r:10px;
+--ease:cubic-bezier(.32,.72,0,1)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:'Outfit','Noto Sans SC',sans-serif;min-height:100vh}
+.mono{font-family:'IBM Plex Mono',monospace}
+.wrap{max-width:1180px;margin:0 auto;padding:0 38px}
+.tagbar{position:sticky;top:0;z-index:50;background:rgba(28,25,23,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.tagbar .in{display:flex;align-items:center;gap:14px;padding:13px 38px;max-width:1180px;margin:0 auto}
+.tagbar .tag{color:var(--amber2);border:1px solid var(--amber2);padding:3px 11px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:11px}
+.tagbar h1{font-size:15px;font-weight:500}
+.tagbar .note{margin-left:auto;color:var(--tx2);font-size:11.5px}
+.sec{padding:46px 0 6px}
+.sec-h{display:flex;align-items:baseline;gap:14px;margin-bottom:20px}
+.sec-h .no{font-family:'IBM Plex Mono',monospace;color:var(--amber2);font-size:11px;letter-spacing:.1em}
+.sec-h b{font-weight:500;font-size:17px}
+.sec-h .d{margin-left:auto;color:var(--tx2);font-size:12px}
+/* 导航：机身顶板 */
+.nav{background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);padding:12px 18px;display:flex;align-items:center;gap:20px}
+.nav .brand{font-weight:600;letter-spacing:.06em;font-size:14px;display:flex;align-items:center;gap:10px}
+.nav .brand .rec{width:8px;height:8px;border-radius:50%;background:var(--red,#e0655a);box-shadow:0 0 8px rgba(224,101,90,.6)}
+.nav nav{display:flex;gap:2px;margin-left:8px}
+.nav nav a{color:var(--tx2);text-decoration:none;font-size:12.5px;padding:7px 14px;border-radius:6px}
+.nav nav a.on{color:var(--amber2);background:rgba(232,118,3,.12)}
+.nav .dial{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--lcd)}
+/* 胶片帧：两侧齿孔 */
+.filmgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.film{background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;display:flex}
+.perf{width:22px;background:repeating-linear-gradient(0deg,transparent 0 10px,rgba(255,235,205,.13) 10px 20px);border-right:1px solid var(--line);flex:none}
+.perf.r{border-right:none;border-left:1px solid var(--line)}
+.filmmain{flex:1;min-width:0}
+.film .ph{position:relative}
+.film .img{width:100%;display:block}
+/* 取景框角标 */
+.film .corner{position:absolute;width:18px;height:18px;border:1.5px solid rgba(245,166,35,.75)}
+.film .c1{top:10px;left:10px;border-right:none;border-bottom:none}
+.film .c2{top:10px;right:10px;border-left:none;border-bottom:none}
+.film .c3{bottom:10px;left:10px;border-right:none;border-top:none}
+.film .c4{bottom:10px;right:10px;border-left:none;border-top:none}
+/* 曝光 HUD */
+.film .hud{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--lcd);background:rgba(0,0,0,.55);padding:4px 12px;border-radius:4px;letter-spacing:.08em;white-space:nowrap}
+.film .meta{padding:12px 16px 14px;display:flex;justify-content:space-between;align-items:center}
+.film .meta b{font-weight:500;font-size:13px}
+.film .meta .m{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3)}
+.i1{height:230px;background:linear-gradient(160deg,#3d2914 0%,#7a4a21 45%,#d99a3d 80%,#f0c987 100%)}
+.i2{height:150px;background:linear-gradient(150deg,#0f1c14 0%,#1e3a2a 55%,#4a7a5c 100%)}
+.i3{height:150px;background:linear-gradient(145deg,#2e1616 0%,#5c2e2e 55%,#9e4a3d 100%)}
+.i4{height:150px;background:linear-gradient(155deg,#141d2e 0%,#2a3d5c 60%,#4a6a9e 100%)}
+/* AI：机身 LCD 屏 */
+.lcd{background:var(--panel);border:1px solid var(--line2);border-radius:var(--r);overflow:hidden}
+.lcdbezel{margin:16px;background:#0a0f05;border:2px solid #000;border-radius:6px;padding:16px;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.9;color:var(--lcd);box-shadow:inset 0 0 40px rgba(163,230,53,.05)}
+.lcdbezel .t{color:rgba(163,230,53,.6);font-size:10.5px;letter-spacing:.12em;margin-bottom:8px}
+.lcdbezel .u{color:#d4f07a}
+.lcdbezel .dim{color:rgba(163,230,53,.55)}
+.lcdbezel .cfm{margin-top:10px;padding-top:10px;border-top:1px dashed rgba(163,230,53,.3)}
+.lcdbezel .cfm button{font-family:inherit;background:var(--lcd);color:#0a0f05;border:none;padding:6px 16px;border-radius:4px;font-size:11.5px;font-weight:500;cursor:pointer;margin-right:8px}
+.lcdbezel .cfm button.ghost{background:transparent;color:var(--lcd);border:1px solid rgba(163,230,53,.4)}
+.lcdside{padding:4px 16px 16px;display:flex;gap:10px;align-items:center}
+.lcdside .btn{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx2);border:1px solid var(--line2);border-radius:6px;padding:7px 14px;letter-spacing:.08em}
+.lcdside .btn.on{color:var(--amber2);border-color:var(--amber2)}
+.inputrow{display:flex;gap:10px;padding:0 16px 16px}
+.inputrow input{flex:1;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;outline:none;color:var(--tx);font-family:inherit;font-size:12.5px;padding:11px 14px}
+.inputrow input::placeholder{color:var(--tx3)}
+.inputrow .send{font-family:'IBM Plex Mono',monospace;background:var(--amber);color:#1c1917;border:none;border-radius:6px;padding:0 22px;font-size:12px;font-weight:500;cursor:pointer}
+/* 色板 */
+.swatches{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.sw{border:1px solid var(--line2);border-radius:var(--r);overflow:hidden}
+.sw .c{height:48px}.sw .l{padding:7px 10px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx2)}.sw .l b{display:block;color:var(--tx);font-weight:500}
+.foot{padding:36px 0 50px;color:var(--tx3);font-size:11px;font-family:'IBM Plex Mono',monospace;display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+<div class="tagbar"><div class="in"><span class="tag">SCHEME F</span><h1>胶片 · Analog Film</h1><span class="note">拟物摄影器材 · 齿孔边条 · 取景框角标 · 曝光 HUD · LCD 屏 AI</span></div></div>
+<div class="wrap">
+  <div class="sec"><div class="sec-h"><span class="no">01/FRAME</span><b>导航 — 机身顶板</b><span class="d">REC 灯 · 曝光表读数</span></div>
+    <div class="nav">
+      <span class="brand"><span class="rec"></span>PANOMINT</span>
+      <nav><a class="on" href="#">时间轴</a><a href="#">相册</a><a href="#">地图</a><a href="#">人物</a><a href="#">工具箱</a></nav>
+      <span class="dial">EXP +0.0 · ISO 400 · f/2.8</span>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">02/ROLL</span><b>媒体网格 — 胶片帧</b><span class="d">齿孔边条 + 取景框角标 + 曝光参数 HUD</span></div>
+    <div class="filmgrid">
+      <div class="film"><div class="perf"></div><div class="filmmain"><div class="ph"><div class="img i1"></div><div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div><div class="hud">PANORAMA · 42MP · f/8 1/500 ISO100</div></div>
+        <div class="meta"><b>洱海东岸 · 环湖骑行</b><span class="m">FRAME 01 · 09-14</span></div></div><div class="perf r"></div></div>
+      <div class="film"><div class="perf"></div><div class="filmmain"><div class="ph"><div class="img i2"></div><div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div><div class="hud">4K60 · HEVC · 转码中 64%</div></div>
+        <div class="meta"><b>苍山云海 · 延时</b><span class="m">FRAME 02 · 09-12</span></div></div><div class="perf r"></div></div>
+      <div class="film"><div class="perf"></div><div class="filmmain"><div class="ph"><div class="img i3"></div><div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div></div>
+        <div class="meta"><b>夜市光轨</b><span class="m">FRAME 03 · 09-10</span></div></div><div class="perf r"></div></div>
+      <div class="film"><div class="perf"></div><div class="filmmain"><div class="ph"><div class="img i4"></div><div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div></div>
+        <div class="meta"><b>洱海出口</b><span class="m">FRAME 04 · 09-06</span></div></div><div class="perf r"></div></div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">03/LCD</span><b>AI 助手 — 机身液晶屏</b><span class="d">磷光绿 LCD · 工具调用为屏显行</span></div>
+    <div class="lcd">
+      <div class="lcdbezel">
+        <div class="t">AI ASSISTANT · qwen3.6-27b · LOCAL</div>
+        <div class="u">> 看看转码队列什么情况，顺便把 HLS 分片改成 6 秒</div>
+        <div style="margin-top:8px"><span class="dim">[TOOL]</span> pano_view_transcode_snapshot → OK</div>
+        <div><span class="dim">QUEUE]</span> waiting 0 · processing 0 · failed 0 — 空闲</div>
+        <div class="cfm">
+          <div>
+            <div class="t" style="margin-bottom:4px">CONFIRM · pano_set_transcode_param</div>
+            hls_seg_seconds: 4 → 6
+          </div>
+        </div>
+      </div>
+      <div class="lcdside"><span class="btn on">确认执行</span><span class="btn">取消</span><span class="btn">审计日志</span></div>
+      <div class="inputrow"><input placeholder="输入任务，回车提交（白名单语义工具直接执行）"><span class="send">EXEC ⏎</span></div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">04/PAL</span><b>色板与规格</b></div>
+    <div class="swatches">
+      <div class="sw"><div class="c" style="background:#1c1917"></div><div class="l"><b>body</b>#1C1917</div></div>
+      <div class="sw"><div class="c" style="background:#262220"></div><div class="l"><b>panel</b>#262220</div></div>
+      <div class="sw"><div class="c" style="background:#e87603"></div><div class="l"><b>film</b>#E87603</div></div>
+      <div class="sw"><div class="c" style="background:#a3e635"></div><div class="l"><b>lcd</b>#A3E635</div></div>
+      <div class="sw"><div class="c" style="background:#efe7dc"></div><div class="l"><b>text</b>#EFE7DC</div></div>
+      <div class="sw"><div class="c" style="background:#a89a8a"></div><div class="l"><b>mute</b>#A89A8A</div></div>
+    </div>
+    <div style="margin-top:16px;color:var(--tx2);font-size:12px;line-height:1.9;max-width:52em">
+      暖黑机身底（非冷黑）；照片嵌在「胶片帧」里：两侧齿孔条（repeating-gradient 打孔）+ 取景框四角标 + 曝光参数 HUD；AI 助手是机身液晶屏——黑底磷光绿等宽字、内阴影辉光、实体按钮条。语义工具调用呈现为屏显行 [TOOL]，确认动作是 LCD 上的实体按钮。与方案 A 的区别：A 是抽象玻璃暗色，F 是可触摸的摄影器材拟物。
+    </div>
+  </div>
+  <div class="foot"><span>PANOMINT UI · SCHEME F / ANALOG FILM</span><span>MOCKUP 2026-10</span></div>
+</div>
+</body>
+</html>

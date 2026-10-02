@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>方案 I · 蓝图 Blueprint — Panomint UI 重设计</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bp:#173a5e;--bp2:#12304e;--line:rgba(200,225,255,.28);--line2:rgba(200,225,255,.5);
+--tx:#dbe9f7;--tx2:#8fb0cc;--tx3:#5d82a6;
+--mark:#ffd166;--ok:#6ee7a0;--r:2px;--ease:cubic-bezier(.32,.72,0,1)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bp);color:var(--tx);font-family:'IBM Plex Mono','Noto Sans SC',monospace;font-size:13px;min-height:100vh;
+background-image:linear-gradient(rgba(200,225,255,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(200,225,255,.055) 1px,transparent 1px);
+background-size:22px 22px}
+.wline{font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:300}
+.wrap{max-width:1180px;margin:0 auto;padding:0 40px}
+.tagbar{position:sticky;top:0;z-index:50;background:rgba(18,48,78,.92);border-bottom:1px solid var(--line2)}
+.tagbar .in{display:flex;align-items:center;gap:14px;padding:13px 40px;max-width:1180px;margin:0 auto}
+.tagbar .tag{color:var(--mark);border:1px solid var(--mark);padding:3px 11px;font-size:11px}
+.tagbar h1{font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:400;font-size:15px;letter-spacing:.14em}
+.tagbar .note{margin-left:auto;color:var(--tx2);font-size:11.5px}
+.sec{padding:46px 0 8px}
+.sec-h{display:flex;align-items:center;gap:14px;margin-bottom:20px}
+.sec-h .no{color:var(--mark);font-size:11px}
+.sec-h b{font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:400;font-size:15px;letter-spacing:.16em}
+.sec-h .d{margin-left:auto;color:var(--tx2);font-size:11.5px}
+/* 元素全部描线（transparent 填充 + 白描边） */
+.box{border:1px solid var(--line2);border-radius:var(--r);background:rgba(200,225,255,.03)}
+.nav{display:flex;align-items:center;padding:0 0}
+.nav .brand{padding:12px 20px;border-right:1px solid var(--line2);color:var(--mark);letter-spacing:.2em;font-size:13px}
+.nav a{color:var(--tx2);text-decoration:none;padding:12px 18px;border-right:1px solid var(--line);font-size:12px;letter-spacing:.08em}
+.nav a.on{color:var(--mark);background:rgba(255,209,102,.07)}
+.nav .ai{margin-left:auto;border-right:none;border-left:1px solid var(--line2);color:var(--mark)}
+/* 照片：白描线框 + 编号标注 */
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+.col4{grid-column:span 4}.col8{grid-column:span 8}
+.shot{border:1px solid var(--line2);border-radius:var(--r);position:relative;background:rgba(200,225,255,.04)}
+.shot .ph{position:relative;margin:8px}
+.shot .img{width:100%;display:block;border:1px solid var(--line)}
+.shot .callout{position:absolute;top:-9px;left:12px;background:var(--bp);padding:0 8px;font-size:10px;color:var(--mark);letter-spacing:.1em}
+.shot .meta{padding:4px 12px 10px;display:flex;justify-content:space-between;color:var(--tx2);font-size:11px}
+.shot .meta b{color:var(--tx);font-weight:400}
+.shot .dim{position:absolute;top:10px;right:12px;font-size:10px;color:var(--tx3)}
+.i1{height:210px;background:linear-gradient(160deg,#1a3350 0%,#2e5a8a 55%,#528ab8 100%)}
+.i2{height:140px;background:linear-gradient(150deg,#12321f 0%,#1e5a38 60%,#3d8a5c 100%)}
+.i3{height:140px;background:linear-gradient(145deg,#321a1a 0%,#5e2e2e 60%,#8a3d3d 100%)}
+.i4{height:140px;background:linear-gradient(155deg,#2e1a3a 0%,#4a2e5c 60%,#7a529e 100%)}
+/* AI：图注框 */
+.aiwrap{display:grid;grid-template-columns:1fr 280px;gap:16px}
+.aibox{border:1px solid var(--line2);border-radius:var(--r);background:rgba(200,225,255,.04);position:relative}
+.aibox .callout{position:absolute;top:-9px;left:14px;background:var(--bp);padding:0 8px;font-size:10px;color:var(--mark);letter-spacing:.14em}
+.aibody{padding:20px;line-height:2}
+.aibox .u{color:var(--tx);font-size:13.5px;margin-bottom:14px}
+.aibox .u::before{content:'> ';color:var(--mark)}
+.aibox .tool{border-top:1px dashed var(--line);padding-top:12px;margin-top:12px}
+.aibox .tool .t{color:var(--mark);font-size:11px;letter-spacing:.1em;margin-bottom:6px}
+.aibox .tool .row{display:flex;justify-content:space-between;color:var(--tx2);font-size:12px;border-bottom:1px solid var(--line);padding:5px 0}
+.aibox .tool .row b{color:var(--tx);font-weight:400}
+.aibox .cfm{display:flex;gap:12px;margin-top:14px}
+.aibox .cfm button{font-family:inherit;font-size:12px;background:transparent;color:var(--mark);border:1px solid var(--mark);padding:7px 20px;border-radius:var(--r);cursor:pointer;letter-spacing:.1em}
+.aibox .cfm button.ghost{color:var(--tx2);border-color:var(--line2)}
+.aside .item{border:1px solid var(--line);border-radius:var(--r);padding:11px 14px;margin-bottom:10px;display:flex;justify-content:space-between;color:var(--tx2);font-size:11.5px}
+.aside .item b{color:var(--tx);font-weight:400;font-size:11.5px}
+.aside .item .lv{color:var(--mark)}
+.inputrow{display:flex;border-top:1px solid var(--line2)}
+.inputrow .ps{color:var(--mark);padding:13px 0 13px 18px}
+.inputrow input{flex:1;background:transparent;border:none;outline:none;color:var(--tx);font-family:inherit;font-size:12.5px;padding:13px 12px}
+/* 色板 */
+.swatches{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.sw{border:1px solid var(--line2);border-radius:var(--r);overflow:hidden}
+.sw .c{height:48px}.sw .l{padding:7px 10px;font-size:10px;color:var(--tx2)}.sw .l b{display:block;color:var(--tx);font-weight:400}
+.foot{padding:38px 0 50px;color:var(--tx3);font-size:10.5px;display:flex;justify-content:space-between;letter-spacing:.12em;border-top:1px solid var(--line2);margin-top:46px}
+</style>
+</head>
+<body>
+<div class="tagbar"><div class="in"><span class="tag">SCHEME I</span><h1>蓝图 · Blueprint</h1><span class="note">工程蓝图底 22px 方格 · 白描线框 · 编号标注 · 图注框 AI · 建造者气质</span></div></div>
+<div class="wrap">
+  <div class="sec"><div class="sec-h"><span class="no">FIG.01</span><b>导 航</b><span class="d">分格描线 · 激活态 = 主题黄底纹</span></div>
+    <div class="box nav">
+      <span class="brand">PANOMINT</span>
+      <a class="on" href="#">时间轴</a><a href="#">相册</a><a href="#">地图</a><a href="#">人物</a><a href="#">工具箱</a>
+      <a class="ai" href="#">AI 助手 / ASSISTANT</a>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">FIG.02</span><b>媒体网格</b><span class="d">照片 = 蓝图上的贴图 · callout 编号标注</span></div>
+    <div class="grid">
+      <div class="shot col4"><span class="callout">FIG.02-A · PANORAMA</span><div class="ph"><div class="img i1"></div></div><div class="meta"><b>洱海东岸·环湖骑行</b><span>09-14 · 42MP</span></div></div>
+      <div class="shot col8"><span class="callout">FIG.02-B · TRANSCODING 64%</span><div class="ph"><div class="img i2"></div><span class="dim">HEVC 4K60</span></div><div class="meta"><b>苍山云海·延时片段</b><span>09-12</span></div></div>
+      <div class="shot col4"><span class="callout">FIG.02-C</span><div class="ph"><div class="img i3"></div></div><div class="meta"><b>大理夜航</b><span>09-10</span></div></div>
+      <div class="shot col4"><span class="callout">FIG.02-D</span><div class="ph"><div class="img i4"></div></div><div class="meta"><b>沙溪古镇</b><span>09-08</span></div></div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">FIG.03</span><b>AI 助手</b><span class="d">左：图注框对话+确认 · 右：白名单清单</span></div>
+    <div class="aiwrap">
+      <div class="aibox">
+        <span class="callout">AI ASSISTANT · SESSION</span>
+        <div class="aibody">
+          <div class="u">看看转码队列什么情况，顺便把 HLS 分片改成 6 秒</div>
+          <div class="tool">
+            <div class="t">EXEC · PANO_VIEW_TRANCODE_SNAPSHOT → OK</div>
+            <div class="row"><span>waiting</span><b>0</b></div>
+            <div class="row"><span>processing</span><b>0</b></div>
+            <div class="row"><span>failed</span><b>0</b></div>
+          </div>
+          <div class="tool">
+            <div class="t">CONFIRM · PANO_SET_TRANCODE_PARAM</div>
+            <div class="row"><span>hls_seg_seconds</span><b>4 → 6</b></div>
+            <div class="cfm"><button>确认执行</button><button class="ghost">取消</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="aside">
+        <div class="aibox" style="padding:16px 18px">
+          <span class="callout">SEMANTIC TOOLS</span>
+          <div style="padding-top:6px">
+            <div class="item"><b>snapshot</b><span class="lv">L1</span></div>
+            <div class="item"><b>queue.stats</b><span class="lv">L1</span></div>
+            <div class="item"><b>job.log.tail</b><span class="lv">L1</span></div>
+            <div class="item"><b>job.pause</b><span class="lv">L2</span></div>
+            <div class="item"><b>job.cancel</b><span class="lv">L2</span></div>
+            <div class="item"><b>transcode.config</b><span class="lv">L2</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">FIG.04</span><b>色板与规格</b></div>
+    <div class="swatches">
+      <div class="sw"><div class="c" style="background:#173a5e"></div><div class="l"><b>blueprint</b>#173A5E</div></div>
+      <div class="sw"><div class="c" style="background:#12304e"></div><div class="l"><b>deep</b>#12304E</div></div>
+      <div class="sw"><div class="c" style="background:#dbe9f7"></div><div class="l"><b>line-text</b>#DBE9F7</div></div>
+      <div class="sw"><div class="c" style="background:#ffd166"></div><div class="l"><b>mark</b>#FFD166</div></div>
+      <div class="sw"><div class="c" style="background:#6ee7a0"></div><div class="l"><b>ok</b>#6EE7A0</div></div>
+    </div>
+    <div style="margin-top:22px;color:var(--tx2);font-size:12px;line-height:2;max-width:52em">
+      全站唯一背景 = 蓝图蓝 + 22px 工程方格；所有容器**无填充仅描线**（白 28%-50% 透明度），层级靠网格与标注；主题黄只用于 callout 编号与确认动作；照片是「贴在蓝图上的实拍图」，带 FIG 编号图注。Panomint 是自建系统——蓝图气质呼应「建造者-owned」。
+    </div>
+  </div>
+  <div class="foot"><span>PANOMINT UI · SCHEME I / BLUEPRINT</span><span>DRAWN TO SCALE · MOCKUP 2026-10</span></div>
+</div>
+</body>
+</html>

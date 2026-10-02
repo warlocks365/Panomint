@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>TimelineView · 晨雾 Morandi 深化稿 — GSAP 动效标注</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9e4de;--card:#f4f1ed;--card2:#efebe5;--tx:#41403c;--tx2:#7d7a73;--tx3:#a5a29a;
+--line:#ddd8d0;--primary:#4a5a6a;--primary-h:#3d4b58;--mist:rgba(143,163,173,.16);
+--ok:#6e8a72;--warn:#8a6d3d;--r:10px;--ease:cubic-bezier(.32,.72,0,1);
+--sh:0 1px 3px rgba(65,64,60,.05),0 10px 34px rgba(65,64,60,.07)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:300;font-size:14px;
+-webkit-font-smoothing:antialiased;letter-spacing:.01em}
+.mono{font-family:'IBM Plex Mono',monospace;font-weight:400}
+.wrap{max-width:1400px;margin:0 auto;padding:0 24px;display:flex;gap:0;min-height:100vh}
+/* 侧栏 */
+.side{width:220px;flex:none;background:#f4f1ed;border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:2px}
+.side .brand{font-size:13px;letter-spacing:.24em;padding:6px 12px 18px;color:var(--tx)}
+.side a{color:var(--tx2);text-decoration:none;font-size:13px;padding:9px 14px;border-radius:7px;letter-spacing:.14em}
+.side a.on{color:var(--tx);background:var(--mist)}
+.side .grp{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--tx3);letter-spacing:.18em;padding:16px 12px 6px}
+/* 顶栏 */
+.main{flex:1;min-width:0}
+.top{height:56px;background:#f4f1ed;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 24px}
+.top .ttl{font-size:15px;font-weight:400;letter-spacing:.12em}
+.top .sp{flex:1}
+.top .u{font-size:12px;color:var(--tx2)}
+/* 页头（DESIGN.md §5） */
+.pagehead{display:flex;align-items:baseline;gap:14px;padding:26px 24px 0}
+.pagehead .no{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tx3)}
+.pagehead h2{font-size:17px;font-weight:400;letter-spacing:.12em}
+.pagehead .d{margin-left:auto;font-size:12.5px;color:var(--tx2)}
+.pagehead .act{background:var(--primary);color:#f4f1ed;border:none;border-radius:10px;padding:9px 20px;font-size:13px;font-weight:400;font-family:inherit;cursor:pointer}
+/* 工具栏（真实元素） */
+.toolbar{display:flex;align-items:center;gap:10px;padding:18px 24px 14px;flex-wrap:wrap}
+.toolbar .sel{background:#f4f1ed;border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-family:inherit;font-size:13px;color:var(--tx);font-weight:300}
+.tool-btn{background:#f4f1ed;border:1px solid var(--line);border-radius:10px;padding:8px 15px;font-family:inherit;font-size:13px;color:var(--tx2);font-weight:300;cursor:pointer}
+.tool-btn.active{color:var(--tx);background:var(--mist);border-color:rgba(143,163,173,.4)}
+.tool-btn .n{font-family:'IBM Plex Mono',monospace;font-size:11px}
+.toolbar .sp{flex:1}
+.toolbar .trash{color:var(--tx3)}
+/* 图例 */
+.legend{display:flex;gap:18px;padding:0 24px 16px;font-size:12px;color:var(--tx2)}
+.legend .li{display:flex;align-items:center;gap:7px}
+.legend .d{width:9px;height:9px;border-radius:50%}
+/* 日期分组 */
+.dateband{display:flex;align-items:baseline;gap:14px;padding:14px 24px 12px}
+.dateband .d1{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--tx)}
+.dateband .cnt{font-size:11.5px;color:var(--tx3)}
+.dateband .ln{flex:1;height:1px;background:var(--line)}
+/* 瀑布网格 + veil */
+.mgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:0 24px 30px}
+.mcard{border-radius:10px;overflow:hidden;background:#f4f1ed;box-shadow:0 1px 3px rgba(65,64,60,.05),0 10px 34px rgba(65,64,60,.07);position:relative}
+.mcard .ph{position:relative}
+.mcard .img{width:100%;display:block}
+.mcard .veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(233,228,222,.16),transparent 34%)}
+.mcard .chip{position:absolute;top:10px;left:10px;font-size:10.5px;padding:4px 11px;border-radius:99px;background:rgba(244,241,237,.78);backdrop-filter:blur(6px);display:flex;align-items:center;gap:6px;color:var(--tx)}
+.mcard .chip .dot{width:6px;height:6px;border-radius:50%}
+.mcard .fv{position:absolute;top:10px;right:10px;width:16px;height:16px;border-radius:50%;background:rgba(244,241,237,.78);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center}
+.mcard .fv svg{width:9px;height:9px}
+.mcard .cap{padding:11px 14px 13px;font-size:12.5px;color:var(--tx2);font-weight:300;letter-spacing:.03em}
+.mcard .cap .loc{color:var(--tx3);font-size:11px;margin-left:8px}
+.g1{height:200px;background:linear-gradient(160deg,#d0d8d2 0%,#9db0a5 55%,#5f7d6d 100%)}
+.g2{height:140px;background:linear-gradient(150deg,#e0d6c8 0%,#c0ab8e 55%,#8a7355 100%)}
+.g3{height:140px;background:linear-gradient(145deg,#c8ccd6 0%,#98a3b5 55%,#5f7189 100%)}
+.g4{height:140px;background:linear-gradient(155deg,#d8cfc4 0%,#b5a48e 55%,#7d6b52 100%)}
+.g5{height:200px;background:linear-gradient(165deg,#d5d0d8 0%,#a49eb0 55%,#6f6880 100%)}
+/* AI 球 */
+.aiball{position:fixed;right:26px;bottom:26px;width:48px;height:48px;border-radius:50%;background:var(--primary);color:#f4f1ed;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 1px 3px rgba(65,64,60,.05),0 14px 40px rgba(65,64,60,.18);cursor:pointer}
+/* 动效标注卡 */
+.motion{border-top:1px dashed var(--line2);margin:0 24px;padding:20px 0 34px}
+.motion h4{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3);letter-spacing:.18em;margin-bottom:12px}
+.motion .m-row{display:flex;gap:10px;flex-wrap:wrap}
+.motion .m-chip{background:#f4f1ed;border:1px solid var(--line);border-radius:8px;padding:8px 13px;font-size:11.5px;color:var(--tx2)}
+.motion .m-chip b{color:var(--tx);font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:11px}
+.foot{padding:0 24px 40px;color:var(--tx3);font-size:10.5px;font-family:'IBM Plex Mono',monospace;display:flex;justify-content:space-between}
+/* 动效标注浮标 */
+.anim-tag{position:absolute;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#4a5a6a;background:rgba(255,209,102,.32);border:1px dashed rgba(74,90,106,.45);padding:2px 7px;border-radius:4px;z-index:10;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <div class="brand">PANOMINT</div>
+    <a class="on" href="#">时间轴</a><a href="#">相 册</a><a href="#">地 图</a><a href="#">人 物</a><a href="#">标 签</a>
+    <div class="grp">SPACE</div>
+    <a href="#">共享空间</a><a href="#">文件夹</a>
+    <div class="grp">OPS</div>
+    <a href="#">工具箱</a><a href="#">上 传</a><a href="#">搜 索</a>
+    <div class="grp">SYS</div>
+    <a href="#">设 置</a><a href="#">管理后台</a>
+  </aside>
+  <main class="main">
+    <div class="top"><span class="ttl">时间轴</span><span class="sp"></span><span class="u">owner@pano.local</span></div>
+
+    <div class="pagehead">
+      <span class="no">VIEW.01</span><h2>时 间 轴</h2><span class="d">42 张照片 · 3 段视频 · 本月</span>
+      <button class="act">上传媒体</button>
+    </div>
+
+    <div class="toolbar">
+      <select class="sel"><option>全部类型</option></select>
+      <button class="tool-btn">收藏</button>
+      <button class="tool-btn active">洱海 <span class="n">×12</span></button>
+      <button class="tool-btn">大理古城 <span class="n">×5</span></button>
+      <span class="sp"></span>
+      <button class="tool-btn trash">回收站</button>
+    </div>
+
+    <div class="legend">
+      <span class="li"><span class="d" style="background:#7d95a8"></span>照片 38</span>
+      <span class="li"><span class="d" style="background:#9a8aa0"></span>视频 3</span>
+      <span class="li"><span class="d" style="background:#c4a57a"></span>全景照片 1</span>
+      <span class="li"><span class="d" style="background:#b0766a"></span>全景视频 0</span>
+    </div>
+
+    <div class="dateband"><span class="d1">2026-09-14</span><span class="cnt">12 项</span><span class="ln"></span></div>
+    <div class="mgrid">
+      <div class="mcard"><div class="ph"><div class="img g1"></div><div class="veil"></div>
+        <span class="chip"><span class="dot" style="background:#6e8a72"></span>360° 全景</span>
+        <span class="fv"><svg viewBox="0 0 24 24" fill="#b0685c" stroke="none"><path d="M12 21s-7-4.6-9.5-8.5C.5 9 2 5 5.5 5c2 0 3.4 1.2 4.2 2.4l2.3 3 2.3-3C15.1 6.2 16.5 5 18.5 5 22 5 23.5 9 21.5 12.5 19 16.4 12 21 12 21z"/></svg></span>
+        <span class="anim-tag" style="top:44px;left:12px">GSAP: stagger 0.06 / y24</span></div>
+        <div class="cap">洱海东岸<span class="loc">环湖骑行</span></div></div>
+      <div class="mcard"><div class="ph"><div class="img g2"></div><div class="veil"></div></div><div class="cap">晨雾码头</div></div>
+      <div class="mcard"><div class="ph"><div class="img g3"></div></div><div class="cap">才村码头</div></div>
+      <div class="mcard"><div class="ph"><div class="img g4"></div></div><div class="cap">磻溪村</div></div>
+      <div class="mcard"><div class="ph"><div class="img g5"></div></div><div class="cap">全景 · 天空</div></div>
+    </div>
+
+    <div class="dateband"><span class="d1">2026-09-10</span><span class="cnt">5 项</span><span class="ln"></span></div>
+    <div class="mgrid" style="padding-bottom:10px">
+      <div class="mcard"><div class="ph"><div class="img g2"></div><div class="veil"></div></div><div class="cap">夜航灯</div></div>
+      <div class="mcard"><div class="ph"><div class="img g4"></div><div class="veil"></div></div><div class="cap">塔影</div></div>
+      <div class="mcard"><div class="ph"><div class="img g1"></div><div class="veil"></div></div><div class="cap">湖岸线</div></div>
+    </div>
+
+    <div class="motion">
+      <h4>MOTION SPEC · GSAP (useGSAP + ScrollTrigger) — 本页动效账本</h4>
+      <div class="m-row">
+        <span class="m-chip"><b>page-enter</b> 页面挂载：header/toolbar/legend y24→0 淡入 · dur .6 · power2.out</span>
+        <span class="m-chip"><b>grid-stagger</b> 媒体卡瀑布：stagger 0.06 · y24→0 · opacity · ScrollTrigger start 'top 88%'</span>
+        <span class="m-chip"><b>card-hover</b> 媒体卡：scale 1.015 + 阴影升至 lift · dur .5 · power2.out</span>
+        <span class="m-chip"><b>dateband</b> 日期带进入：x-16→0 · dur .5</span>
+        <span class="m-chip"><b>reduced-motion</b> prefers-reduced-motion → 全部跳过（gsap.matchMedia）</span>
+      </div>
+    </div>
+
+    <div class="foot"><span>TIMELINEVIEW · MORANDI DEEP-DIVE</span><span>STATIC MOCKUP · 2026-10</span></div>
+  </main>
+</div>
+<div class="aiball">AI</div>
+</body>
+</html>

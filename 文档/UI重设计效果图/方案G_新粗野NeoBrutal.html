@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>方案 G · 新粗野 Neo-Brutal — Panomint UI 重设计</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=Space+Grotesk:wght@500;700&family=Noto+Sans+SC:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f1e8;--yellow:#ffd02e;--blue:#3d5afe;--ink:#111;--panel:#fff;
+--bd:3px solid var(--ink);--sh:6px 6px 0 var(--ink);--sh2:4px 4px 0 var(--ink);--r:4px;
+--ease:cubic-bezier(.32,.72,0,1)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:'Space Grotesk','Noto Sans SC',sans-serif;min-height:100vh}
+.hd{font-family:'Archivo','Noto Sans SC',sans-serif;font-weight:900}
+.mono{font-family:'IBM Plex Mono',monospace}
+.wrap{max-width:1180px;margin:0 auto;padding:0 40px}
+.tagbar{position:sticky;top:0;z-index:50;background:var(--yellow);border-bottom:var(--bd)}
+.tagbar .in{display:flex;align-items:center;gap:14px;padding:12px 40px;max-width:1180px;margin:0 auto}
+.tagbar .tag{background:var(--ink);color:var(--yellow);padding:4px 12px;font-family:'IBM Plex Mono',monospace;font-size:11px}
+.tagbar h1{font-size:16px;font-weight:900;text-transform:uppercase;letter-spacing:-.01em}
+.tagbar .note{margin-left:auto;font-size:12px;font-weight:500}
+.sec{padding:46px 0 8px}
+.sec-h{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.sec-h .no{background:var(--ink);color:var(--yellow);padding:4px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px}
+.sec-h h2{font-size:19px;font-weight:900;text-transform:uppercase;letter-spacing:-.01em}
+.sec-h .d{margin-left:auto;font-size:12.5px;font-weight:500}
+/* 导航：黑框按钮排 */
+.nav{display:flex;gap:0;flex-wrap:wrap}
+.nav .brand{background:var(--blue);color:#fff;border:var(--bd);box-shadow:var(--sh);padding:12px 22px;font-weight:900;font-size:16px;margin-right:16px}
+.nav a{background:var(--panel);border:var(--bd);box-shadow:var(--sh2);padding:12px 20px;font-weight:700;font-size:13px;text-decoration:none;color:var(--ink);margin:0 10px 10px 0;display:inline-block;transition:all .3s var(--ease)}
+.nav a:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--ink)}
+.nav a.on{background:var(--yellow)}
+.nav .ai{background:var(--ink);color:var(--yellow);box-shadow:var(--sh2)}
+/* 网格 */
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:22px}
+.col4{grid-column:span 4}.col8{grid-column:span 8}
+.shot{background:var(--panel);border:var(--bd);box-shadow:var(--sh);overflow:hidden}
+.shot .ph{position:relative;border-bottom:var(--bd)}
+.shot .img{width:100%;display:block}
+.shot .b{position:absolute;top:-3px;left:-3px;background:var(--blue);color:#fff;font-size:11px;font-weight:900;padding:6px 12px;border:var(--bd);text-transform:uppercase}
+.shot .meta{padding:12px 16px;display:flex;justify-content:space-between;font-weight:700;font-size:13px}
+.shot .meta .m{font-family:'IBM Plex Mono',monospace;font-weight:400;font-size:11px}
+.i1{height:220px;background:linear-gradient(160deg,#ffb84d 0%,#ff7a3d 55%,#3d5afe 100%)}
+.i2{height:150px;background:linear-gradient(150deg,#4dd0e1 0%,#3d5afe 60%,#1a237e 100%)}
+.i3{height:150px;background:linear-gradient(145deg,#ffd54f 0%,#ff8a65 60%,#d84315 100%)}
+.i4{height:150px;background:linear-gradient(155deg,#aed581 0%,#558b2f 65%,#1b5e20 100%)}
+/* AI：黑框终端窗 */
+.aiwin{background:var(--panel);border:var(--bd);box-shadow:8px 8px 0 var(--ink)}
+.aiwin .bar{background:var(--ink);color:var(--yellow);padding:10px 18px;font-weight:900;font-size:13px;display:flex;justify-content:space-between;text-transform:uppercase}
+.aibody{padding:22px;font-size:13.5px}
+.msg-u{margin-left:auto;width:max-content;max-width:80%;background:var(--yellow);border:var(--bd);box-shadow:var(--sh2);padding:11px 16px;font-weight:700;margin-bottom:20px}
+.msg-a{border:var(--bd);padding:16px 18px;background:#fff}
+.msg-a .tt{font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--blue);color:#fff;display:inline-block;padding:3px 10px;margin-bottom:12px;font-weight:700}
+.msg-a table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+.msg-a td{border:2px solid var(--ink);padding:7px 12px;font-weight:500}
+.msg-a .cfm{display:flex;gap:12px;margin-top:16px}
+.msg-a .cfm button{font-family:'Archivo','Noto Sans SC',sans-serif;font-weight:900;font-size:13px;padding:10px 22px;border:var(--bd);box-shadow:var(--sh2);cursor:pointer;background:var(--yellow);text-transform:uppercase;transition:all .3s var(--ease)}
+.msg-a .cfm button:hover{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--ink)}
+.msg-a .cfm button.no{background:#fff}
+.aiinput{display:flex;gap:0;margin-top:20px}
+.aiinput input{flex:1;border:var(--bd);padding:12px 16px;font-family:inherit;font-size:13.5px;font-weight:500;outline:none}
+.aiinput .send{background:var(--ink);color:var(--yellow);border:var(--bd);border-left:none;padding:0 24px;font-weight:900;font-size:13px;cursor:pointer;text-transform:uppercase}
+/* 色板 */
+.swatches{display:grid;grid-template-columns:repeat(6,1fr);gap:18px}
+.sw{border:var(--bd);box-shadow:var(--sh2);background:var(--panel)}
+.sw .c{height:52px;border-bottom:var(--bd)}
+.sw .l{padding:8px 11px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:700}
+.foot{padding:40px 0 54px;display:flex;justify-content:space-between;font-weight:700;font-size:11.5px;text-transform:uppercase;border-top:var(--bd);margin-top:50px}
+</style>
+</head>
+<body>
+<div class="tagbar"><div class="in"><span class="tag">SCHEME G</span><h1>新粗野 Neo-Brutal</h1><span class="note">粗黑边框 · 硬阴影位移 · 高饱和撞色（黄/蓝/白）· 大写黑体 · 零圆角</span></div></div>
+<div class="wrap">
+  <div class="sec"><div class="sec-h"><span class="no">01</span><h2>导航 — 黑框按钮排</h2><span class="d">hover = 按压位移（6px 阴影 → 2px）</span></div>
+    <div class="nav">
+      <span class="brand">PANOMINT</span>
+      <a class="on" href="#">时间轴</a><a href="#">相册</a><a href="#">地图</a><a href="#">人物</a><a href="#">工具箱</a>
+      <a class="ai" href="#">AI 助手 →</a>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">02</span><h2>媒体网格 — 贴纸相框</h2><span class="d">标签盖角 · 图片区域大色块</span></div>
+    <div class="grid">
+      <div class="shot col4"><div class="ph"><div class="img i1"></div><span class="b">360° 全景</span></div><div class="meta"><span>洱海东岸·环湖骑行</span><span class="m">09-14 42MP</span></div></div>
+      <div class="shot col8"><div class="ph"><div class="img i2"></div><span class="b">HEVC 转码中</span></div><div class="meta"><span>大理夜航</span><span class="m">09-10 4K60</span></div></div>
+      <div class="shot col4"><div class="ph"><div class="img i3"></div></div><div class="meta"><span>沙溪古镇</span><span class="m">09-08</span></div></div>
+      <div class="shot col4"><div class="ph"><div class="img i4"></div></div><div class="meta"><span>山径徒步</span><span class="m">09-05</span></div></div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">03</span><h2>AI 助手 — 黑框终端窗</h2><span class="d">大写标题栏 · 确认按钮按压位移</span></div>
+    <div class="aiwin">
+      <div class="bar"><span>AI ASSISTANT — QWEN3.6-27B LOCAL</span><span>● ONLINE</span></div>
+      <div class="aibody">
+        <div class="msg-u">看看转码队列什么情况，顺便把 HLS 分片改成 6 秒</div>
+        <div class="msg-a">
+          <span class="tt">AGENT · PANO_VIEW_TRANCODE_SNAPSHOT</span>
+          <table><tr><td>WAITING</td><td>0</td></tr><tr><td>PROCESSING</td><td>0</td></tr><tr><td>FAILED</td><td>0</td></tr></table>
+          <p style="margin-top:12px;font-weight:500">队列空闲，无活动任务。接下来修改 HLS 分片时长：</p>
+          <div class="cfm"><button>确认执行 4→6</button><button class="no">取消</button></div>
+        </div>
+        <div class="aiinput"><input placeholder="输入任务，回车提交"><span class="send">SEND</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">04</span><h2>色板与规格</h2></div>
+    <div class="swatches">
+      <div class="sw"><div class="c" style="background:#f5f1e8"></div><div class="l">BG #F5F1E8</div></div>
+      <div class="sw"><div class="c" style="background:#ffd02e"></div><div class="l">YELLOW #FFD02E</div></div>
+      <div class="sw"><div class="c" style="background:#3d5afe"></div><div class="l">BLUE #3D5AFE</div></div>
+      <div class="sw"><div class="c" style="background:#111111"></div><div class="l">INK #111111</div></div>
+      <div class="sw"><div class="c" style="background:#ffffff"></div><div class="l">PANEL #FFFFFF</div></div>
+      <div class="sw"><div class="c" style="background:#ff7a3d"></div><div class="l">PHOTO #FF7A3D</div></div>
+    </div>
+    <div style="margin-top:20px;font-size:13px;font-weight:500;line-height:1.9;max-width:52em">
+      规则：3px 黑边框 + 6px 硬阴影（无模糊）；hover = 元素向阴影方向位移（按压进纸面）；零圆角；黄色为品牌底色、蓝色为媒体高亮、黑白为结构。字体 Archivo Black 大写标题 + Space Grotesk 700 正文。交互反馈全部通过「位移 + 阴影收缩」表达，不用颜色淡入。
+    </div>
+  </div>
+  <div class="foot"><span>PANOMINT UI · SCHEME G / NEO-BRUTAL</span><span>MOCKUP 2026-10</span></div>
+</div>
+</body>
+</html>

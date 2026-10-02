@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MapView · 晨雾 Morandi 深化稿 — 瓦片调和 + 浮层 + GSAP 账本</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9e4de;--card:#f4f1ed;--card2:#efebe5;--tx:#41403c;--tx2:#7d7a73;--tx3:#a5a29a;
+--line:#ddd8d0;--primary:#4a5a6a;--primary-h:#3d4b58;--mist:rgba(143,163,173,.16);
+--ok:#6e8a72;--r:10px;--ease:cubic-bezier(.32,.72,0,1);
+--sh:0 1px 3px rgba(65,64,60,.05),0 10px 34px rgba(65,64,60,.07);
+--sh-lift:0 2px 6px rgba(65,64,60,.06),0 14px 40px rgba(65,64,60,.12)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:300;font-size:14px;-webkit-font-smoothing:antialiased;letter-spacing:.01em}
+.mono{font-family:'IBM Plex Mono',monospace;font-weight:400}
+.wrap{max-width:1400px;margin:0 auto;display:flex;min-height:100vh}
+.side{width:220px;flex:none;background:#f4f1ed;border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:2px}
+.side .brand{font-size:13px;letter-spacing:.24em;padding:6px 12px 18px}
+.side a{color:var(--tx2);text-decoration:none;font-size:13px;padding:9px 14px;border-radius:7px;letter-spacing:.14em}
+.side a.on{color:var(--tx);background:var(--mist)}
+.main{flex:1;min-width:0;position:relative}
+.top{height:56px;background:#f4f1ed;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 24px}
+.top .ttl{font-size:15px;font-weight:400;letter-spacing:.12em}
+.top .sp{flex:1}
+.top .u{font-size:12px;color:var(--tx2)}
+/* 地图画布：瓦片 Morandi 调和（filter 演示） */
+.map{position:absolute;top:56px;bottom:0;left:0;right:0;overflow:hidden}
+.tiles{position:absolute;inset:0;
+  background:
+    linear-gradient(rgba(233,228,222,.28), rgba(233,228,222,.28)),
+    repeating-linear-gradient(90deg, #cfd8d3 0 120px, #c4cfc9 120px 240px),
+    repeating-linear-gradient(0deg, transparent 0 88px, rgba(255,255,255,.5) 88px 90px),
+    #d7dfd9;
+  filter:saturate(.42) brightness(1.04)}
+.roads{position:absolute;inset:0}
+.road{position:absolute;background:#f0ece4;opacity:.85}
+.r1{left:8%;top:30%;width:70%;height:5px;transform:rotate(-7deg)}
+.r2{left:20%;top:10%;width:4px;height:75%;transform:rotate(9deg)}
+.r3{left:40%;top:20%;width:55%;height:3px;transform:rotate(4deg)}
+.water{position:absolute;left:-5%;bottom:-8%;width:60%;height:34%;background:linear-gradient(170deg,#b8c9c4,#93aca8);border-radius:48% 52% 40% 60%/60% 40% 62% 38%;opacity:.7}
+.filter-note{position:absolute;top:12px;right:14px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#4a5a6a;background:rgba(244,241,237,.85);padding:4px 10px;border-radius:6px;border:1px dashed rgba(74,90,106,.4)}
+/* 聚类标注（Morandi 化 marker） */
+.mk{position:absolute;display:flex;flex-direction:column;align-items:center;gap:4px;transform:translate(-50%,-100%)}
+.mk .pin{width:30px;height:30px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);background:var(--primary);display:flex;align-items:center;justify-content:center;box-shadow:var(--sh)}
+.mk .pin i{transform:rotate(45deg);width:10px;height:10px;border-radius:50%;background:#f4f1ed;display:block}
+.mk.cluster .pin{background:#8fa3ad;width:36px;height:36px}
+.mk .n{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx2)}
+.mk.single .pin{width:22px;height:22px}
+.mk.single .pin i{width:7px;height:7px}
+/* 搜索浮层 */
+.search{position:absolute;top:20px;left:20px;width:320px;background:#f4f1ed;border-radius:var(--r);box-shadow:var(--sh-lift);padding:10px 14px;display:flex;align-items:center;gap:10px}
+.search input{flex:1;border:none;background:transparent;outline:none;font-family:inherit;font-size:13px;color:var(--tx);font-weight:300}
+.search .ic{color:var(--tx3)}
+/* 时间轴浮层（底部） */
+.tl-dock{position:absolute;left:20px;right:20px;bottom:20px;background:#f4f1ed;border-radius:var(--r);box-shadow:var(--sh-lift);padding:14px 18px}
+.tl-dock .hd{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.tl-dock .hd b{font-size:12.5px;font-weight:400;letter-spacing:.1em}
+.tl-dock .hd .cnt{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3)}
+.bars{display:flex;align-items:flex-end;gap:3px;height:44px}
+.bar{flex:1;border-radius:3px 3px 0 0;background:var(--mist)}
+.bar.h2{background:rgba(74,90,106,.5)}
+.bar.h3{background:var(--primary)}
+/* hover 卡 */
+.hovercard{position:absolute;left:38%;top:34%;width:230px;background:#f4f1ed;border-radius:var(--r);box-shadow:var(--sh-lift);overflow:hidden}
+.hovercard .hp{height:96px;background:linear-gradient(155deg,#d0d8d2 0%,#9db0a5 55%,#5f7d6d 100%)}
+.hovercard .hc{padding:12px 15px 14px}
+.hovercard .hc .t{font-size:13px;font-weight:400}
+.hovercard .hc .m{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3);margin-top:5px}
+.hovercard .hc .go{margin-top:10px;font-size:12px;color:var(--primary)}
+/* 筛选 dock（右侧） */
+.dock{position:absolute;right:20px;top:70px;width:170px;background:#f4f1ed;border-radius:var(--r);box-shadow:var(--sh-lift);padding:14px 16px}
+.dock h5{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.16em;color:var(--tx3);margin-bottom:10px;font-weight:400}
+.dock .f{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12.5px;color:var(--tx2);border-bottom:1px solid var(--line)}
+.dock .f:last-child{border-bottom:none}
+.dock .f .sw{width:32px;height:18px;border-radius:99px;background:var(--ok);position:relative}
+.dock .f .sw::after{content:'';position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff}
+.dock .f .sw.off{background:var(--line2,#d5d5d0)}
+/* 动效账本 */
+.motion{position:static;margin:0;background:var(--card);border-top:1px dashed var(--line);padding:18px 24px 26px}
+.motion{position:relative;top:auto}
+.motion-wrap{position:relative}
+.motion h4{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3);letter-spacing:.18em;margin-bottom:12px;font-weight:400}
+.motion .m-row{display:flex;gap:10px;flex-wrap:wrap}
+.motion .m-chip{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 13px;font-size:11.5px;color:var(--tx2)}
+.motion .m-chip b{color:var(--tx);font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:11px}
+.motion-sec{padding:26px 24px 40px;background:var(--bg)}
+.motion-sec h3{font-size:15px;font-weight:400;letter-spacing:.12em;margin-bottom:16px}
+.anim-tag{position:absolute;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#4a5a6a;background:rgba(255,209,102,.32);border:1px dashed rgba(74,90,106,.45);padding:2px 7px;border-radius:4px;z-index:20;pointer-events:none}
+.foot{padding:0 24px 36px;color:var(--tx3);font-size:10.5px;font-family:'IBM Plex Mono',monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <div class="brand">PANOMINT</div>
+    <a href="#">时间轴</a><a class="on" href="#">地 图</a><a href="#">相 册</a><a href="#">人 物</a><a href="#">标 签</a>
+    <div class="grp" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--tx3);letter-spacing:.18em;padding:16px 12px 6px">SPACE</div>
+    <a href="#">共享空间</a><a href="#">文件夹</a>
+    <div class="grp" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--tx3);letter-spacing:.18em;padding:16px 12px 6px">OPS</div>
+    <a href="#">工具箱</a><a href="#">上 传</a><a href="#">搜 索</a>
+    <div class="grp" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--tx3);letter-spacing:.18em;padding:16px 12px 6px">SYS</div>
+    <a href="#">设 置</a><a href="#">管理后台</a>
+  </aside>
+  <main class="main">
+    <div class="top"><span class="ttl">地 图</span><span class="sp"></span><span class="u">owner@pano.local</span></div>
+    <div class="map">
+      <div class="tiles"></div>
+      <div class="water"></div>
+      <div class="roads"><div class="road r1"></div><div class="road r2"></div><div class="road r3"></div></div>
+      <span class="filter-note">TILES: filter saturate(.42) brightness(1.04) — 瓦片 Morandi 调和</span>
+
+      <div class="mk cluster" style="left:46%;top:38%"><span class="pin"><i></i></span><span class="n">12</span></div>
+      <div class="mk single" style="left:60%;top:52%"><span class="pin"><i></i></span><span class="n">1</span></div>
+      <div class="mk single" style="left:33%;top:56%"><span class="pin"><i></i></span><span class="n">1</span></div>
+      <div class="mk single" style="left:68%;top:30%"><span class="pin"><i></i></span><span class="n">3</span></div>
+
+      <div class="search"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></span><input placeholder="搜索地点、城市群组…"></div>
+
+      <div class="dock">
+        <h5>FILTER DOCK</h5>
+        <div class="f"><span>照片</span><span class="sw"></span></div>
+        <div class="f"><span>视频</span><span class="sw"></span></div>
+        <div class="f"><span>全景</span><span class="sw off"></span></div>
+        <div class="f"><span>收藏</span><span class="sw off"></span></div>
+      </div>
+
+      <div class="hovercard">
+        <div class="hp"></div>
+        <div class="hc"><div class="t">洱海东岸 · 环湖骑行</div><div class="m">2026-09-14 · 3 张 · 大理</div><div class="go">查看此地点的媒体 →</div></div>
+      </div>
+
+      <div class="tl-dock">
+        <div class="hd"><b>时间分布</b><span class="cnt">2026-06 — 2026-09 · 45 项 · 7 地点</span></div>
+        <div class="bars">
+          <div class="bar" style="height:12px"></div><div class="bar" style="height:8px"></div><div class="bar h2" style="height:22px"></div>
+          <div class="bar" style="height:14px"></div><div class="bar h2" style="height:30px"></div><div class="bar" style="height:10px"></div>
+          <div class="bar h3" style="height:44px"></div><div class="bar h2" style="height:26px"></div><div class="bar" style="height:16px"></div>
+          <div class="bar" style="height:9px"></div><div class="bar h2" style="height:20px"></div><div class="bar" style="height:13px"></div>
+        </div>
+      </div>
+
+      <span class="anim-tag" style="left:24px;top:66px">GSAP: dock slide-in y16</span>
+      <span class="anim-tag" style="left:360px;top:86px">search fade+scale .96</span>
+      <span class="anim-tag" style="left:660px;top:330px">hovercard pop y8</span>
+    </div>
+  </main>
+</div>
+
+<div class="motion-sec">
+  <h3>动 效 账 本</h3>
+  <div class="motion">
+    <h4>MOTION SPEC · GSAP — 本页动效账本（虚拟滚动无；瓦片由 Leaflet 渲染，CSS filter 调和不触碰引擎）</h4>
+    <div class="m-row">
+      <span class="m-chip"><b>page-enter</b> 顶栏/页头 y24→0 · dur .6 · power2.out（与 Timeline 同剧目）</span>
+      <span class="m-chip"><b>dock-in</b> 时间轴 dock / 筛选 dock：y16→0 + opacity · dur .5 · power2.out</span>
+      <span class="m-chip"><b>search-in</b> 搜索框：opacity + scale .96→1 · dur .45 · power3.out</span>
+      <span class="m-chip"><b>hovercard-pop</b> 悬停卡：y8→0 · opacity · dur .4 · power3.out（仅首次出现）</span>
+      <span class="m-chip"><b>tile-harmony</b> 瓦片调和：CSS filter 常驻（非动画）· saturate(.42) brightness(1.04)</span>
+      <span class="m-chip"><b>reduced-motion</b> 全部跳过（gsap.matchMedia）</span>
+    </div>
+    <div style="margin-top:14px;font-size:12px;color:var(--tx2);line-height:1.9;max-width:52em">
+      标注（marker/pin）由地图引擎渲染，不做 GSAP 逐点动画（性能与引擎生命周期风险）；聚类展开的视觉反馈交给引擎自身的 zoom 过渡。悬停卡与浮层的出入场走 GSAP；瓦片灰调调和是纯 CSS 常驻滤镜——让地图「坐」进晨雾界面而不是浮在上面。
+    </div>
+  </div>
+</div>
+<div style="padding:0 24px 40px;color:var(--tx3);font-size:10.5px;font-family:'IBM Plex Mono',monospace">MAPVIEW · MORANDI DEEP-DIVE · STATIC MOCKUP 2026-10</div>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>时间分布条 · 设计迭代 — 晨雾 Morandi</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9e4de;--card:#f4f1ed;--card2:#efebe5;--tx:#41403c;--tx2:#7d7a73;--tx3:#a5a29a;
+--line:#ddd8d0;--primary:#4a5a6a;--primary-h:#3d4b58;--mist:rgba(143,163,173,.16);
+--mist2:rgba(143,163,173,.32);--ok:#6e8a72;--mark:#ffd166;--r:10px;--ease:cubic-bezier(.32,.72,0,1);
+--sh:0 1px 3px rgba(65,64,60,.05),0 10px 34px rgba(65,64,60,.07)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:300;font-size:14px;-webkit-font-smoothing:antialiased}
+.mono{font-family:'IBM Plex Mono',monospace;font-weight:400}
+.wrap{max-width:1240px;margin:0 auto;padding:34px 44px 60px}
+.tagbar{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.tagbar .tag{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.14em;color:#4a5a6a;background:rgba(143,163,173,.16);padding:4px 11px;border-radius:6px}
+.tagbar h1{font-size:17px;font-weight:400;letter-spacing:.1em}
+.tagbar .note{margin-left:auto;color:var(--tx2);font-size:11.5px}
+.lead{color:var(--tx2);font-size:12.5px;line-height:1.9;margin-bottom:26px;max-width:60em}
+.lead b{font-weight:400;color:var(--tx)}
+
+/* ---- 通用 dock 底 ---- */
+.dock{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);position:relative}
+.dock::before{content:'';position:absolute;inset:0;border-radius:var(--r);pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(65,64,60,.03)}
+
+/* ============ 状态一：默认 ============ */
+.demo{margin-bottom:44px}
+.demo-h{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+.demo-h .no{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3);letter-spacing:.14em}
+.demo-h b{font-size:14.5px;font-weight:400;letter-spacing:.08em}
+.demo-h .d{margin-left:auto;color:var(--tx3);font-size:11.5px}
+.dock-in{padding:16px 20px 13px}
+.hd{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.hd .tt{font-size:12.5px;font-weight:400;letter-spacing:.14em}
+.hd .hint{font-size:11px;color:var(--tx3);font-weight:300}
+.hd .range{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tx);
+  background:var(--mist);padding:4px 12px;border-radius:6px}
+.hd .stats{display:flex;gap:16px;font-size:11px;color:var(--tx2)}
+.hd .stats b{font-family:'IBM Plex Mono',monospace;font-weight:400;color:var(--tx);font-size:11.5px}
+/* 直方图 */
+.hist{display:flex;align-items:flex-end;gap:4px;height:56px;position:relative;padding-bottom:0}
+.hist::after{content:'';position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--line2,#d5d0c8)}
+.col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;cursor:pointer;position:relative}
+.col .bar{border-radius:3px 3px 0 0;background:linear-gradient(180deg,#8fa3ad,#6e8494);opacity:.55;transition:all .45s var(--ease)}
+.col:hover .bar{opacity:1;background:linear-gradient(180deg,#6e8494,#4a5a6a)}
+.col .tip{position:absolute;top:-26px;left:50%;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;
+  font-size:10px;color:var(--tx);background:#f4f1ed;border:1px solid var(--line);border-radius:5px;padding:2px 8px;
+  white-space:nowrap;opacity:0;transition:opacity .3s var(--ease);pointer-events:none}
+.col:hover .tip{opacity:1}
+/* 刷选区间（默认态展示一个示例区间） */
+.brush{position:absolute;bottom:0;top:0;background:rgba(74,90,106,.1);border-left:1px solid var(--primary);border-right:1px solid var(--primary);border-radius:3px}
+.brush .hnd{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;background:var(--card);border:1.5px solid var(--primary);transform:translateY(-50%)}
+.brush .hnd.l{left:-6px}.brush .hnd.r{right:-6px}
+/* 月份轴 */
+.axis{display:flex;justify-content:space-between;margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx3)}
+
+/* ============ 状态二：悬停单柱 ============ */
+.hover-demo .col.demo-col .bar{opacity:1;background:linear-gradient(180deg,#6e8494,#4a5a6a)}
+.hover-demo .col.demo-col .tip{opacity:1}
+.hover-demo .col.demo-col::after{content:'';position:absolute;left:0;right:0;top:-4px;bottom:0;background:var(--mist);border-radius:4px}
+
+/* ============ 状态三：区间选中 + 摘要 ============ */
+.sel-summary{display:flex;gap:26px;align-items:center;margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
+.sel-summary .s b{font-family:'IBM Plex Mono',monospace;font-weight:400;font-size:16px;display:block;color:var(--tx)}
+.sel-summary .s span{font-size:10.5px;color:var(--tx3)}
+.sel-summary .act{margin-left:auto;display:flex;gap:9px}
+.sel-summary .act button{font-family:inherit;font-size:12px;letter-spacing:.06em;padding:7px 18px;border-radius:8px;cursor:pointer;border:none}
+.sel-summary .act .p{background:var(--primary);color:#f4f1ed}
+.sel-summary .act .g{background:transparent;color:var(--tx2);border:1px solid var(--line)}
+
+/* ---- 标注 ---- */
+.an{position:absolute;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#4a5a6a;
+  background:rgba(255,209,102,.32);border:1px dashed rgba(74,90,106,.45);padding:2px 7px;border-radius:4px;
+  z-index:10;pointer-events:none}
+
+/* ---- 全页上下文缩略 ---- */
+.ctx{display:flex;gap:16px;align-items:flex-start}
+.ctx .thumb-full{flex:1;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:var(--sh);background:#fff;padding:10px}
+.ctx .thumb-full .mini{position:relative;height:150px;overflow:hidden;border-radius:4px;
+  background:linear-gradient(rgba(233,228,222,.28),rgba(233,228,222,.28)),repeating-linear-gradient(90deg,#cfd8d3 0 40px,#c4cfc9 40px 80px),#d7dfd9}
+.ctx .mini .mini-dock{position:absolute;left:8px;right:8px;bottom:8px;background:#f4f1ed;border-radius:6px;box-shadow:var(--sh);padding:7px 10px;display:flex;align-items:center;gap:8px}
+.ctx .mini .mini-dock .mb{display:flex;align-items:flex-end;gap:2px;height:18px;flex:1}
+.ctx .mini .mini-dock .mb i{flex:1;background:#8fa3ad;opacity:.6;border-radius:2px 2px 0 0}
+.ctx .mini .mini-dock .mt{font-size:8.5px;color:var(--tx2);letter-spacing:.1em}
+.ctx .desc{width:300px;font-size:12.5px;color:var(--tx2);line-height:2;font-weight:300}
+.ctx .desc b{font-weight:400;color:var(--tx)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="tagbar"><span class="tag">ITERATION</span><h1>时间分布条 · 设计迭代</h1><span class="note">地图页 dock 特写 · 三状态 + 细节标注</span></div>
+  <p class="lead">在保持晨雾 Morandi 体系的前提下，把时间条从「朴素直方图」升级为<b>可刷选的时间范围控件</b>：渐变柱 + 月份轴 + 区间刷（brush）+ 悬停气泡 + 选择摘要与动作区。三状态如下。</p>
+
+  <!-- 状态一 -->
+  <div class="demo">
+    <div class="demo-h"><span class="no">STATE.01</span><b>默认态（含示例刷选区间）</b><span class="d">渐变柱 · 月份轴 · 区间刷手柄</span></div>
+    <div class="dock dock-in" style="position:relative">
+      <div class="hd">
+        <span class="tt">时间分布</span><span class="hint">拖动两端手柄选择范围 · 点击柱聚焦当月</span>
+        <span class="range">2026-07-12 — 2026-09-30</span>
+      </div>
+      <div class="hist">
+        <div class="col" style="height:22%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:14%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:34%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:20%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:48%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:16%"><div class="bar" style="height:100%"></div></div>
+        <div class="brush" style="left:38%;width:44%"><span class="hnd l"></span><span class="hnd r"></span></div>
+        <div class="col" style="height:78%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:40%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:24%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:14%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:30%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:20%"><div class="bar" style="height:100%"></div></div>
+      </div>
+      <div class="axis"><span>2026-06</span><span>07</span><span>08</span><span>09</span><span>10</span></div>
+      <span class="an" style="right:18px;top:14px">range pill = 当前选中区间</span>
+      <span class="an" style="left:46%;bottom:76px">brush 刷选带 + 双手柄</span>
+    </div>
+  </div>
+
+  <!-- 状态二 -->
+  <div class="demo">
+    <div class="demo-h"><span class="no">STATE.02</span><b>柱悬停（聚焦当月）</b><span class="d">hover 背景 + 数值气泡</span></div>
+    <div class="dock dock-in hover-demo" style="position:relative">
+      <div class="hd"><span class="tt">时间分布</span><span class="hint">悬停查看当月数量</span><span class="range">全部时间</span></div>
+      <div class="hist" style="height:64px">
+        <div class="col" style="height:30%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:18%"><div class="bar" style="height:100%"></div></div>
+        <div class="col demo-col" style="height:100%"><span class="tip">2026-09 · <b class="mono">18</b> 项</span><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:38%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:22%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:44%"><div class="bar" style="height:100%"></div></div>
+      </div>
+      <div class="axis"><span>06</span><span>07</span><span>08</span><span>09</span><span>10</span></div>
+      <span class="an" style="left:34%;bottom:96px">hover: 柱加深 + 列背景 mist + 数值气泡</span>
+    </div>
+  </div>
+
+  <!-- 状态三 -->
+  <div class="demo">
+    <div class="demo-h"><span class="no">STATE.03</span><b>区间选中后 — 摘要与动作</b><span class="d">选中统计 + 应用/清除</span></div>
+    <div class="dock dock-in">
+      <div class="hd"><span class="tt">时间分布</span><span class="hint">已选择区间</span><span class="range">2026-07-12 — 2026-09-30</span></div>
+      <div class="hist" style="height:44px">
+        <div class="col" style="height:30%"><div class="bar" style="height:100%;opacity:.28"></div></div>
+        <div class="col" style="height:18%"><div class="bar" style="height:100%;opacity:.28"></div></div>
+        <div class="col" style="height:52%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:34%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:78%"><div class="bar" style="height:100%"></div></div>
+        <div class="col" style="height:46%"><div class="bar" style="height:100%"></div></div>
+      </div>
+      <div class="sel-summary">
+        <div class="s"><b>27</b><span>区间内媒体</span></div>
+        <div class="s"><b>4</b><span>涉及地点</span></div>
+        <div class="s"><b>2</b><span>涉及相册</span></div>
+        <div class="act"><button class="p">应用范围</button><button class="g">清除</button></div>
+      </div>
+      <span class="an" style="right:18px;bottom:70px">区间外柱降透明度 .28 — 聚焦选中</span>
+    </div>
+  </div>
+
+  <!-- 全页上下文 -->
+  <div class="demo">
+    <div class="demo-h"><span class="no">CONTEXT</span><b>全页位置关系</b><span class="d">dock 在地图画布底部（左右 20px 内缩）</span></div>
+    <div class="ctx">
+      <div class="thumb-full">
+        <div class="mini">
+          <div class="mini-dock"><span class="mt">时间分布</span>
+            <div class="mb"><i style="height:30%"></i><i style="height:18%"></i><i style="height:55%"></i><i style="height:36%"></i><i style="height:80%"></i><i style="height:44%"></i><i style="height:24%"></i></div>
+            <span class="mono" style="font-size:8.5px;color:var(--tx3)">07—09</span>
+          </div>
+        </div>
+      </div>
+      <div class="desc">
+        <b>结构</b>：dock 仍为米白圆角 + 双层漫射阴影（与搜索框/筛选 dock 同族）；直方图是 dock 的主体，月份轴在其下，摘要与动作区仅在选中后出现（渐进披露）。
+        <br><b>交互</b>：柱 hover 聚焦当月；拖动刷选手柄定区间；「应用范围」过滤地图标注并联动时间轴页。
+      </div>
+    </div>
+  </div>
+
+  <div style="padding-top:8px;color:var(--tx3);font-family:'IBM Plex Mono',monospace;font-size:10.5px">TIMELINE DOCK · DESIGN ITERATION · MORANDI · 2026-10</div>
+</div>
+</body>
+</html>

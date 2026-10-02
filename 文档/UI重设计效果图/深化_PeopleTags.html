@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 深化 · 人物 / 标签（VIEW.04 / VIEW.05）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #e9e4de; --surface: #f4f1ed; --surface-hover: #efebe5; --border: #ddd8d0;
+    --text: #41403c; --text2: #7d7a73; --text3: #a5a29a;
+    --primary: #4a5a6a; --primary-hover: #3d4b58; --danger: #b0685c; --success: #6e8a72;
+    --oat: #c4a57a; --mist: rgba(233,228,222,.82);
+    --shadow-card: 0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift: 0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font: "Outfit", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ded9d2; font-family: var(--font); color: var(--text); font-weight: 300; letter-spacing: .01em; padding: 28px 0 48px; }
+  .canvas { width: 1440px; margin: 0 auto; }
+  .frame { background: var(--bg); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 40px; }
+  .view-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: var(--text3); padding: 14px 36px 0; }
+
+  /* ===== 页头规范 ===== */
+  .page { padding: 26px 36px 40px; }
+  .ph { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+  .ph .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--text3); }
+  .ph h1 { font-size: 16px; font-weight: 500; letter-spacing: .12em; }
+  .ph .sub { font-family: var(--mono); font-size: 11px; color: var(--text2); letter-spacing: .02em; }
+  .ph .spacer { flex: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 10px; font-size: 13px; font-family: var(--font); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); transition: all .5s cubic-bezier(.32,.72,0,1); }
+  .btn:hover { background: var(--surface-hover); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #eef1f4; }
+  .btn.primary:hover { background: var(--primary-hover); }
+  .search { display: flex; align-items: center; gap: 8px; width: 240px; height: 38px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #efebe5; color: var(--text3); font-size: 13px; }
+
+  /* ===== 人物页 ===== */
+  .section { margin-bottom: 30px; }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .sec-head h2 { font-size: 15px; font-weight: 500; letter-spacing: .04em; }
+  .sec-head .hint { font-size: 12px; color: var(--text3); }
+  .sec-head .mono-count { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .pgrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 18px; }
+  .pcard { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 18px 12px 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; transition: box-shadow .5s cubic-bezier(.32,.72,0,1); }
+  .pcard:hover { box-shadow: var(--shadow-lift); }
+  .avatar { width: 88px; height: 88px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 400; color: rgba(255,255,255,.92); position: relative; }
+  .pcard:hover .avatar { transform: scale(1.03); }
+  .avatar { transition: transform .5s cubic-bezier(.32,.72,0,1); }
+  .a1 { background: linear-gradient(150deg,#7d95a8,#5d7288); }
+  .a2 { background: linear-gradient(150deg,#9a8aa0,#7a6c85); }
+  .a3 { background: linear-gradient(150deg,#c4a57a,#a98862); }
+  .a4 { background: linear-gradient(150deg,#6e8a72,#56705b); }
+  .a5 { background: linear-gradient(150deg,#b0766a,#936055); }
+  .a6 { background: linear-gradient(150deg,#8a97a3,#6d7a88); }
+  .pname { font-size: 13.5px; font-weight: 500; color: var(--text); }
+  .pmeta { font-family: var(--mono); font-size: 10.5px; color: var(--text2); letter-spacing: .02em; }
+  .pflag { position: absolute; top: 8px; right: 10px; font-size: 10px; color: var(--text3); }
+  .pick-dot { position: absolute; top: 10px; right: 10px; width: 17px; height: 17px; border-radius: 50%; border: 1.5px solid #fff; background: rgba(65,64,60,.34); }
+  .pick-dot.on { background: var(--primary); border-color: var(--primary); }
+  /* 聚类卡：虚线头像 */
+  .cluster .avatar { background: transparent; border: 1.5px dashed var(--text3); color: var(--text3); font-family: var(--mono); }
+  .cluster.picked { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .cluster .pcard-note { font-size: 10.5px; color: var(--text3); }
+  .merge-bar { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+  .merge-bar .mb-info { font-family: var(--mono); font-size: 11px; color: var(--primary); }
+  .merge-btn { padding: 5px 12px; border-radius: 8px; border: none; background: var(--primary); color: #eef1f4; font-size: 12px; font-family: var(--font); }
+
+  /* ===== 标签页 ===== */
+  .cloud { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; padding: 22px 26px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); margin-bottom: 22px; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 15px; border-radius: 999px; border: 1px solid transparent; background: rgba(244,241,237,.82); box-shadow: 0 1px 3px rgba(65,64,60,.08); color: var(--text); font-family: var(--font); cursor: pointer; transition: all .5s cubic-bezier(.32,.72,0,1); }
+  .chip:hover { box-shadow: var(--shadow-lift); }
+  .chip .cnt { font-family: var(--mono); font-size: 10px; color: var(--text2); }
+  .chip.s1 { font-size: 16px; } .chip.s2 { font-size: 14px; } .chip.s3 { font-size: 12.5px; color: var(--text2); }
+  .chip.active { background: var(--primary); color: #eef1f4; }
+  .chip.active .cnt { color: rgba(238,241,244,.75); }
+  .chip .ai-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--oat); }
+  .chip .pending { font-size: 9px; color: var(--oat); border: 1px solid var(--oat); border-radius: 5px; padding: 0 3px; }
+  /* 详情面板 */
+  .detail { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 20px 26px 24px; }
+  .d-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .d-head .d-name { font-size: 15px; font-weight: 500; letter-spacing: .04em; }
+  .d-head .d-meta { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .d-head .spacer { flex: 1; }
+  .mini-btn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 12px; font-family: var(--font); cursor: pointer; }
+  .mini-btn.danger { color: var(--danger); border-color: rgba(176,104,92,.4); }
+  .mgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .mtile { background: #faf8f5; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(65,64,60,.05); position: relative; }
+  .mthumb { aspect-ratio: 1; position: relative; }
+  .m1 { background: linear-gradient(150deg,#b8c4cd,#93a4b1); } .m2 { background: linear-gradient(150deg,#c9bfae,#a99a83); }
+  .m3 { background: linear-gradient(150deg,#a89aa4,#8a7d88); } .m4 { background: linear-gradient(150deg,#b3a795,#96897a); }
+  .veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(233,228,222,.16), transparent 34%); }
+  .mname { font-size: 10.5px; color: var(--text); text-align: center; padding: 7px 6px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mdate { font-family: var(--mono); font-size: 9.5px; color: var(--text3); text-align: center; padding-bottom: 8px; }
+
+  /* ===== 账本条 ===== */
+  .ledger { width: 1440px; margin: 0 auto; background: var(--primary); border-radius: 14px; padding: 16px 26px; display: flex; gap: 26px; }
+  .ledger .lt { color: rgba(238,241,244,.65); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; margin-bottom: 4px; }
+  .ledger .li { flex: 1; }
+  .ledger .ln { color: #eef1f4; font-size: 12px; font-weight: 400; }
+  .ledger .ld { color: rgba(238,241,244,.55); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ============ VIEW.04 人物 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.04 · /people — 人物（圆形头像卡体系）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">04</span><h1>人物</h1>
+        <span class="sub">6 位已命名 · 3 个待命名</span>
+        <div class="spacer"></div>
+        <button class="btn">重新扫描人脸</button>
+      </div>
+
+      <div class="section">
+        <div class="sec-head"><h2>已命名</h2><span class="mono-count">NAMED · 6</span></div>
+        <div class="pgrid">
+          <div class="pcard"><div class="avatar a1">林</div><div class="pname">林远</div><div class="pmeta">128 张</div></div>
+          <div class="pcard"><div class="avatar a2">苏</div><div class="pname">苏晚</div><div class="pmeta">96 张</div></div>
+          <div class="pcard"><div class="avatar a3">陈</div><div class="pname">陈屿</div><div class="pmeta">64 张</div></div>
+          <div class="pcard"><div class="avatar a4">海</div><div class="pname">海棠（宠物）</div><div class="pmeta">42 张 · 宠物</div></div>
+          <div class="pcard"><div class="avatar a5">王</div><div class="pname">王砚</div><div class="pmeta">31 张</div></div>
+          <div class="pcard" style="opacity:.55"><span class="pflag">已隐藏</span><div class="avatar a6">周</div><div class="pname">周眠</div><div class="pmeta">12 张</div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sec-head">
+          <h2>未命名聚类</h2><span class="hint">勾选多个可合并为同一人</span><span class="mono-count">CLUSTERS · 3</span>
+          <div class="merge-bar"><span class="mb-info">已选 2</span><button class="merge-btn">合并命名</button></div>
+        </div>
+        <div class="pgrid">
+          <div class="pcard cluster picked"><span class="pick-dot on"></span><div class="avatar">?</div><div class="pname">未命名</div><div class="pmeta">18 张</div></div>
+          <div class="pcard cluster picked"><span class="pick-dot on"></span><div class="avatar">?</div><div class="pname">未命名</div><div class="pmeta">9 张</div></div>
+          <div class="pcard cluster"><span class="pick-dot"></span><div class="avatar">?</div><div class="pname">未命名</div><div class="pmeta">5 张</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ VIEW.05 标签 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.05 · /tags — 标签（磨砂云 chip + 详情面板）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">05</span><h1>标签</h1>
+        <div class="search">搜索标签</div>
+        <div class="spacer"></div>
+        <button class="btn">AI 打标</button>
+        <button class="btn primary">新建标签</button>
+      </div>
+
+      <div class="cloud">
+        <button class="chip s1 active">海边 <span class="cnt">86</span></button>
+        <button class="chip s1">山脉 <span class="cnt">64</span></button>
+        <button class="chip s1">城市 <span class="cnt">52</span></button>
+        <button class="chip s2">夜景 <span class="cnt">38</span></button>
+        <button class="chip s2">咖啡 <span class="cnt">31</span></button>
+        <button class="chip s2"><span class="ai-dot"></span>日落 <span class="cnt">27</span><span class="pending">待</span></button>
+        <button class="chip s2">徒步 <span class="cnt">22</span></button>
+        <button class="chip s3">雪景 <span class="cnt">15</span></button>
+        <button class="chip s3">集市 <span class="cnt">11</span></button>
+        <button class="chip s3">湖泊 <span class="cnt">9</span></button>
+        <button class="chip s3"><span class="ai-dot"></span>雾 <span class="cnt">7</span><span class="pending">待</span></button>
+        <button class="chip s3">美食 <span class="cnt">4</span></button>
+      </div>
+
+      <div class="detail">
+        <div class="d-head">
+          <span class="d-name">海边</span><span class="d-meta">86 项 · 最近 2026-09-28</span>
+          <div class="spacer"></div>
+          <button class="mini-btn">重命名</button>
+          <button class="mini-btn danger">删除标签</button>
+        </div>
+        <div class="mgrid">
+          <div class="mtile"><div class="mthumb m1"><div class="veil"></div></div><div class="mname">2024-11-故垒-海岸线…</div><div class="mdate">2024-11-03</div></div>
+          <div class="mtile"><div class="mthumb m2"><div class="veil"></div></div><div class="mname">corpus-0tar000361…</div><div class="mdate">2026-09-12</div></div>
+          <div class="mtile"><div class="mthumb m3"><div class="veil"></div></div><div class="mname">IMG_20260712_1842…</div><div class="mdate">2026-07-12</div></div>
+          <div class="mtile"><div class="mthumb m4"><div class="veil"></div></div><div class="mname">DSC08421-礁石与浪…</div><div class="mdate">2026-06-30</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GSAP 账本 ============ -->
+  <div class="ledger">
+    <div class="li"><div class="lt">MOTION · GSAP 账本</div><div class="ln">people-stagger</div><div class="ld">人物卡 y24 瀑布 0.05 · 首屏一次性 clearProps</div></div>
+    <div class="li"><div class="lt">HOVER</div><div class="ln">avatar-lift</div><div class="ld">头像 scale 1.03 + 卡片阴影升 lift 层</div></div>
+    <div class="li"><div class="lt">ENTER</div><div class="ln">cloud-in</div><div class="ld">标签云 chip stagger 0.03 · scale 0.92→1</div></div>
+    <div class="li"><div class="lt">REUSE</div><div class="ln">dgrid-enter</div><div class="ld">详情媒体网格复用 MediaTileGrid 已实装动效</div></div>
+    <div class="li"><div class="lt">GUARD</div><div class="ln">reduced-motion</div><div class="ld">prefers-reduced-motion 全部跳过</div></div>
+  </div>
+
+</div>
+</body>
+</html>

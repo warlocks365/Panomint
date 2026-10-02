@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 深化 · 空间 / 文件夹（VIEW.06 / VIEW.07）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #e9e4de; --surface: #f4f1ed; --surface-hover: #efebe5; --border: #ddd8d0;
+    --text: #41403c; --text2: #7d7a73; --text3: #a5a29a;
+    --primary: #4a5a6a; --primary-hover: #3d4b58; --danger: #b0685c; --success: #6e8a72;
+    --oat: #c4a57a;
+    --shadow-card: 0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift: 0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font: "Outfit", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ded9d2; font-family: var(--font); color: var(--text); font-weight: 300; letter-spacing: .01em; padding: 28px 0 48px; }
+  .canvas { width: 1440px; margin: 0 auto; }
+  .frame { background: var(--bg); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 40px; }
+  .view-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: var(--text3); padding: 14px 36px 0; }
+  .page { padding: 26px 36px 40px; }
+
+  /* 页头规范 */
+  .ph { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .ph .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--text3); }
+  .ph h1 { font-size: 16px; font-weight: 500; letter-spacing: .12em; }
+  .ph .spacer { flex: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 10px; font-size: 13px; font-family: var(--font); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); transition: all .5s cubic-bezier(.32,.72,0,1); }
+  .btn:hover { background: var(--surface-hover); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #eef1f4; }
+
+  /* ===== VIEW.06 空间 ===== */
+  .space-cards { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .scard { display: flex; align-items: center; gap: 16px; padding: 22px 24px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); border: 1.5px solid transparent; cursor: pointer; transition: all .5s cubic-bezier(.32,.72,0,1); }
+  .scard:hover { box-shadow: var(--shadow-lift); }
+  .scard.active { border-color: var(--primary); }
+  .sicon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: rgba(74,90,106,.10); color: var(--primary); font-size: 20px; flex-shrink: 0; }
+  .sinfo { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .sname { font-size: 14.5px; font-weight: 500; }
+  .smeta { font-family: var(--mono); font-size: 11px; color: var(--text2); letter-spacing: .02em; }
+  .sbadge { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; color: var(--text3); border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+  .scard.active .sbadge { color: var(--primary); border-color: rgba(74,90,106,.35); }
+
+  .ghead { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .ghead h2 { font-size: 15px; font-weight: 500; letter-spacing: .04em; }
+  .ghead .cnt { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .ghead .spacer { flex: 1; }
+  .seg { display: inline-flex; background: var(--surface); border-radius: 999px; padding: 3px; box-shadow: 0 1px 3px rgba(65,64,60,.06); }
+  .seg button { border: none; background: transparent; padding: 6px 16px; border-radius: 999px; font-family: var(--font); font-size: 12.5px; color: var(--text2); cursor: pointer; }
+  .seg button.on { background: var(--primary); color: #eef1f4; }
+
+  .mgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .mtile { background: #faf8f5; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(65,64,60,.05); }
+  .mthumb { aspect-ratio: 1; position: relative; }
+  .m1 { background: linear-gradient(150deg,#b8c4cd,#93a4b1); } .m2 { background: linear-gradient(150deg,#c9bfae,#a99a83); }
+  .m3 { background: linear-gradient(150deg,#a89aa4,#8a7d88); } .m4 { background: linear-gradient(150deg,#a9b8a6,#8b9c89); }
+  .m5 { background: linear-gradient(150deg,#c4ae9e,#a68e7e); } .m6 { background: linear-gradient(150deg,#9aa5ad,#7e8a93); }
+  .veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(233,228,222,.16), transparent 34%); }
+  .mname { font-size: 10.5px; color: var(--text); text-align: center; padding: 7px 6px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mdate { font-family: var(--mono); font-size: 9.5px; color: var(--text3); text-align: center; padding-bottom: 8px; }
+
+  /* ===== VIEW.07 文件夹 ===== */
+  .fbody { display: grid; grid-template-columns: 1fr 2.5fr; gap: 18px; }
+  .tree { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 16px 12px; }
+  .tnode { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text2); cursor: pointer; }
+  .tnode:hover { background: var(--surface-hover); color: var(--text); }
+  .tnode.on { background: rgba(74,90,106,.12); color: var(--text); font-weight: 500; }
+  .tnode .tw { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-left: auto; }
+  .tnode.l1 { margin-left: 18px; } .tnode.l2 { margin-left: 36px; }
+  .caret { font-family: var(--mono); font-size: 9px; color: var(--text3); width: 10px; }
+
+  .gpanel { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 18px 22px 22px; }
+  .crumbs { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 12.5px; color: var(--text2); flex-wrap: wrap; }
+  .crumbs .sep { font-family: var(--mono); color: var(--text3); }
+  .crumbs .cur { color: var(--text); font-weight: 500; }
+  .crumbs .spacer { flex: 1; }
+  .crumbs .mono-n { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+
+  /* 账本 */
+  .ledger { width: 1440px; margin: 0 auto; background: var(--primary); border-radius: 14px; padding: 16px 26px; display: flex; gap: 26px; }
+  .ledger .lt { color: rgba(238,241,244,.65); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; margin-bottom: 4px; }
+  .ledger .li { flex: 1; }
+  .ledger .ln { color: #eef1f4; font-size: 12px; font-weight: 400; }
+  .ledger .ld { color: rgba(238,241,244,.55); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ============ VIEW.06 空间 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.06 · /spaces — 空间（不对称双卡 + 胶囊分段切换）</p>
+    <div class="page">
+      <div class="ph"><span class="eyebrow">06</span><h1>空间</h1><div class="spacer"></div></div>
+
+      <div class="space-cards">
+        <div class="scard active">
+          <div class="sicon">◐</div>
+          <div class="sinfo">
+            <span class="sname">个人空间</span>
+            <span class="smeta">1284 个媒体 · 86.4 GB</span>
+          </div>
+          <span class="sbadge">ACTIVE</span>
+        </div>
+        <div class="scard">
+          <div class="sicon">◉◉</div>
+          <div class="sinfo">
+            <span class="sname">共享空间</span>
+            <span class="smeta">2 个空间</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ghead">
+        <h2>个人空间媒体</h2><span class="cnt">共 1284 项</span>
+        <div class="spacer"></div>
+        <div class="seg"><button class="on">时间轴</button><button>按相册</button></div>
+      </div>
+
+      <div class="mgrid">
+        <div class="mtile"><div class="mthumb m1"><div class="veil"></div></div><div class="mname">2024-11-故垒-海岸线…</div><div class="mdate">2024-11-03</div></div>
+        <div class="mtile"><div class="mthumb m2"><div class="veil"></div></div><div class="mname">corpus-0tar000361…</div><div class="mdate">2026-09-12</div></div>
+        <div class="mtile"><div class="mthumb m3"><div class="veil"></div></div><div class="mname">IMG_20260712_1842…</div><div class="mdate">2026-07-12</div></div>
+        <div class="mtile"><div class="mthumb m4"><div class="veil"></div></div><div class="mname">DSC08421-山径与雾…</div><div class="mdate">2026-06-30</div></div>
+        <div class="mtile"><div class="mthumb m5"><div class="veil"></div></div><div class="mname">PANO_360_湖心亭.h…</div><div class="mdate">2026-05-18</div></div>
+        <div class="mtile"><div class="mthumb m6"><div class="veil"></div></div><div class="mname">.mp4_20260401市集…</div><div class="mdate">2026-04-01</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ VIEW.07 文件夹 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.07 · /folders — 文件夹（树导航 1:2.5 不对称 + 面包屑）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">07</span><h1>文件夹</h1>
+        <div class="spacer"></div>
+        <button class="btn">管理目录</button>
+      </div>
+
+      <div class="fbody">
+        <div class="tree">
+          <div class="tnode on"><span class="caret">▾</span> 全部 <span class="tw">1284</span></div>
+          <div class="tnode l1"><span class="caret">▾</span> 2026 <span class="tw">522</span></div>
+          <div class="tnode l2">海边 <span class="tw">86</span></div>
+          <div class="tnode l2">山脉 <span class="tw">64</span></div>
+          <div class="tnode l2 on2" style="background:rgba(74,90,106,.06)">城市 <span class="tw">52</span></div>
+          <div class="tnode l1"><span class="caret">▸</span> 2025 <span class="tw">418</span></div>
+          <div class="tnode l1"><span class="caret">▸</span> 2024 <span class="tw">344</span></div>
+          <div class="tnode"><span class="caret">▸</span> family-archive <span class="tw">96</span></div>
+        </div>
+
+        <div class="gpanel">
+          <div class="crumbs">
+            <span>全部</span><span class="sep">/</span><span>2026</span><span class="sep">/</span><span class="cur">海边</span>
+            <span class="mono-n">86 项</span>
+            <div class="spacer"></div>
+            <button class="btn" style="padding:6px 12px;font-size:12px">管理</button>
+          </div>
+          <div class="mgrid">
+            <div class="mtile"><div class="mthumb m2"><div class="veil"></div></div><div class="mname">2024-11-故垒-海岸线…</div><div class="mdate">2024-11-03</div></div>
+            <div class="mtile"><div class="mthumb m1"><div class="veil"></div></div><div class="mname">corpus-0tar000361…</div><div class="mdate">2026-09-12</div></div>
+            <div class="mtile"><div class="mthumb m6"><div class="veil"></div></div><div class="mname">IMG_20260712_1842…</div><div class="mdate">2026-07-12</div></div>
+            <div class="mtile"><div class="mthumb m5"><div class="veil"></div></div><div class="mname">DSC08421-礁石与浪…</div><div class="mdate">2026-06-30</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GSAP 账本 ============ -->
+  <div class="ledger">
+    <div class="li"><div class="lt">MOTION · GSAP 账本</div><div class="ln">cards-in</div><div class="ld">空间卡 y24 stagger 0.08 · 首屏一次性 clearProps</div></div>
+    <div class="li"><div class="lt">SWITCH</div><div class="ln">toggle-capsule</div><div class="ld">分段切换胶囊雾蓝填充过渡（CSS 0.5s soft 曲线）</div></div>
+    <div class="li"><div class="lt">SELECT</div><div class="ln">tree-select</div><div class="ld">树节点激活条雾蓝浅底（CSS 过渡，无 GSAP 循环）</div></div>
+    <div class="li"><div class="lt">REUSE</div><div class="ln">dgrid-enter</div><div class="ld">媒体网格复用 MediaTileGrid 已实装动效</div></div>
+    <div class="li"><div class="lt">GUARD</div><div class="ln">reduced-motion</div><div class="ld">prefers-reduced-motion 全部跳过</div></div>
+  </div>
+
+</div>
+</body>
+</html>

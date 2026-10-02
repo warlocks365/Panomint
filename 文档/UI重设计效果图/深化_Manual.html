@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 深化 · 操作手册（VIEW.14）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #e9e4de; --surface: #f4f1ed; --surface-hover: #efebe5; --border: #ddd8d0;
+    --text: #41403c; --text2: #7d7a73; --text3: #a5a29a;
+    --primary: #4a5a6a; --primary-hover: #3d4b58; --danger: #b0685c; --success: #6e8a72;
+    --oat: #c4a57a;
+    --shadow-card: 0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift: 0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font: "Outfit", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ded9d2; font-family: var(--font); color: var(--text); font-weight: 300; letter-spacing: .01em; padding: 28px 0 48px; }
+  .canvas { width: 1440px; margin: 0 auto; }
+  .frame { background: var(--bg); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 40px; }
+  .view-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: var(--text3); padding: 14px 36px 0; }
+  .page { padding: 26px 36px 40px; }
+
+  .ph { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .ph .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--text3); }
+  .ph h1 { font-size: 16px; font-weight: 500; letter-spacing: .12em; }
+  .ph .sub { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+
+  .mbody { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
+  .mnav { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 12px; position: sticky; top: 0; }
+  .mnav .nav-cap { font-family: var(--mono); font-size: 10px; letter-spacing: .16em; color: var(--text3); padding: 6px 10px 10px; }
+  .nitem { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 11px; border: none; border-radius: 9px; background: transparent; color: var(--text2); font-family: var(--font); font-size: 12.5px; text-align: left; cursor: pointer; }
+  .nitem:hover { background: var(--surface-hover); color: var(--text); }
+  .nitem.on { background: rgba(74,90,106,.12); color: var(--text); font-weight: 500; box-shadow: inset 2.5px 0 0 var(--primary); }
+  .nitem .nno { font-family: var(--mono); font-size: 9.5px; color: var(--text3); width: 18px; flex-shrink: 0; }
+
+  .article { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 26px 30px 24px; }
+  .a-title { font-size: 19px; font-weight: 500; letter-spacing: .05em; }
+  .a-lead { font-size: 13.5px; line-height: 1.9; color: var(--text2); margin: 10px 0 16px; }
+  .mb-h3 { font-size: 14.5px; font-weight: 500; letter-spacing: .03em; margin: 18px 0 8px; }
+  .mb-p { font-size: 13px; line-height: 1.9; color: var(--text); margin-bottom: 8px; }
+  .mb-steps { list-style: none; counter-reset: st; margin: 10px 0; }
+  .mb-steps li { counter-increment: st; position: relative; padding: 0 0 10px 34px; font-size: 13px; line-height: 1.7; }
+  .mb-steps li::before { content: counter(st, decimal-leading-zero); position: absolute; left: 0; top: 1px; font-family: var(--mono); font-size: 10.5px; color: var(--primary); background: rgba(74,90,106,.1); border-radius: 6px; padding: 2px 6px; }
+  .mb-note { border-left: 2px solid var(--success); background: rgba(110,138,114,.08); padding: 9px 12px; font-size: 12.5px; color: var(--text2); border-radius: 0 9px 9px 0; margin: 10px 0; }
+  .mb-warn { border-left: 2px solid var(--oat); background: rgba(196,165,122,.1); padding: 9px 12px; font-size: 12.5px; color: var(--text2); border-radius: 0 9px 9px 0; margin: 10px 0; }
+  .mb-code { background: #3a4652; color: #d9e0e6; border-radius: 10px; padding: 13px 16px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; overflow-x: auto; margin: 10px 0; }
+
+  .deep { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 16px; }
+  .deep-toggle { display: inline-flex; align-items: center; gap: 8px; border: none; background: transparent; font-family: var(--font); font-size: 12.5px; color: var(--primary); cursor: pointer; padding: 6px 0; }
+  .deep-toggle .chev { transition: transform .4s cubic-bezier(.32,.72,0,1); }
+  .deep-toggle .chev.up { transform: rotate(180deg); }
+  .deep-body { margin-top: 12px; background: rgba(74,90,106,.05); border-left: 2.5px solid var(--primary); border-radius: 0 12px 12px 0; padding: 16px 20px; }
+  .deep-body .db-cap { font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; color: var(--text3); margin-bottom: 8px; }
+  .deep-body .mb-p { font-size: 12.5px; }
+
+  .flip { display: flex; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .btn-ghost { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text2); font-family: var(--font); font-size: 12.5px; cursor: pointer; max-width: 46%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btn-ghost:hover { color: var(--text); border-color: var(--primary); }
+  .flip .spacer { flex: 1; }
+
+  .ledger { width: 1440px; margin: 0 auto; background: var(--primary); border-radius: 14px; padding: 16px 26px; display: flex; gap: 26px; }
+  .ledger .lt { color: rgba(238,241,244,.65); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; margin-bottom: 4px; }
+  .ledger .li { flex: 1; }
+  .ledger .ln { color: #eef1f4; font-size: 12px; font-weight: 400; }
+  .ledger .ld { color: rgba(238,241,244,.55); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ============ VIEW.14 阅读态 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.14 · /manual — 操作手册（章节导航 + 正文 + 原理深入可展开）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">12</span><h1>操作手册</h1>
+        <span class="sub">13 章 · 每章含可展开的原理深入</span>
+      </div>
+
+      <div class="mbody">
+        <aside class="mnav">
+          <div class="nav-cap">CHAPTERS · 13</div>
+          <button class="nitem"><span class="nno">01</span>快速认知</button>
+          <button class="nitem"><span class="nno">02</span>上传与导入</button>
+          <button class="nitem"><span class="nno">03</span>时间轴与播放</button>
+          <button class="nitem"><span class="nno">04</span>相册（手动 / 智能 / 共享空间）</button>
+          <button class="nitem on"><span class="nno">05</span>文件夹与存储：虚拟目录 vs 物理空间</button>
+          <button class="nitem"><span class="nno">06</span>地图与地点</button>
+          <button class="nitem"><span class="nno">07</span>人物与标签（人脸识别）</button>
+          <button class="nitem"><span class="nno">08</span>AI 语义搜索</button>
+          <button class="nitem"><span class="nno">09</span>分享</button>
+          <button class="nitem"><span class="nno">10</span>设置与账号安全</button>
+          <button class="nitem"><span class="nno">11</span>管理后台</button>
+          <button class="nitem"><span class="nno">12</span>回收站、数据安全与常见问题</button>
+          <button class="nitem"><span class="nno">13</span>AI 助手（Agent 语义接口）</button>
+        </aside>
+
+        <article class="article">
+          <h1 class="a-title">文件夹与存储：虚拟目录 vs 物理空间</h1>
+          <p class="a-lead">相册里的「文件夹」是 Panomint 自己管理的虚拟目录，与磁盘上的物理路径是两套平行世界——理解这一点，扫描导入、权限与整理就都顺了。</p>
+
+          <h3 class="mb-h3">创建与选择目录</h3>
+          <ol class="mb-steps">
+            <li>进入「文件夹」页，左树选择或右键新建目录；目录名支持中文与多级嵌套。</li>
+            <li>选中目录后右侧网格只显示该目录（含子目录可选）的媒体。</li>
+            <li>「上传到此处」按钮会把上传目标锁定为当前目录。</li>
+          </ol>
+
+          <div class="mb-warn">虚拟目录不等于物理路径：把文件从磁盘移动走，虚拟目录里的记录不会自动跟随，需要在「工具箱 → 扫描导入」重新索引。</div>
+
+          <div class="mb-note">owner 可以在「管理后台 → 存储」里查看虚拟目录与物理挂载点的映射关系。</div>
+
+          <div class="deep">
+            <button class="deep-toggle">
+              <svg class="chev up" viewBox="0 0 16 16" width="16" height="16"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>原理深入：这一章背后的实现</span>
+            </button>
+            <div class="deep-body">
+              <div class="db-cap">DEEP DIVE · 实现层</div>
+              <p class="mb-p">虚拟目录落库为 folders 表（path 唯一键），媒体行的 folder_path 冗余存储；扫描导入按挂载根 diff 增量入索引。权限沿目录子树继承（grants 表按 path 前缀匹配）——因此移动目录即移动权限边界，rename 是原路径 + 前缀批量更新。</p>
+            </div>
+          </div>
+
+          <nav class="flip">
+            <button class="btn-ghost">← 相册（手动 / 智能 / 共享空间）</button>
+            <span class="spacer"></span>
+            <button class="btn-ghost">地图与地点 →</button>
+          </nav>
+        </article>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GSAP 账本 ============ -->
+  <div class="ledger">
+    <div class="li"><div class="lt">MOTION · GSAP 账本</div><div class="ln">chapter-in</div><div class="ld">章节切换正文 y12 淡入 0.4（watch currentId · clearProps）</div></div>
+    <div class="li"><div class="lt">STATE</div><div class="ln">deep-expand</div><div class="ld">原理深入高度过渡 CSS 0.5 + chev 旋转（软曲线）</div></div>
+    <div class="li"><div class="lt">STATE</div><div class="ln">nav-active</div><div class="ld">章节激活雾蓝浅底 + 左竖线 inset（CSS 过渡）</div></div>
+    <div class="li"><div class="lt">REUSE</div><div class="ln">deep-link</div><div class="ld">?chapter= 深链与设置页入口语义零改动</div></div>
+    <div class="li"><div class="lt">GUARD</div><div class="ln">reduced-motion</div><div class="ld">prefers-reduced-motion 全部跳过</div></div>
+  </div>
+
+</div>
+</body>
+</html>

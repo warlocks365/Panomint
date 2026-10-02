@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 深化 · 工具箱 / 上传（VIEW.08 / VIEW.09）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #e9e4de; --surface: #f4f1ed; --surface-hover: #efebe5; --border: #ddd8d0;
+    --text: #41403c; --text2: #7d7a73; --text3: #a5a29a;
+    --primary: #4a5a6a; --primary-hover: #3d4b58; --danger: #b0685c; --success: #6e8a72;
+    --oat: #c4a57a;
+    --shadow-card: 0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift: 0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font: "Outfit", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ded9d2; font-family: var(--font); color: var(--text); font-weight: 300; letter-spacing: .01em; padding: 28px 0 48px; }
+  .canvas { width: 1440px; margin: 0 auto; }
+  .frame { background: var(--bg); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 40px; }
+  .view-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: var(--text3); padding: 14px 36px 0; }
+  .page { padding: 26px 36px 40px; }
+
+  .ph { display: flex; align-items: baseline; gap: 10px; margin-bottom: 22px; }
+  .ph .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--text3); }
+  .ph h1 { font-size: 16px; font-weight: 500; letter-spacing: .12em; }
+  .ph .sub { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .ph .spacer { flex: 1; }
+
+  /* ===== VIEW.08 工具箱 ===== */
+  .seg { display: inline-flex; background: var(--surface); border-radius: 999px; padding: 3px; box-shadow: 0 1px 3px rgba(65,64,60,.06); margin-bottom: 22px; }
+  .seg button { border: none; background: transparent; padding: 7px 18px; border-radius: 999px; font-family: var(--font); font-size: 12.5px; color: var(--text2); cursor: pointer; }
+  .seg button.on { background: var(--primary); color: #eef1f4; }
+
+  .panel-title { font-size: 15px; font-weight: 500; letter-spacing: .04em; margin-bottom: 4px; }
+  .panel-sub { font-family: var(--mono); font-size: 11px; color: var(--text2); margin-bottom: 16px; }
+
+  .dup-group { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 18px 22px; margin-bottom: 14px; display: flex; align-items: center; gap: 18px; }
+  .dg-thumbs { display: flex; gap: 8px; }
+  .dg-t { width: 72px; height: 72px; border-radius: 10px; position: relative; overflow: hidden; }
+  .m1 { background: linear-gradient(150deg,#b8c4cd,#93a4b1); } .m2 { background: linear-gradient(150deg,#c9bfae,#a99a83); } .m3 { background: linear-gradient(150deg,#a89aa4,#8a7d88); }
+  .veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(233,228,222,.16), transparent 34%); }
+  .dg-info { flex: 1; min-width: 0; }
+  .dg-name { font-size: 13.5px; font-weight: 500; }
+  .dg-meta { font-family: var(--mono); font-size: 11px; color: var(--text2); margin-top: 3px; }
+  .dg-meta .sim { color: var(--oat); }
+  .dg-actions { display: flex; gap: 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 10px; font-size: 12.5px; font-family: var(--font); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #eef1f4; }
+  .btn.danger { color: var(--danger); border-color: rgba(176,104,92,.4); }
+
+  /* ===== VIEW.09 上传 ===== */
+  .target { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 10px; background: rgba(74,90,106,.08); font-size: 12.5px; color: var(--text2); margin-bottom: 18px; }
+  .target .t-mono { font-family: var(--mono); font-size: 11px; color: var(--text); }
+
+  .dropzone { background: var(--surface); border: 1.5px dashed rgba(74,90,106,.4); border-radius: 14px; box-shadow: var(--shadow-card); padding: 44px 24px; display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 22px; transition: all .5s cubic-bezier(.32,.72,0,1); }
+  .dropzone:hover { border-color: var(--primary); background: rgba(74,90,106,.04); }
+  .drop-icon { width: 64px; height: 64px; border-radius: 50%; background: rgba(74,90,106,.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 26px; }
+  .drop-title { font-size: 14.5px; font-weight: 500; }
+  .drop-desc { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+
+  .qhead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .qhead h2 { font-size: 15px; font-weight: 500; letter-spacing: .04em; }
+  .qhead .qcnt { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .qitem { background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-card); padding: 14px 18px; margin-bottom: 10px; display: flex; align-items: center; gap: 14px; }
+  .qicon { width: 38px; height: 38px; border-radius: 10px; background: rgba(74,90,106,.08); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; }
+  .qinfo { flex: 1; min-width: 0; }
+  .qname { font-size: 13px; font-weight: 500; }
+  .qbar { height: 4px; border-radius: 999px; background: var(--surface-hover); margin-top: 8px; overflow: hidden; }
+  .qfill { height: 100%; border-radius: 999px; background: var(--primary); }
+  .qmeta { font-family: var(--mono); font-size: 10.5px; color: var(--text2); width: 150px; text-align: right; flex-shrink: 0; }
+  .qmeta .ok { color: var(--success); }
+  .qmeta .err { color: var(--danger); }
+
+  /* 账本 */
+  .ledger { width: 1440px; margin: 0 auto; background: var(--primary); border-radius: 14px; padding: 16px 26px; display: flex; gap: 26px; }
+  .ledger .lt { color: rgba(238,241,244,.65); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; margin-bottom: 4px; }
+  .ledger .li { flex: 1; }
+  .ledger .ln { color: #eef1f4; font-size: 12px; font-weight: 400; }
+  .ledger .ld { color: rgba(238,241,244,.55); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ============ VIEW.08 工具箱 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.08 · /toolbox — 工具箱（胶囊 tabs + 重复组卡）</p>
+    <div class="page">
+      <div class="ph"><span class="eyebrow">08</span><h1>工具箱</h1><span class="sub">查找重复媒体 · 找回误删内容</span></div>
+
+      <div class="seg">
+        <button class="on">重复项目</button>
+        <button>最近删除</button>
+        <button>已恢复</button>
+        <button>扫描导入</button>
+        <button>我的分享</button>
+      </div>
+
+      <div class="panel-title">重复项目</div>
+      <div class="panel-sub">DUP_GROUPS · 2 组 · 共 6 项</div>
+
+      <div class="dup-group">
+        <div class="dg-thumbs">
+          <div class="dg-t m1"><div class="veil"></div></div>
+          <div class="dg-t m1" style="filter:brightness(.92)"><div class="veil"></div></div>
+        </div>
+        <div class="dg-info">
+          <div class="dg-name">corpus-0lar-7002PO.jpg × 2</div>
+          <div class="dg-meta">2.4 MB × 2 · <span class="sim">相似度 98%</span> · 同尺寸 1600×1067</div>
+        </div>
+        <div class="dg-actions">
+          <button class="btn">对比查看</button>
+          <button class="btn danger">保留一张</button>
+        </div>
+      </div>
+
+      <div class="dup-group">
+        <div class="dg-thumbs">
+          <div class="dg-t m2"><div class="veil"></div></div>
+          <div class="dg-t m2" style="filter:brightness(.9)"><div class="veil"></div></div>
+          <div class="dg-t m3" style="filter:brightness(.95)"><div class="veil"></div></div>
+        </div>
+        <div class="dg-info">
+          <div class="dg-name">2026-05-18-湖心亭全景.mp4 × 3</div>
+          <div class="dg-meta">184.2 MB × 3 · <span class="sim">相似度 96%</span> · 时长差 &lt; 2s</div>
+        </div>
+        <div class="dg-actions">
+          <button class="btn">对比查看</button>
+          <button class="btn danger">保留时长最长</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ VIEW.09 上传 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.09 · /upload — 上传（雾蓝虚线 dropzone + 队列进度）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">09</span><h1>上传</h1>
+        <div class="target">将上传到：<span class="t-mono">个人空间根目录</span></div>
+      </div>
+
+      <div class="dropzone">
+        <div class="drop-icon">↑</div>
+        <p class="drop-title">拖拽文件到此处，或点击选择</p>
+        <p class="drop-desc">支持照片与视频 · &gt;8MB 自动分块续传</p>
+      </div>
+
+      <div class="qhead"><h2>上传队列</h2><span class="qcnt">2/3 完成</span></div>
+
+      <div class="qitem">
+        <div class="qicon">IMG</div>
+        <div class="qinfo">
+          <div class="qname">DSC08421-礁石与浪.jpg</div>
+          <div class="qbar"><div class="qfill" style="width:100%"></div></div>
+        </div>
+        <div class="qmeta"><span class="ok">完成</span> · 8.2 MB</div>
+      </div>
+
+      <div class="qitem">
+        <div class="qicon">VID</div>
+        <div class="qinfo">
+          <div class="qname">PANO_360_湖心亭.mp4</div>
+          <div class="qbar"><div class="qfill" style="width:64%"></div></div>
+        </div>
+        <div class="qmeta">64% · 118/184 MB</div>
+      </div>
+
+      <div class="qitem">
+        <div class="qicon">IMG</div>
+        <div class="qinfo">
+          <div class="qname">corpus-0lar-7002PO-2.jpg</div>
+          <div class="qbar"><div class="qfill" style="width:12%; background:var(--danger)"></div></div>
+        </div>
+        <div class="qmeta"><span class="err">失败</span> · 网络中断</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GSAP 账本 ============ -->
+  <div class="ledger">
+    <div class="li"><div class="lt">MOTION · GSAP 账本</div><div class="ln">tabs-fade</div><div class="ld">面板切换 y12 淡入 0.4 · Vue transition 复用</div></div>
+    <div class="li"><div class="lt">STATE</div><div class="ln">dropzone-hint</div><div class="ld">dragover 雾蓝浅底+描边加深（CSS 软曲线）</div></div>
+    <div class="li"><div class="lt">ENTER</div><div class="ln">queue-in</div><div class="ld">队列项 y16 stagger 0.05 · clearProps</div></div>
+    <div class="li"><div class="lt">PROGRESS</div><div class="ln">qbar</div><div class="ld">进度条宽度过渡 CSS 0.3s（非 GSAP 循环）</div></div>
+    <div class="li"><div class="lt">GUARD</div><div class="ln">reduced-motion</div><div class="ld">prefers-reduced-motion 全部跳过</div></div>
+  </div>
+
+</div>
+</body>
+</html>

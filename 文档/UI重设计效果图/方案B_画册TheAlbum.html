@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案 B · 画册 The Album — Panomint UI 重设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Noto+Serif+SC:wght@600;700&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f7f3ec; --paper2:#efe9de; --ink:#211d18; --ink2:#6b6257; --ink3:#a39a8c;
+    --line:rgba(33,29,24,.12); --line2:rgba(33,29,24,.22);
+    --accent:#b4552d; --accent-dim:rgba(180,85,45,.1);
+    --sage:#6f7d5c; --sage-dim:rgba(111,125,92,.12);
+    --r-lg:6px; --r-md:4px;
+    --ease:cubic-bezier(.32,.72,0,1);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--paper);color:var(--ink);font-family:'Noto Sans SC',sans-serif;min-height:100vh;position:relative}
+  body::after{content:'';position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.035;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .serif{font-family:'Fraunces','Noto Serif SC',serif}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 44px}
+
+  .scheme-tag{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(247,243,236,.9);border-bottom:1px solid var(--line2)}
+  .scheme-tag .in{display:flex;align-items:center;gap:14px;padding:14px 44px;max-width:1180px;margin:0 auto}
+  .scheme-tag .tag{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.18em;color:var(--accent);border:1px solid var(--accent);padding:4px 12px;border-radius:2px}
+  .scheme-tag h1{font-family:'Fraunces','Noto Serif SC',serif;font-size:17px;font-weight:600}
+  .scheme-tag .en{color:var(--ink3);font-size:12px;font-family:'IBM Plex Mono',monospace}
+  .scheme-tag .note{margin-left:auto;color:var(--ink2);font-size:12px}
+
+  .sec{padding:52px 0 6px}
+  .sec-h{display:flex;align-items:baseline;gap:14px;margin-bottom:24px;border-bottom:2px solid var(--ink);padding-bottom:12px}
+  .sec-h .no{font-family:'IBM Plex Mono',monospace;color:var(--ink3);font-size:12px}
+  .sec-h h2{font-family:'Fraunces','Noto Serif SC',serif;font-size:21px;font-weight:600}
+  .sec-h .d{margin-left:auto;color:var(--ink2);font-size:12.5px}
+
+  /* ---- 导航：报头式（非悬浮胶囊，编辑部分裂式） ---- */
+  .masthead{border-bottom:2px solid var(--ink)}
+  .masthead .top{display:flex;align-items:flex-end;justify-content:space-between;padding:22px 0 14px}
+  .masthead .brand{font-family:'Fraunces','Noto Serif SC',serif;font-size:34px;font-weight:600;letter-spacing:-.02em}
+  .masthead .brand span{color:var(--accent);font-style:italic}
+  .masthead .issue{text-align:right;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink2);line-height:1.7}
+  .masthead nav{display:flex;gap:0;border-top:1px solid var(--line2)}
+  .masthead nav a{color:var(--ink2);text-decoration:none;font-size:13px;padding:10px 20px 10px 0;margin-right:20px;letter-spacing:.06em;border-bottom:2px solid transparent}
+  .masthead nav a.on{color:var(--ink);border-bottom-color:var(--accent);font-weight:500}
+  .masthead nav .ai{margin-left:auto;color:var(--accent);border-bottom-color:transparent;display:flex;align-items:center;gap:7px}
+
+  /* ---- 编辑分裂布局：左大字右图列 ---- */
+  .split{display:grid;grid-template-columns:5fr 7fr;gap:40px}
+  .split .left{padding-top:8px}
+  .split .left .eyebrow{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.22em;color:var(--paper);background:var(--ink);padding:5px 11px;border-radius:2px;margin-bottom:18px}
+  .split .left h3{font-family:'Fraunces','Noto Serif SC',serif;font-size:44px;font-weight:600;line-height:1.14;letter-spacing:-.01em}
+  .split .left h3 em{font-style:italic;color:var(--accent)}
+  .split .left p{color:var(--ink2);font-size:14px;line-height:1.9;margin-top:20px;max-width:34em}
+  .split .left .stats{display:flex;gap:34px;margin-top:30px;padding-top:20px;border-top:1px solid var(--line)}
+  .split .left .stats b{font-family:'Fraunces',serif;font-size:26px;font-weight:600;display:block}
+  .split .left .stats span{font-size:11.5px;color:var(--ink3)}
+
+  .filmrow{display:flex;gap:12px;overflow:hidden}
+  .frame{flex:1;border:1px solid var(--line2);padding:6px;background:#fff;box-shadow:2px 3px 0 rgba(33,29,24,.08)}
+  .frame .ph{aspect-ratio:4/5;overflow:hidden}
+  .frame .cap{padding:9px 4px 4px;font-size:11px;color:var(--ink2);display:flex;justify-content:space-between}
+  .frame .cap b{color:var(--ink);font-weight:500}
+  .i1{height:100%;background:linear-gradient(170deg,#d9c7a7 0%,#a68a5b 55%,#5c4632 100%)}
+  .i2{height:100%;background:linear-gradient(150deg,#9db4c0 0%,#5c7182 55%,#2e3d49 100%)}
+  .i3{height:100%;background:linear-gradient(140deg,#c9a66b 0%,#8a6238 60%,#3f2d1a 100%)}
+  .i4{height:100%;background:linear-gradient(160deg,#a8b5a0 0%,#6f7d5c 55%,#3d4632 100%)}
+
+  /* ---- AI 助手：信纸式 ---- */
+  .aiwrap{display:grid;grid-template-columns:7fr 5fr;gap:0;border:1px solid var(--ink);background:#fffcf5;box-shadow:4px 4px 0 rgba(33,29,24,.12)}
+  .aimain{padding:22px 26px;border-right:1px solid var(--line)}
+  .aihead{display:flex;align-items:baseline;gap:12px;border-bottom:2px solid var(--ink);padding-bottom:12px;margin-bottom:16px}
+  .aihead b{font-family:'Fraunces','Noto Serif SC',serif;font-size:19px}
+  .aihead .st{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--sage)}
+  .msg-u{margin-left:auto;max-width:80%;border:1px solid var(--line2);border-radius:2px;padding:10px 14px;font-size:13px;width:max-content;background:var(--paper2)}
+  .msg-a{border-left:3px solid var(--accent);padding:4px 0 4px 16px;margin-top:16px;font-size:13px;line-height:1.75}
+  .msg-a .tt{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:6px}
+  .msg-a table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  .msg-a td{padding:5px 4px;border-bottom:1px solid var(--line);color:var(--ink2)}
+  .msg-a td:first-child{font-family:'IBM Plex Mono',monospace;color:var(--ink)}
+  .msg-a .cfm{margin-top:12px;display:flex;gap:10px}
+  .msg-a .cfm button{font-family:inherit;font-size:12.5px;padding:8px 18px;border-radius:2px;cursor:pointer;letter-spacing:.04em}
+  .msg-a .cfm .ok{background:var(--ink);color:var(--paper);border:1px solid var(--ink)}
+  .msg-a .cfm .no{background:transparent;border:1px solid var(--line2);color:var(--ink2)}
+  .aiside{padding:22px;background:var(--paper2);border-left:1px solid var(--line)}
+  .aiside h4{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;color:var(--ink2);margin-bottom:14px}
+  .aiside .tool{display:flex;justify-content:space-between;font-size:12px;padding:8px 0;border-bottom:1px dashed var(--line2);color:var(--ink2)}
+  .aiside .tool b{color:var(--ink);font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:11px}
+  .aiside .tool .lv{font-family:'IBM Plex Mono',monospace;font-size:10px;padding:2px 7px;border-radius:2px}
+  .aiside .tool .lv.l1{background:var(--sage-dim);color:var(--sage)}
+  .aiside .tool .lv.l2{background:var(--accent-dim);color:var(--accent)}
+  .aiinput{display:flex;align-items:center;gap:10px;padding:12px 26px;border-top:2px solid var(--ink)}
+  .aiinput input{flex:1;background:transparent;border:none;outline:none;color:var(--ink);font-size:13px;font-family:inherit}
+  .aiinput .send{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;background:var(--ink);color:var(--paper);border:none;padding:7px 16px;border-radius:2px;cursor:pointer}
+
+  /* ---- 设置卡：印刷表单 ---- */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .card{border:1px solid var(--ink);background:#fffcf5;padding:24px;box-shadow:4px 4px 0 rgba(33,29,24,.1)}
+  .card h3{font-family:'Fraunces','Noto Serif SC',serif;font-size:17px;font-weight:600;padding-bottom:10px;border-bottom:2px solid var(--ink);display:flex;justify-content:space-between;align-items:baseline}
+  .card h3 .en{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink3);letter-spacing:.15em}
+  .card .row{display:flex;justify-content:space-between;align-items:center;padding:11px 2px;border-bottom:1px solid var(--line);font-size:13px}
+  .card .row .k{color:var(--ink2)}
+  .card .row .v{font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+  .card .row .v.g{color:var(--sage)}
+  .field{margin-top:14px}
+  .field .lb{font-size:11px;color:var(--ink2);margin-bottom:6px;display:block;letter-spacing:.05em}
+  .field .inp{border:1px solid var(--line2);border-radius:2px;padding:0 12px;height:38px;font-family:'IBM Plex Mono',monospace;font-size:12px;display:flex;align-items:center;justify-content:space-between;background:#fff}
+  .field .inp .tail{color:var(--sage)}
+
+  /* ---- 色板/规格 ---- */
+  .spec{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .swatches{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+  .sw{border:1px solid var(--line2)}
+  .sw .c{height:52px}
+  .sw .l{padding:7px 9px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink2);background:#fff}
+  .sw .l b{display:block;color:var(--ink);font-weight:500;font-size:10.5px}
+  .type-row{display:flex;align-items:baseline;gap:16px;padding:13px 0;border-bottom:1px solid var(--line)}
+  .type-row .info{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);text-align:right}
+  .foot{padding:44px 0 60px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3);display:flex;justify-content:space-between;border-top:2px solid var(--ink);margin-top:52px}
+</style>
+</head>
+<body>
+
+<div class="scheme-tag"><div class="in">
+  <span class="tag">SCHEME B</span><h1>画册 · The Album</h1><span class="en">Editorial Luxury × Editorial Split</span>
+  <span class="note">暖纸底 · 衬线大标题 · 胶片颗粒 · 印刷品质感 · Fraunces + Noto Serif SC</span>
+</div></div>
+
+<div class="wrap">
+  <div class="sec">
+    <div class="sec-h"><span class="no">01</span><h2>报头导航</h2><span class="d">杂志刊头式 · 非胶囊 · 底线激活态</span></div>
+    <div class="masthead">
+      <div class="top">
+        <div class="brand">Panomint<span>.</span></div>
+        <div class="issue">自托管全景相册<br>SESSION 2026 · OCT</div>
+      </div>
+      <nav>
+        <a class="on" href="#">时间轴</a><a href="#">相册</a><a href="#">地图</a><a href="#">人物</a><a href="#">工具箱</a>
+        <a class="ai" href="#"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>AI 助手</a>
+      </nav>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">02</span><h2>时间轴 — 编辑分裂布局</h2><span class="d">左：衬线叙事 + 统计 · 右：胶片相框横列</span></div>
+    <div class="split">
+      <div class="left">
+        <span class="eyebrow">TIMELINE · 2026 SEP</span>
+        <h3>九月，<em>洱海</em>与苍山之间</h3>
+        <p>42 张照片、3 段 4K 延时、一次环湖骑行。本月新增媒体已按地点与人物自动归档，全景序列等待转码。</p>
+        <div class="stats">
+          <div><b>42</b><span>照片</span></div><div><b>3</b><span>视频</span></div><div><b>7</b><span>地点</span></div><div><b>2</b><span>人物</span></div>
+        </div>
+      </div>
+      <div class="filmrow">
+        <div class="frame"><div class="ph"><div class="i1"></div></div><div class="cap"><b>环湖骑行</b><span>09-14</span></div></div>
+        <div class="frame"><div class="ph"><div class="i2"></div></div><div class="cap"><b>大理夜航</b><span>09-10</span></div></div>
+        <div class="frame"><div class="ph"><div class="i3"></div></div><div class="cap"><b>沙溪古镇</b><span>09-08</span></div></div>
+        <div class="frame"><div class="ph"><div class="i4"></div></div><div class="cap"><b>山径</b><span>09-05</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">03</span><h2>AI 助手 — 信纸 + 工具清单</h2><span class="d">左：对话与确认 · 右：语义工具白名单一览</span></div>
+    <div class="aiwrap">
+      <div class="aimain">
+        <div class="aihead"><b>Panomint AI</b><span class="st">● CONNECTED · qwen3.6-27b</span></div>
+        <div class="msg-u">看看转码队列什么情况，顺便把 HLS 分片改成 6 秒</div>
+        <div class="msg-a">
+          <div class="tt">AGENT · pano_view_transcode_snapshot</div>
+          <div>当前队列空闲，无活动任务：</div>
+          <table><tr><td>waiting</td><td>0</td></tr><tr><td>processing</td><td>0</td></tr><tr><td>failed</td><td>0</td></tr></table>
+          <div class="tt" style="margin-top:14px">CONFIRM · pano_set_transcode_param</div>
+          <div>即将修改：<span class="mono" style="color:var(--accent)">hls_seg_seconds 4 → 6</span></div>
+          <div class="cfm"><button class="ok">确认执行</button><button class="no">取消</button></div>
+        </div>
+      </div>
+      <div class="aiside">
+        <h4>SEMANTIC TOOLS · 白名单</h4>
+        <div class="tool"><b>snapshot</b><span class="lv l1">L1</span></div>
+        <div class="tool"><b>queue.stats</b><span class="lv l1">L1</span></div>
+        <div class="tool"><b>job.log.tail</b><span class="lv l1">L1</span></div>
+        <div class="tool"><b>job.pause</b><span class="lv l2">L2</span></div>
+        <div class="tool"><b>job.resume</b><span class="lv l2">L2</span></div>
+        <div class="tool"><b>job.cancel</b><span class="lv l2">L2</span></div>
+        <div class="tool"><b>transcode.config</b><span class="lv l2">L2</span></div>
+        <p style="font-size:11px;color:var(--ink3);margin-top:14px;line-height:1.7">L1 只读直执行；L2 变更操作须确认卡放行，全部写入审计。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">04</span><h2>设置 — 印刷表单卡</h2><span class="d">硬边框 + 硬阴影（offset print）· 非圆角体系</span></div>
+    <div class="cards">
+      <div class="card">
+        <h3>LLM 上游 <span class="en">LLM UPSTREAM</span></h3>
+        <div class="row"><span class="k">Base URL</span><span class="v">http://192.168.1.42:8888/v1</span></div>
+        <div class="row"><span class="k">API Key</span><span class="v">•••••••••• <span style="color:var(--sage)">尾 2026</span></span></div>
+        <div class="row"><span class="k">状态</span><span class="v g">已启用 · 连通正常</span></div>
+        <div class="row"><span class="k">Key 存储</span><span class="v">AES-256-GCM 服务端加密</span></div>
+      </div>
+      <div class="card">
+        <h3>转码 <span class="en">TRANSCODE</span></h3>
+        <div class="row"><span class="k">自动转码</span><span class="v g">开</span></div>
+        <div class="row"><span class="k">实时转码</span><span class="v g">开</span></div>
+        <div class="row"><span class="k">HLS 分片</span><span class="v">4 秒</span></div>
+        <div class="row"><span class="k">远程调试通道</span><span class="v">未开启</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">05</span><h2>设计规格</h2><span class="d">色板 / 字体 / 形状语言</span></div>
+    <div class="spec">
+      <div>
+        <div class="swatches">
+          <div class="sw"><div class="c" style="background:#f7f3ec"></div><div class="l"><b>paper</b>#F7F3EC</div></div>
+          <div class="sw"><div class="c" style="background:#fffcf5"></div><div class="l"><b>card</b>#FFFCF5</div></div>
+          <div class="sw"><div class="c" style="background:#211d18"></div><div class="l"><b>ink</b>#211D18</div></div>
+          <div class="sw"><div class="c" style="background:#b4552d"></div><div class="l"><b>accent</b>#B4552D</div></div>
+          <div class="sw"><div class="c" style="background:#6f7d5c"></div><div class="l"><b>sage</b>#6F7D5C</div></div>
+          <div class="sw"><div class="c" style="background:#a39a8c"></div><div class="l"><b>mute</b>#A39A8C</div></div>
+        </div>
+        <div style="margin-top:16px">
+          <div class="type-row"><span class="serif demo" style="font-size:26px;font-weight:600;letter-spacing:-.01em">苍山不墨千秋画</span><span class="info">Heading / Fraunces<br>+ Noto Serif SC 600</span></div>
+          <div class="type-row"><span class="demo" style="font-size:14px">洱海无弦万古琴 · 正文与说明</span><span class="info">Body / Noto Sans SC 400</span></div>
+          <div class="type-row" style="border-bottom:none"><span class="demo mono" style="font-size:12.5px">2026-09-14 · 42MP · HEVC</span><span class="info">Meta / IBM Plex Mono 11-12px</span></div>
+        </div>
+      </div>
+      <div class="card" style="box-shadow:none">
+        <h3>形状与质感语言 <span class="en">SHAPE</span></h3>
+        <p style="margin-top:14px">反圆角体系：2-6px 近直角，卡片硬边框 1px ink + **偏移硬阴影**（4px 4px 0 实色，铅字印刷的版画感）——不是模糊投影。</p>
+        <p>全站 3.5% 胶片颗粒覆盖层（fixed，不随滚动），暖纸底色模拟无酸纸；照片一律白色相框 + 细边 + 硬阴影，像贴进画册的实体照片。</p>
+        <p>强调色赭石橙只出现在：激活下划线、确认按钮、引用边线。鼠尾草绿只用于「成功/在线」语义。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><span>PANOMINT UI REDESIGN · SCHEME B / THE ALBUM</span><span>STATIC MOCKUP · 2026-10</span></div>
+</div>
+</body>
+</html>

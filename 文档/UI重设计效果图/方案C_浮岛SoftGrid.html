@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案 C · 浮岛 Soft Grid — Panomint UI 重设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#eef0f2; --card:#ffffff; --card2:#f6f8f9;
+    --line:rgba(20,30,40,.07); --line2:rgba(20,30,40,.13);
+    --tx:#171c21; --tx2:#5b6670; --tx3:#98a2ab;
+    --primary:#0f62fe; --primary-dim:rgba(15,98,254,.08);
+    --ok:#0e9f6e; --ok-dim:rgba(14,159,110,.1);
+    --warn:#d97706; --warn-dim:rgba(217,119,6,.1);
+    --r-xl:26px; --r-lg:18px; --r-md:12px;
+    --ease:cubic-bezier(.32,.72,0,1);
+    --shadow-soft:0 2px 6px rgba(23,28,33,.04), 0 12px 40px rgba(23,28,33,.07);
+    --shadow-lift:0 4px 10px rgba(23,28,33,.05), 0 24px 70px rgba(23,28,33,.11);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--tx);font-family:'Outfit','Noto Sans SC',sans-serif;min-height:100vh;font-weight:400}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 40px}
+
+  .scheme-tag{position:sticky;top:0;z-index:50;backdrop-filter:blur(16px);background:rgba(238,240,242,.85);border-bottom:1px solid var(--line)}
+  .scheme-tag .in{display:flex;align-items:center;gap:14px;padding:14px 40px;max-width:1180px;margin:0 auto}
+  .scheme-tag .tag{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.18em;color:var(--primary);background:var(--primary-dim);padding:5px 12px;border-radius:8px}
+  .scheme-tag h1{font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .scheme-tag .en{color:var(--tx3);font-size:12px;font-family:'IBM Plex Mono',monospace}
+  .scheme-tag .note{margin-left:auto;color:var(--tx2);font-size:12px}
+
+  .sec{padding:54px 0 8px}
+  .sec-h{display:flex;align-items:baseline;gap:14px;margin-bottom:24px}
+  .sec-h .no{font-family:'IBM Plex Mono',monospace;color:var(--tx3);font-size:12px}
+  .sec-h h2{font-size:20px;font-weight:600;letter-spacing:-.015em}
+  .sec-h .d{margin-left:auto;color:var(--tx2);font-size:13px}
+
+  /* ---- 导航：无边框浮岛（纯阴影定义边界） ---- */
+  .nav{display:flex;align-items:center;gap:4px;background:var(--card);border-radius:var(--r-xl);padding:10px 12px;box-shadow:var(--shadow-lift);width:max-content}
+  .nav .logo{display:flex;align-items:center;gap:10px;padding:0 16px 0 10px;font-weight:600;font-size:14.5px;letter-spacing:-.02em}
+  .nav .logo .mark{width:26px;height:26px;border-radius:9px;background:linear-gradient(135deg,var(--primary),#5a8df5)}
+  .nav a{color:var(--tx2);text-decoration:none;font-size:13.5px;font-weight:500;padding:9px 17px;border-radius:var(--r-md);transition:all .5s var(--ease)}
+  .nav a.on{color:var(--tx);background:var(--card2);box-shadow:inset 0 0 0 1px var(--line)}
+  .nav .ai{margin-left:6px;display:flex;align-items:center;gap:7px;background:var(--tx);color:#fff;font-size:12.5px;font-weight:500;padding:8px 16px;border-radius:var(--r-md)}
+
+  /* ---- Bento 网格 ---- */
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+  .col4{grid-column:span 4}.col8{grid-column:span 8}.col6{grid-column:span 6}.col12{grid-column:span 12}
+  .shot{border-radius:var(--r-xl);background:var(--card);box-shadow:var(--shadow-soft);overflow:hidden;transition:all .6s var(--ease)}
+  .shot .ph{position:relative}
+  .shot .img{width:100%;display:block}
+  .shot .cap{display:flex;align-items:center;gap:10px;padding:14px 18px 16px}
+  .shot .cap .t{font-size:13.5px;font-weight:500}
+  .shot .cap .m{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tx3)}
+  .chip{position:absolute;top:14px;left:14px;font-size:11px;font-weight:500;padding:5px 12px;border-radius:99px;backdrop-filter:blur(10px);display:flex;align-items:center;gap:6px}
+  .chip.g{background:rgba(255,255,255,.75);color:var(--ok)}
+  .chip.w{background:rgba(255,255,255,.75);color:var(--warn)}
+  .chip .dot{width:6px;height:6px;border-radius:50%}
+
+  .p1{height:240px;background:linear-gradient(155deg,#dfe7ee 0%,#b8c9d6 45%,#8aa5b5 100%)}
+  .p2{height:160px;background:linear-gradient(150deg,#e8ded2 0%,#c9b391 55%,#8f7a55 100%)}
+  .p3{height:160px;background:linear-gradient(140deg,#d6e2dc 0%,#a8c3b5 55%,#6f9484 100%)}
+  .p4{height:160px;background:linear-gradient(165deg,#e3e0ea 0%,#b9b4cd 55%,#847fa0 100%)}
+  .p5{height:240px;background:linear-gradient(170deg,#f0e4da 0%,#d3bfa8 50%,#a68d70 100%)}
+  .shot .inner{padding:18px}
+  .shot .inner h4{font-size:14.5px;font-weight:600;letter-spacing:-.01em}
+  .shot .inner p{font-size:12.5px;color:var(--tx2);line-height:1.7;margin-top:8px}
+  .shot .inner .kv{display:flex;justify-content:space-between;margin-top:14px;font-size:12px;color:var(--tx2);padding-top:12px;border-top:1px solid var(--line)}
+  .shot .inner .kv b{color:var(--tx);font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+
+  /* ---- AI 面板：白卡 + 主色动作 ---- */
+  .aiwrap{border-radius:var(--r-xl);background:var(--card);box-shadow:var(--shadow-lift);overflow:hidden}
+  .aihead{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line)}
+  .aihead .orb{width:30px;height:30px;border-radius:11px;background:linear-gradient(135deg,var(--primary),#5a8df5);display:flex;align-items:center;justify-content:center}
+  .aihead b{font-size:14.5px;font-weight:600}
+  .aihead .st{margin-left:auto;font-size:11.5px;color:var(--ok);background:var(--ok-dim);padding:4px 12px;border-radius:99px;font-weight:500}
+  .aibody{padding:20px 22px;background:var(--card2)}
+  .msg-u{margin-left:auto;max-width:76%;background:var(--primary);color:#fff;border-radius:16px 16px 4px 16px;padding:11px 16px;font-size:13px;width:max-content;font-weight:400}
+  .msg-a{max-width:90%;background:var(--card);border-radius:4px 16px 16px 16px;padding:16px 18px;font-size:13px;box-shadow:var(--shadow-soft);margin-top:14px}
+  .msg-a .tt{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--primary);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+  .msg-a table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  .msg-a td{padding:6px 8px;border-top:1px solid var(--line);color:var(--tx2)}
+  .msg-a td:first-child{font-family:'IBM Plex Mono',monospace;color:var(--tx)}
+  .msg-a .cfm{display:flex;gap:9px;margin-top:13px}
+  .msg-a .cfm button{font-family:inherit;font-size:12.5px;font-weight:500;padding:8px 18px;border-radius:var(--r-md);cursor:pointer;border:none}
+  .msg-a .cfm .ok{background:var(--primary);color:#fff}
+  .msg-a .cfm .no{background:var(--card2);color:var(--tx2);box-shadow:inset 0 0 0 1px var(--line2)}
+  .aiinput{display:flex;align-items:center;gap:12px;padding:14px 18px;border-top:1px solid var(--line)}
+  .aiinput input{flex:1;background:var(--card2);border:1px solid var(--line);outline:none;border-radius:var(--r-md);padding:11px 15px;font-size:13px;color:var(--tx);font-family:inherit}
+  .aiinput .send{height:40px;padding:0 20px;border-radius:var(--r-md);background:var(--primary);color:#fff;border:none;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer}
+
+  /* ---- 设置卡 ---- */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .card{border-radius:var(--r-xl);background:var(--card);box-shadow:var(--shadow-soft);padding:24px}
+  .card h3{font-size:15px;font-weight:600;display:flex;align-items:center;gap:10px;letter-spacing:-.01em}
+  .card h3 .ic{width:32px;height:32px;border-radius:10px;background:var(--primary-dim);color:var(--primary);display:flex;align-items:center;justify-content:center}
+  .card p{color:var(--tx2);font-size:12.5px;line-height:1.75;margin-top:10px}
+  .card .row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-top:1px solid var(--line);font-size:13px;margin-top:11px}
+  .card .row:first-of-type{border-top:none;margin-top:14px}
+  .card .row .k{color:var(--tx2)}
+  .card .row .v{font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+  .card .row .v.g{color:var(--ok)}
+  .switch{width:40px;height:22px;border-radius:99px;background:var(--ok);position:relative}
+  .switch::after{content:'';position:absolute;right:2px;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .field{margin-top:13px}
+  .field .lb{font-size:11.5px;color:var(--tx2);margin-bottom:7px;display:block;font-weight:500}
+  .field .inp{display:flex;align-items:center;justify-content:space-between;background:var(--card2);border:1px solid var(--line);border-radius:var(--r-md);padding:0 13px;height:40px;font-family:'IBM Plex Mono',monospace;font-size:12px}
+  .field .inp .tail{color:var(--ok)}
+
+  /* ---- 色板/规格 ---- */
+  .spec{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .swatches{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+  .sw{border-radius:var(--r-md);overflow:hidden;background:var(--card);box-shadow:var(--shadow-soft)}
+  .sw .c{height:52px}
+  .sw .l{padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx2)}
+  .sw .l b{display:block;color:var(--tx);font-weight:500;font-size:10.5px}
+  .type-row{display:flex;align-items:baseline;gap:16px;padding:13px 0;border-bottom:1px solid var(--line)}
+  .type-row .info{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tx3);text-align:right}
+  .foot{padding:42px 0 60px;color:var(--tx3);font-size:11.5px;font-family:'IBM Plex Mono',monospace;display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+
+<div class="scheme-tag"><div class="in">
+  <span class="tag">SCHEME C</span><h1>浮岛 · Soft Grid</h1><span class="en">Soft Structuralism × Bento</span>
+  <span class="note">银白底 · 超大 Outfit 字 · 无边框浮岛卡（纯漫射阴影定义边界）· Lightroom 式现代工具感</span>
+</div></div>
+
+<div class="wrap">
+  <div class="sec">
+    <div class="sec-h"><span class="no">01</span><h2>导航 — 无边框浮岛</h2><span class="d">边界由阴影而非描边定义 · AI 入口深色胶囊</span></div>
+    <div class="nav">
+      <span class="logo"><span class="mark"></span>Panomint</span>
+      <a class="on" href="#">时间轴</a><a href="#">相册</a><a href="#">地图</a><a href="#">人物</a><a href="#">工具箱</a>
+      <span class="ai"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>AI 助手</span>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">02</span><h2>时间轴 — Bento 混排</h2><span class="d">大图卡 / 信息卡 / 状态卡混合 · 漫射阴影漂浮</span></div>
+    <div class="grid">
+      <div class="shot col4"><div class="ph"><div class="img p1"></div><span class="chip g"><span class="dot" style="background:var(--ok)"></span>360° 全景</span></div>
+        <div class="cap"><span class="t">洱海东岸 · 环湖骑行</span><span class="m">09-14 · 42MP</span></div></div>
+      <div class="shot col8"><div class="ph"><div class="img p5"></div><span class="chip w"><span class="dot" style="background:var(--warn)"></span>HEVC 转码中 · 64%</span></div>
+        <div class="cap"><span class="t">苍山云海 · 延时片段</span><span class="m">09-12 · 4K60</span></div></div>
+      <div class="shot col4"><div class="inner"><h4>本月入库</h4><p>42 张照片与 3 段视频已自动按地点归档，2 位新人物完成聚类。</p>
+        <div class="kv"><span>新增媒体</span><b>45</b></div><div class="kv" style="border-top:none;padding-top:0"><span>待转码</span><b>1</b></div></div></div>
+      <div class="shot col4"><div class="ph"><div class="img p2"></div></div><div class="cap"><span class="t">大理夜航</span><span class="m">09-10</span></div></div>
+      <div class="shot col4"><div class="ph"><div class="img p3"></div></div><div class="cap"><span class="t">沙溪古镇</span><span class="m">09-08</span></div></div>
+      <div class="shot col4"><div class="ph"><div class="img p4"></div></div><div class="cap"><span class="t">洱海出口</span><span class="m">09-06</span></div></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">03</span><h2>AI 助手 — 白卡对话 + 确认流</h2><span class="d">主色动作 · 确认卡带参数明细</span></div>
+    <div class="aiwrap">
+      <div class="aihead"><span class="orb"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg></span><b>Panomint AI</b><span style="color:var(--tx3);font-size:11.5px">qwen3.6-27b · 本地</span><span class="st">已连接</span></div>
+      <div class="aibody">
+        <div class="msg-u">看看转码队列什么情况，顺便把 HLS 分片改成 6 秒</div>
+        <div class="msg-a">
+          <div class="tt">AGENT · pano_view_transcode_snapshot</div>
+          <div>当前队列空闲，无活动任务：</div>
+          <table><tr><td>waiting</td><td>0</td></tr><tr><td>processing</td><td>0</td></tr><tr><td>failed</td><td>0</td></tr></table>
+          <div class="tt" style="margin-top:13px">CONFIRM · pano_set_transcode_param</div>
+          <div>即将修改：<span class="mono" style="color:var(--warn)">hls_seg_seconds 4 → 6</span></div>
+          <div class="cfm"><button class="ok">确认执行</button><button class="no">取消</button></div>
+        </div>
+      </div>
+      <div class="aiinput"><input placeholder="输入任务，回车提交 · 白名单语义工具直接执行"><span class="send">发送</span></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">04</span><h2>设置 — 漂浮信息卡</h2><span class="d">无边框 · 开关与元数据行</span></div>
+    <div class="cards">
+      <div class="card">
+        <h3><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/></svg></span>LLM 上游</h3>
+        <p>OpenAI 兼容端点，API Key 服务端加密，永不回显明文。</p>
+        <div class="field"><span class="lb">Base URL</span><div class="inp"><span>http://192.168.1.42:8888/v1</span></div></div>
+        <div class="field"><span class="lb">API Key</span><div class="inp"><span>••••••••••••••••</span><span class="tail">已保存 · 尾 2026</span></div></div>
+        <div class="row"><span class="k">状态</span><span class="v g">已启用 · 连通正常</span></div>
+      </div>
+      <div class="card">
+        <h3><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>转码</h3>
+        <p>系统级开关，AI 可按指令修改（写前确认）。</p>
+        <div class="row"><span class="k">自动转码</span><span class="switch"></span></div>
+        <div class="row"><span class="k">实时转码</span><span class="switch"></span></div>
+        <div class="row"><span class="k">HLS 分片</span><span class="v">4 秒</span></div>
+        <div class="row"><span class="k">远程调试通道</span><span class="v g">未开启</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-h"><span class="no">05</span><h2>设计规格</h2><span class="d">色板 / 字体 / 形状语言</span></div>
+    <div class="spec">
+      <div>
+        <div class="swatches">
+          <div class="sw"><div class="c" style="background:#eef0f2"></div><div class="l"><b>bg</b>#EEF0F2</div></div>
+          <div class="sw"><div class="c" style="background:#ffffff"></div><div class="l"><b>card</b>#FFFFFF</div></div>
+          <div class="sw"><div class="c" style="background:#0f62fe"></div><div class="l"><b>primary</b>#0F62FE</div></div>
+          <div class="sw"><div class="c" style="background:#0e9f6e"></div><div class="l"><b>ok</b>#0E9F6E</div></div>
+          <div class="sw"><div class="c" style="background:#d97706"></div><div class="l"><b>warn</b>#D97706</div></div>
+          <div class="sw"><div class="c" style="background:#171c21"></div><div class="l"><b>ink</b>#171C21</div></div>
+        </div>
+        <div style="margin-top:16px">
+          <div class="type-row"><span class="demo" style="font-size:23px;font-weight:700;letter-spacing:-.02em">苍山不墨千秋画</span><span class="info">Heading / Outfit 700<br>+ Noto Sans SC · -2% tracking</span></div>
+          <div class="type-row"><span class="demo" style="font-size:14px;font-weight:300">洱海无弦万古琴 · 正文 300-400</span><span class="info">Body / Outfit + Noto Sans SC</span></div>
+          <div class="type-row" style="border-bottom:none"><span class="demo mono" style="font-size:12.5px">2026-09-14 · 42MP · HEVC</span><span class="info">Meta / IBM Plex Mono 11-12px</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>形状与质感语言</h3>
+        <p style="margin-top:14px">**无边框哲学**：容器不用描边，边界完全由双层漫射阴影定义（近影 2px + 远影 40px）；银白底与纯白卡形成 3% 明度层级。</p>
+        <p>圆角体系 26 / 18 / 12px 大曲率；开关与状态点用语义色（绿=开、琥珀=进行中、主色=动作）；照片卡上浮 white 75% 磨砂 chip 承载状态。</p>
+        <p>动效一律 cubic-bezier(.32,.72,0,1)——卡片 hover 抬升（阴影从 soft 到 lift），无描边变化。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><span>PANOMINT UI REDESIGN · SCHEME C / SOFT GRID</span><span>STATIC MOCKUP · 2026-10</span></div>
+</div>
+</body>
+</html>

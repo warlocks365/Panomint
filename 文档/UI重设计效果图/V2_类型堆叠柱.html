@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>V2 类型堆叠柱 · 时间分布 dock 效果图</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9e4de;--card:#f4f1ed;--tx:#41403c;--tx2:#7d7a73;--tx3:#a5a29a;--line:#ddd8d0;
+--primary:#4a5a6a;--mist:rgba(143,163,173,.16);--r:10px;--ease:cubic-bezier(.32,.72,0,1);
+--sh:0 1px 3px rgba(65,64,60,.05),0 10px 34px rgba(65,64,60,.07);
+--c-photo:#7d95a8;--c-video:#9a8aa0;--c-pano:#c4a57a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:300;font-size:14px;-webkit-font-smoothing:antialiased;min-height:100vh;position:relative}
+.mono{font-family:'IBM Plex Mono',monospace}
+.mapbg{position:absolute;inset:0;background:linear-gradient(rgba(233,228,222,.28),rgba(233,228,222,.28)),repeating-linear-gradient(90deg,#cfd8d3 0 90px,#c4cfc9 90px 180px),#d7dfd9;filter:saturate(.42) brightness(1.04)}
+.wrap{position:relative;max-width:1000px;margin:0 auto;padding:90px 30px 60px}
+.dock{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:16px 20px 12px;position:relative}
+.hd{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+.hd .tt{font-size:12.5px;font-weight:400;letter-spacing:.14em}
+.hd .hint{font-size:11px;color:var(--tx3)}
+.hd .range{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;background:var(--mist);padding:4px 12px;border-radius:6px}
+.hist{display:flex;align-items:flex-end;gap:8px;height:110px;position:relative}
+.hist::after{content:'';position:absolute;left:0;right:0;bottom:0;height:1px;background:var(--line)}
+.col{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;position:relative;cursor:pointer}
+.stack{display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden}
+.seg{width:100%}
+.seg.photo{background:var(--c-photo)}
+.seg.video{background:var(--c-video)}
+.seg.pano{background:var(--c-pano)}
+.col.hv .stack{box-shadow:0 4px 14px rgba(74,90,106,.28)}
+.col.hv .seg{filter:brightness(1.08)}
+.col .tip{position:absolute;top:-56px;left:50%;transform:translateX(-50%);font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx);background:#f4f1ed;border:1px solid var(--line);border-radius:6px;padding:6px 11px;white-space:nowrap;z-index:5}
+.col .tip .r{display:flex;align-items:center;gap:6px;margin-top:2px}
+.col .tip .d{width:7px;height:7px;border-radius:2px}
+.brush{position:absolute;bottom:0;top:0;left:44%;width:38%;background:rgba(74,90,106,.1);border-left:1px solid var(--primary);border-right:1px solid var(--primary);border-radius:3px;pointer-events:none}
+.brush .hnd{position:absolute;top:50%;width:12px;height:12px;border-radius:50%;background:var(--card);border:1.5px solid var(--primary);transform:translateY(-50%)}
+.brush .hnd.l{left:-6px}.brush .hnd.r{right:-6px}
+.axis{display:flex;justify-content:space-between;margin-top:9px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--tx3)}
+.legend{display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--tx2)}
+.legend .li{display:flex;align-items:center;gap:6px}
+.legend .li i{width:9px;height:9px;border-radius:2.5px}
+.note{margin-top:16px;font-size:12px;color:var(--tx2);line-height:1.9}
+.note b{font-weight:400;color:var(--tx)}
+.vtag{position:absolute;top:-14px;left:18px;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.14em;color:#4a5a6a;background:rgba(143,163,173,.2);border:1px solid rgba(74,90,106,.35);padding:4px 13px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="mapbg"></div>
+<div class="wrap">
+  <div class="dock">
+    <span class="vtag">V2 · 类型堆叠柱 STACKED</span>
+    <div class="hd"><span class="tt">时间分布</span><span class="hint">悬停分解当月类型构成</span><span class="range">2026-07-12 — 2026-09-30</span></div>
+    <div class="hist">
+      <div class="col"><div class="stack" style="height:32%"><div class="seg photo" style="height:75%"></div><div class="seg pano" style="height:25%"></div></div></div>
+      <div class="col"><div class="stack" style="height:20%"><div class="seg photo" style="height:100%"></div></div></div>
+      <div class="col hv"><span class="tip"><b>2026-08 · 17 项</b><span class="r"><i class="d" style="background:var(--c-photo)"></i>照片 10</span><span class="r"><i class="d" style="background:var(--c-video)"></i>视频 4</span><span class="r"><i class="d" style="background:var(--c-pano)"></i>全景 3</span></span>
+        <div class="stack" style="height:70%"><div class="seg photo" style="height:60%"></div><div class="seg video" style="height:25%"></div><div class="seg pano" style="height:15%"></div></div></div>
+      <div class="col"><div class="stack" style="height:45%"><div class="seg photo" style="height:80%"></div><div class="seg video" style="height:20%"></div></div></div>
+      <div class="col"><div class="stack" style="height:100%"><div class="seg photo" style="height:65%"></div><div class="seg video" style="height:22%"></div><div class="seg pano" style="height:13%"></div></div></div>
+      <div class="col"><div class="stack" style="height:60%"><div class="seg photo" style="height:85%"></div><div class="seg video" style="height:15%"></div></div></div>
+      <div class="brush"><span class="hnd l"></span><span class="hnd r"></span></div>
+    </div>
+    <div class="axis"><span>2026-06</span><span>07</span><span>08</span><span>09</span><span>10</span></div>
+    <div class="legend">
+      <span class="li"><i style="background:var(--c-photo)"></i>照片</span>
+      <span class="li"><i style="background:var(--c-video)"></i>视频</span>
+      <span class="li"><i style="background:var(--c-pano)"></i>全景</span>
+      <span class="li" style="color:var(--tx3)">· 与时间轴页图例四色同源</span>
+    </div>
+  </div>
+  <p class="note"><b>V2 类型堆叠柱</b>——柱内按媒体类型分段（与时间轴页图例四色同源），悬停整柱提亮 + **分解气泡**（当月照片/视频/全景计数）。信息量最大：一眼看出「8 月视频多、全景集中在 8 月」。刷选区间照常可用。</p>
+</div>
+</body>
+</html>

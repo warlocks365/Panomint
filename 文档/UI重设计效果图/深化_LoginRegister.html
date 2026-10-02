@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 深化 · 登录 / 注册（VIEW.11）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #e9e4de; --surface: #f4f1ed; --surface-hover: #efebe5; --border: #ddd8d0;
+    --text: #41403c; --text2: #7d7a73; --text3: #a5a29a;
+    --primary: #4a5a6a; --primary-hover: #3d4b58; --danger: #b0685c; --success: #6e8a72;
+    --shadow-card: 0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift: 0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font: "Outfit", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ded9d2; font-family: var(--font); color: var(--text); font-weight: 300; letter-spacing: .01em; padding: 28px 0 48px; }
+  .canvas { width: 1440px; margin: 0 auto; }
+  .frame { background: var(--bg); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 40px; position: relative; }
+  .view-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: var(--text3); padding: 14px 36px 0; }
+  .frame::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(900px 420px at 12% -8%, rgba(244,241,237,.55), transparent 60%),
+                radial-gradient(760px 380px at 92% 108%, rgba(74,90,106,.06), transparent 60%); }
+  .wordmark { position: absolute; top: 18px; left: 36px; font-family: var(--mono); font-size: 11px; letter-spacing: .22em; color: var(--text3); }
+  .vermark { position: absolute; bottom: 16px; right: 36px; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--text3); }
+
+  .stage { min-height: 560px; display: flex; align-items: center; justify-content: center; padding: 46px 36px; position: relative; }
+
+  .card { width: 380px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 38px 36px 30px; }
+  .card + .card { margin-left: 60px; }
+  .c-eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: .2em; color: var(--text3); text-align: center; margin-bottom: 10px; }
+  .c-title { font-size: 20px; font-weight: 500; letter-spacing: .12em; text-align: center; }
+  .c-sub { font-size: 12.5px; color: var(--text2); text-align: center; margin: 6px 0 26px; }
+
+  .field { display: block; margin-bottom: 14px; }
+  .f-label { display: block; font-size: 11.5px; color: var(--text2); margin-bottom: 6px; letter-spacing: .04em; }
+  .f-input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #efebe5; color: var(--text); font-size: 13.5px; font-family: var(--font); }
+  .f-hint { display: block; font-size: 11px; color: var(--text3); margin-top: 5px; }
+
+  .remember { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text2); margin: 4px 0 18px; cursor: pointer; }
+  .remember input { accent-color: var(--primary); }
+
+  .submit { width: 100%; height: 40px; border: none; border-radius: 10px; background: var(--primary); color: #eef1f4; font-family: var(--font); font-size: 13.5px; letter-spacing: .08em; cursor: pointer; transition: background .5s cubic-bezier(.32,.72,0,1); }
+  .submit:hover { background: var(--primary-hover); }
+
+  .alt { text-align: center; font-size: 12.5px; color: var(--text2); margin-top: 18px; }
+  .alt a { color: var(--primary); text-decoration: none; border-bottom: 1px solid rgba(74,90,106,.3); padding-bottom: 1px; }
+
+  .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0 16px; color: var(--text3); font-size: 11px; }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .sso { width: 100%; height: 38px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); font-family: var(--font); font-size: 12.5px; cursor: pointer; }
+
+  .mfa { border-left: 2px solid var(--oat); padding-left: 10px; margin-bottom: 14px; }
+  .mfa .m-t { font-size: 11.5px; color: var(--oat); font-weight: 500; }
+  .mfa .m-d { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+  .ledger { width: 1440px; margin: 0 auto; background: var(--primary); border-radius: 14px; padding: 16px 26px; display: flex; gap: 26px; }
+  .ledger .lt { color: rgba(238,241,244,.65); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; margin-bottom: 4px; }
+  .ledger .li { flex: 1; }
+  .ledger .ln { color: #eef1f4; font-size: 12px; font-weight: 400; }
+  .ledger .ld { color: rgba(238,241,244,.55); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ============ VIEW.11 登录 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.11 · /login — 登录（雾面氛围 + 规范输入卡）</p>
+    <span class="wordmark">PANOMINT</span>
+    <div class="stage">
+      <div class="card">
+        <div class="c-eyebrow">PANOMINT · 自托管全景相册</div>
+        <h1 class="c-title">全景相册</h1>
+        <p class="c-sub">登录你的账号</p>
+
+        <label class="field">
+          <span class="f-label">账号</span>
+          <input class="f-input" type="text" value="owner@pano.local" />
+        </label>
+        <label class="field">
+          <span class="f-label">密码</span>
+          <input class="f-input" type="password" value="············" />
+        </label>
+
+        <div class="mfa">
+          <div class="m-t">动态口令 · 已要求二次验证</div>
+          <div class="m-d">打开认证器 App，输入当前显示的 6 位数字</div>
+        </div>
+        <label class="field">
+          <span class="f-label">动态口令</span>
+          <input class="f-input" type="text" placeholder="123456" />
+        </label>
+
+        <label class="remember"><input type="checkbox" checked /> 记住我</label>
+
+        <button class="submit">登 录</button>
+
+        <p class="alt">还没有账号？<a>注册新账号</a></p>
+
+        <div class="divider"><span>或</span></div>
+        <button class="sso">使用 SSO 登录</button>
+      </div>
+    </div>
+    <span class="vermark">v1.9.1 · self-hosted</span>
+  </div>
+
+  <!-- ============ VIEW.11-B 注册 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.11-B · /register — 注册（同源卡形态）</p>
+    <span class="wordmark">PANOMINT</span>
+    <div class="stage">
+      <div class="card">
+        <div class="c-eyebrow">PANOMINT · 自托管全景相册</div>
+        <h1 class="c-title">创建账号</h1>
+        <p class="c-sub">注册后即可上传与管理你的媒体</p>
+
+        <label class="field">
+          <span class="f-label">邮箱地址</span>
+          <input class="f-input" type="text" placeholder="you@example.com" />
+        </label>
+        <label class="field">
+          <span class="f-label">显示名</span>
+          <input class="f-input" type="text" placeholder="相册里希望被称呼的名字" />
+        </label>
+        <label class="field">
+          <span class="f-label">密码</span>
+          <input class="f-input" type="password" placeholder="至少 8 位" />
+          <span class="f-hint">建议混合字母、数字与符号</span>
+        </label>
+        <label class="field">
+          <span class="f-label">确认密码</span>
+          <input class="f-input" type="password" placeholder="再输入一次" />
+        </label>
+
+        <button class="submit" style="margin-top:6px">注 册</button>
+        <p class="alt">已有账号？<a>直接登录</a></p>
+      </div>
+    </div>
+    <span class="vermark">v1.9.1 · self-hosted</span>
+  </div>
+
+  <!-- ============ GSAP 账本 ============ -->
+  <div class="ledger">
+    <div class="li"><div class="lt">MOTION · GSAP 账本</div><div class="ln">card-in</div><div class="ld">登录卡 y16 淡入 0.55 · 页面加载一次</div></div>
+    <div class="li"><div class="lt">STATE</div><div class="ln">mfa-reveal</div><div class="ld">动态口令字段按需出现（MFA_REQUIRED 才渲染 · 高度过渡）</div></div>
+    <div class="li"><div class="lt">FEEDBACK</div><div class="ln">btn-press</div><div class="ld">提交钮 active scale 0.98 触压感（CSS）</div></div>
+    <div class="li"><div class="lt">AMBIENCE</div><div class="ln">mist-wash</div><div class="ld">背景双团雾色 radial（bg 色相 ±3% 明度内 · 非装饰渐变）</div></div>
+    <div class="li"><div class="lt">GUARD</div><div class="ln">reduced-motion</div><div class="ld">prefers-reduced-motion 全部跳过</div></div>
+  </div>
+
+</div>
+</body>
+</html>

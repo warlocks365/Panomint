@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>方案 E · 纸墨 Ink — Panomint UI 重设计</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500&family=Noto+Serif+SC:wght@600&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fafaf8;--ink:#1a1a1a;--ink2:#6f6f6c;--ink3:#b8b8b3;--line:#e8e8e4;--line2:#d5d5d0;
+--seal:#c73e3a;--r:3px;--ease:cubic-bezier(.32,.72,0,1)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:'Noto Sans SC',sans-serif;font-weight:300;font-size:14px;min-height:100vh}
+.serif{font-family:'Noto Serif SC',serif;font-weight:600}
+.mono{font-family:'IBM Plex Mono',monospace}
+.wrap{max-width:1080px;margin:0 auto;padding:0 44px}
+.tagbar{position:sticky;top:0;z-index:50;background:rgba(250,250,248,.94);border-bottom:1px solid var(--line)}
+.tagbar .in{display:flex;align-items:center;gap:16px;padding:16px 44px;max-width:1080px;margin:0 auto}
+.tagbar .tag{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.16em;color:var(--seal);border:1px solid var(--seal);padding:3px 10px;border-radius:2px}
+.tagbar h1{font-size:15px;font-weight:400}
+.tagbar .note{margin-left:auto;color:var(--ink2);font-size:11.5px;font-weight:300}
+.sec{padding:58px 0 10px}
+.sec-h{display:flex;align-items:baseline;gap:16px;margin-bottom:30px;border-bottom:1px solid var(--line2);padding-bottom:14px}
+.sec-h .no{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink3)}
+.sec-h h2{font-size:16px;font-weight:400;letter-spacing:.28em}
+.sec-h .d{margin-left:auto;color:var(--ink3);font-size:11.5px}
+.nav{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line2);padding-bottom:18px}
+.nav .brand{font-family:'Noto Serif SC',serif;font-weight:600;font-size:19px;letter-spacing:.35em;display:flex;align-items:center;gap:14px}
+.nav .brand .seal{width:30px;height:30px;background:var(--seal);color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;font-weight:500;border-radius:2px}
+.nav nav{display:flex;gap:38px}
+.nav nav a{color:var(--ink2);text-decoration:none;font-size:13px;font-weight:300;letter-spacing:.2em;position:relative}
+.nav nav a.on{color:var(--ink);font-weight:400}
+.nav nav a.on::after{content:'';position:absolute;left:0;right:0;bottom:-19px;height:2px;background:var(--seal)}
+.nav nav .ai{color:var(--seal);letter-spacing:.1em}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:0}
+.cell{padding:0 22px 34px;position:relative}
+.cell+.cell{border-left:1px solid var(--line)}
+.cell:nth-child(3n+1){padding-left:0}
+.cell:nth-child(3n){padding-right:0;border-right:none}
+.cell .ph{aspect-ratio:3/4;overflow:hidden;margin-bottom:14px;position:relative}
+.cell .img{width:100%;height:100%;display:block}
+.cell .t{font-size:13.5px;font-weight:400;letter-spacing:.04em}
+.cell .m{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);margin-top:5px;letter-spacing:.06em}
+.i1{height:100%;background:linear-gradient(165deg,#e5ded2 0%,#b8ab94 60%,#7a6f5c 100%)}
+.i2{height:100%;background:linear-gradient(150deg,#dde3e0 0%,#a3b0ab 60%,#5f6f68 100%)}
+.i3{height:100%;background:linear-gradient(155deg,#e0d5cd 0%,#b39d8c 55%,#6f5d4c 100%)}
+.i4{height:100%;background:linear-gradient(150deg,#d6d9de 0%,#9fa8b3 55%,#5c6773 100%)}
+.i5{height:100%;background:linear-gradient(160deg,#e8e0d8 0%,#c0b3a2 60%,#857767 100%)}
+.i6{height:100%;background:linear-gradient(145deg,#d9ddda 0%,#adb5b0 60%,#6d7a72 100%)}
+.seal-mark{position:absolute;top:14px;right:14px;width:26px;height:26px;background:var(--seal);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;border-radius:2px;font-weight:400}
+.aiconv{border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);padding:34px 0;display:grid;grid-template-columns:1fr 300px;gap:56px}
+.aileft .msg-u{font-size:14.5px;font-weight:400;margin-bottom:26px;letter-spacing:.02em}
+.aileft .msg-u::before{content:'「';color:var(--ink3)}
+.aileft .msg-u::after{content:'」';color:var(--ink3)}
+.aileft .resp{border-left:1px solid var(--seal);padding-left:24px}
+.aileft .resp .tt{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--seal);letter-spacing:.14em;margin-bottom:12px}
+.aileft .resp p{font-size:13.5px;line-height:2.1;color:var(--ink)}
+.aileft .resp .row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink2);font-weight:300}
+.aileft .resp .row b{font-family:'IBM Plex Mono',monospace;font-weight:400;color:var(--ink)}
+.aileft .cfm{margin-top:22px;display:flex;align-items:center;gap:20px}
+.aileft .cfm button{font-family:inherit;font-size:13px;letter-spacing:.2em;background:var(--seal);color:#fff;border:none;padding:9px 26px;cursor:pointer;border-radius:2px}
+.aileft .cfm .no{background:transparent;color:var(--ink2);border:none;cursor:pointer}
+.airight h4{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.18em;color:var(--ink3);margin-bottom:16px}
+.airight .tool{display:flex;justify-content:space-between;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink2);font-weight:300}
+.airight .tool b{font-family:'IBM Plex Mono',monospace;font-weight:400;color:var(--ink);font-size:11.5px}
+.airight .tool .lv{font-family:'IBM Plex Mono',monospace;font-size:10px}
+.airight .tool .lv.l1{color:var(--ink2)}.airight .tool .lv.l2{color:var(--seal)}
+.swatches{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line)}
+.sw{background:var(--bg)}
+.sw .c{height:64px}.sw .l{padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink2)}.sw .l b{display:block;color:var(--ink);font-weight:400}
+.foot{padding:48px 0 56px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);display:flex;justify-content:space-between;letter-spacing:.1em}
+</style>
+</head>
+<body>
+<div class="tagbar"><div class="in"><span class="tag">SCHEME E</span><h1>纸墨 · Ink</h1><span class="note">极简白 · hairline 细线 · 印章红点睛 · Noto 300 细字重 · 大留白</span></div></div>
+<div class="wrap">
+  <div class="sec"><div class="sec-h"><span class="no">01</span><h2>导 航</h2><span class="d">字距 .2em · 底线印章激活态</span></div>
+    <div class="nav">
+      <span class="brand"><span class="seal">映</span>PANOMINT</span>
+      <nav><a class="on" href="#">时 间 轴</a><a href="#">相 册</a><a href="#">地 图</a><a href="#">人 物</a><a href="#">工 具 箱</a><a class="ai" href="#">AI 助手</a></nav>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">02</span><h2>时 间 轴</h2><span class="d">无卡片边界 · hairline 分栏 · 印章标注精选</span></div>
+    <div class="grid">
+      <div class="cell"><div class="ph"><div class="img i1"></div><span class="seal-mark">映</span></div><div class="t">洱海东岸 · 环湖骑行</div><div class="m">2026-09-14 · 42MP · PANORAMA</div></div>
+      <div class="cell"><div class="ph"><div class="img i2"></div></div><div class="t">大理夜航</div><div class="m">2026-09-10 · ISO1600</div></div>
+      <div class="cell"><div class="ph"><div class="img i3"></div></div><div class="t">沙溪古镇</div><div class="m">2026-09-08 · 28MM</div></div>
+      <div class="cell"><div class="ph"><div class="img i4"></div></div><div class="t">洱海出口</div><div class="m">2026-09-06 · 50MM</div></div>
+      <div class="cell"><div class="ph"><div class="img i5"></div></div><div class="t">喜洲稻田</div><div class="m">2026-09-04 · 35MM</div></div>
+      <div class="cell"><div class="ph"><div class="img i6"></div></div><div class="t">晨雾</div><div class="m">2026-09-02 · 85MM</div></div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">03</span><h2>AI 助 手</h2><span class="d">左：对话卷轴 · 右：白名单清单</span></div>
+    <div class="aiconv">
+      <div class="aileft">
+        <div class="msg-u">看看转码队列什么情况，顺便把 HLS 分片改成 6 秒</div>
+        <div class="resp">
+          <div class="tt">AGENT · PANO_VIEW_TRANCODE_SNAPSHOT</div>
+          <p>当前队列空闲，无活动任务。</p>
+          <div style="margin-top:14px">
+            <div class="row"><span>waiting</span><b>0</b></div>
+            <div class="row"><span>processing</span><b>0</b></div>
+            <div class="row"><span>failed</span><b>0</b></div>
+          </div>
+          <div class="tt" style="margin-top:22px">CONFIRM · PANO_SET_TRANCODE_PARAM</div>
+          <p>即将修改：hls_seg_seconds，4 → 6。</p>
+          <div class="cfm"><button>确 认 执 行</button><button class="no">取消</button></div>
+        </div>
+      </div>
+      <div class="airight">
+        <h4>SEMANTIC TOOLS · 白名单</h4>
+        <div class="tool"><b>snapshot</b><span class="lv l1">L1 只读</span></div>
+        <div class="tool"><b>queue.stats</b><span class="lv l1">L1 只读</span></div>
+        <div class="tool"><b>job.log.tail</b><span class="lv l1">L1 只读</span></div>
+        <div class="tool"><b>job.pause</b><span class="lv l2">L2 变更</span></div>
+        <div class="tool"><b>job.resume</b><span class="lv l2">L2 变更</span></div>
+        <div class="tool"><b>job.cancel</b><span class="lv l2">L2 变更</span></div>
+        <div class="tool"><b>transcode.config</b><span class="lv l2">L2 变更</span></div>
+        <p style="font-size:11.5px;color:var(--ink3);margin-top:18px;line-height:2;font-weight:300">L1 只读直执行；L2 变更须经确认，全部写审计。</p>
+      </div>
+    </div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="no">04</span><h2>色 板</h2><span class="d">五色即全站</span></div>
+    <div class="swatches">
+      <div class="sw"><div class="c" style="background:#fafaf8"></div><div class="l"><b>paper</b>#FAFAF8</div></div>
+      <div class="sw"><div class="c" style="background:#1a1a1a"></div><div class="l"><b>ink</b>#1A1A1A</div></div>
+      <div class="sw"><div class="c" style="background:#c73e3a"></div><div class="l"><b>seal</b>#C73E3A</div></div>
+      <div class="sw"><div class="c" style="background:#6f6f6c"></div><div class="l"><b>mute</b>#6F6F6C</div></div>
+      <div class="sw"><div class="c" style="background:#e8e8e4"></div><div class="l"><b>line</b>#E8E8E4</div></div>
+    </div>
+    <div style="margin-top:26px;color:var(--ink2);font-size:13px;line-height:2.2;font-weight:300;max-width:46em">
+      全站仅五色。无阴影、无渐变、无圆角卡片——层级由 hairline 细线与留白承担；字重 300 为主，标题靠字距（.28em）而非字号。印章红只出现在两处：品牌章与确认按钮。照片之间用细线分栏，像册页的装订线。
+    </div>
+  </div>
+  <div class="foot"><span>PANOMINT UI · SCHEME E / INK</span><span>MOCKUP 2026-10</span></div>
+</div>
+</body>
+</html>

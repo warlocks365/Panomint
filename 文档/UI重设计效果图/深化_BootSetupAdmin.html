@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 深化 · 启动等待 / 初始化 / 管理后台（VIEW.12 / VIEW.13）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #e9e4de; --surface: #f4f1ed; --surface-hover: #efebe5; --border: #ddd8d0;
+    --text: #41403c; --text2: #7d7a73; --text3: #a5a29a;
+    --primary: #4a5a6a; --primary-hover: #3d4b58; --danger: #b0685c; --success: #6e8a72;
+    --oat: #c4a57a;
+    --shadow-card: 0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift: 0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font: "Outfit", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ded9d2; font-family: var(--font); color: var(--text); font-weight: 300; letter-spacing: .01em; padding: 28px 0 48px; }
+  .canvas { width: 1440px; margin: 0 auto; }
+  .frame { background: var(--bg); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 40px; position: relative; }
+  .frame::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(900px 420px at 12% -8%, rgba(244,241,237,.55), transparent 60%),
+                radial-gradient(760px 380px at 92% 108%, rgba(74,90,106,.06), transparent 60%); }
+  .view-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: var(--text3); padding: 14px 36px 0; }
+  .wordmark { position: absolute; top: 18px; left: 36px; font-family: var(--mono); font-size: 11px; letter-spacing: .22em; color: var(--text3); }
+  .vermark { position: absolute; bottom: 16px; right: 36px; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--text3); }
+  .stage { min-height: 460px; display: flex; align-items: center; justify-content: center; padding: 46px 36px; position: relative; }
+
+  /* ===== VIEW.12 启动等待 ===== */
+  .bcard { width: 460px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 36px 34px 28px; }
+  .b-eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: .2em; color: var(--text3); text-align: center; margin-bottom: 10px; }
+  .b-title { font-size: 20px; font-weight: 500; letter-spacing: .12em; text-align: center; }
+  .b-sub { font-family: var(--mono); font-size: 11px; color: var(--text2); text-align: center; margin: 8px 0 24px; }
+  .bcheck { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 10px; background: rgba(74,90,106,.05); margin-bottom: 8px; font-size: 13px; }
+  .bcheck .bdot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .bcheck .bdot.wait { background: var(--oat); animation: pulse 1.6s ease-in-out infinite; }
+  .bcheck .bdot.ok { background: var(--success); }
+  @keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(196,165,122,.4);} 50% { opacity: .55; box-shadow: 0 0 0 5px rgba(196,165,122,0);} }
+  .bcheck .bname { flex: 1; }
+  .bcheck .bst { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .bcheck .bst.ok { color: var(--success); }
+  .bcheck { flex-wrap: wrap; padding-bottom: 13px; }
+  .bprog { flex-basis: 100%; height: 3px; border-radius: 999px; background: rgba(74,90,106,.10); overflow: hidden; margin-top: 9px; }
+  .bprog .bfill { height: 100%; border-radius: 999px; background: var(--oat); transition: width 1s cubic-bezier(.32,.72,0,1); }
+  .bcheck.is-ok .bprog .bfill { background: var(--success); }
+  .bcheck .beta { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-left: auto; }
+  .btotal { margin: 2px 0 18px; }
+  .btotal .btop { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+  .btotal .btpct { font-family: var(--mono); font-size: 15px; color: var(--primary); }
+  .btotal .bteta { font-family: var(--mono); font-size: 10.5px; color: var(--text3); }
+  .btotal .btrack { height: 5px; border-radius: 999px; background: rgba(74,90,106,.10); overflow: hidden; }
+  .btotal .btfill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--oat), var(--primary)); transition: width 1s cubic-bezier(.32,.72,0,1); }
+  .bnote { font-family: var(--mono); font-size: 9.5px; color: var(--text3); margin-top: 8px; text-align: center; }
+
+  /* ===== VIEW.12-B 初始化 ===== */
+  .ucard { width: 380px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 38px 36px 30px; }
+  .c-eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: .2em; color: var(--text3); text-align: center; margin-bottom: 10px; }
+  .c-title { font-size: 20px; font-weight: 500; letter-spacing: .12em; text-align: center; }
+  .c-sub { font-size: 12.5px; color: var(--text2); text-align: center; margin: 6px 0 26px; }
+  .field { display: block; margin-bottom: 14px; }
+  .f-label { display: block; font-size: 11.5px; color: var(--text2); margin-bottom: 6px; letter-spacing: .04em; }
+  .f-input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: #efebe5; color: var(--text); font-size: 13.5px; font-family: var(--font); }
+  .f-hint { display: block; font-size: 11px; color: var(--text3); margin-top: 5px; }
+  .submit { width: 100%; height: 40px; border: none; border-radius: 10px; background: var(--primary); color: #eef1f4; font-family: var(--font); font-size: 13.5px; letter-spacing: .08em; cursor: pointer; }
+
+  /* ===== VIEW.13 管理后台 ===== */
+  .apage { padding: 26px 36px 40px; position: relative; }
+  .ph { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .ph .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--text3); }
+  .ph h1 { font-size: 16px; font-weight: 500; letter-spacing: .12em; }
+  .ph .sub { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; background: var(--surface); border-radius: 999px; padding: 3px; box-shadow: 0 1px 3px rgba(65,64,60,.06); margin-bottom: 22px; }
+  .seg button { border: none; background: transparent; padding: 6px 15px; border-radius: 999px; font-family: var(--font); font-size: 12px; color: var(--text2); cursor: pointer; }
+  .seg button.on { background: var(--primary); color: #eef1f4; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+  .stat { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 18px 22px; display: flex; align-items: center; gap: 14px; }
+  .stat .sicon { width: 42px; height: 42px; border-radius: 12px; background: rgba(74,90,106,.1); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 17px; flex-shrink: 0; }
+  .stat .sinfo { display: flex; flex-direction: column; gap: 2px; }
+  .stat .sname { font-size: 12px; color: var(--text2); }
+  .stat .sval { font-family: var(--mono); font-size: 19px; font-weight: 400; color: var(--text); letter-spacing: .02em; }
+  .stat .sbig { font-family: var(--mono); font-size: 12px; color: var(--text3); margin-left: auto; }
+
+  .jobs { background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); padding: 18px 22px 20px; }
+  .jobs h3 { font-size: 13.5px; font-weight: 500; letter-spacing: .04em; margin-bottom: 4px; }
+  .jobs .jsub { font-family: var(--mono); font-size: 10.5px; color: var(--text3); margin-bottom: 12px; }
+  .jrow { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); font-size: 12.5px; }
+  .jrow .jid { font-family: var(--mono); font-size: 11px; color: var(--primary); width: 84px; flex-shrink: 0; }
+  .jrow .jname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .jrow .jst { font-family: var(--mono); font-size: 10.5px; padding: 2px 9px; border-radius: 999px; flex-shrink: 0; }
+  .jst.done { color: var(--success); background: rgba(110,138,114,.12); }
+  .jst.run { color: var(--primary); background: rgba(74,90,106,.1); }
+  .jrow .jtime { font-family: var(--mono); font-size: 10px; color: var(--text3); width: 100px; text-align: right; flex-shrink: 0; }
+
+  .ledger { width: 1440px; margin: 0 auto; background: var(--primary); border-radius: 14px; padding: 16px 26px; display: flex; gap: 26px; }
+  .ledger .lt { color: rgba(238,241,244,.65); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; margin-bottom: 4px; }
+  .ledger .li { flex: 1; }
+  .ledger .ln { color: #eef1f4; font-size: 12px; font-weight: 400; }
+  .ledger .ld { color: rgba(238,241,244,.55); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ============ VIEW.12 启动等待 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.12 · /boot — 初次启动等待（依赖分项检查 + 降级指引）</p>
+    <span class="wordmark">PANOMINT</span>
+    <div class="stage">
+      <div class="bcard">
+        <div class="b-eyebrow">PANOMINT · BOOT GATE</div>
+        <h1 class="b-title">系统启动中</h1>
+        <p class="b-sub">正在等待依赖服务… 已等待 14s</p>
+
+        <div class="btotal">
+          <div class="btop"><span class="btpct">62%</span><span class="bteta">预计还需 ~9s（基于近 5 次启动）</span></div>
+          <div class="btrack"><div class="btfill" style="width:62%"></div></div>
+        </div>
+
+        <div class="bcheck is-ok">
+          <span class="bdot ok"></span><span class="bname">数据库 PostgreSQL</span>
+          <span class="beta">2.1s / 用时 6s</span><span class="bst ok">就绪</span>
+          <div class="bprog"><div class="bfill" style="width:100%"></div></div>
+        </div>
+        <div class="bcheck">
+          <span class="bdot wait"></span><span class="bname">任务队列 Valkey</span>
+          <span class="beta">预计还需 ~9s</span><span class="bst">等待中</span>
+          <div class="bprog"><div class="bfill" style="width:58%"></div></div>
+        </div>
+        <div class="bcheck is-ok">
+          <span class="bdot ok"></span><span class="bname">存储磁盘</span>
+          <span class="beta">0.4s / 用时 9s</span><span class="bst ok">就绪</span>
+          <div class="bprog"><div class="bfill" style="width:100%"></div></div>
+        </div>
+
+        <p class="bnote">百分比 = 已等待 / 历史启动时长估算 · 就绪即满格并自动回跳</p>
+      </div>
+    </div>
+    <span class="vermark">BOOT GATE · 就绪后自动回跳</span>
+  </div>
+
+  <!-- ============ VIEW.12-B 初始化 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.12-B · /setup — 初始化管理员账号（首启向导）</p>
+    <span class="wordmark">PANOMINT</span>
+    <div class="stage">
+      <div class="ucard">
+        <div class="c-eyebrow">PANOMINT · 首次初始化</div>
+        <h1 class="c-title">欢迎使用全景相册</h1>
+        <p class="c-sub">首次使用需要创建一个管理员账号（v1.9.1）</p>
+        <label class="field">
+          <span class="f-label">邮箱</span>
+          <input class="f-input" type="text" placeholder="作为登录账号" />
+        </label>
+        <label class="field">
+          <span class="f-label">显示名</span>
+          <input class="f-input" type="text" placeholder="选填，默认可留空" />
+        </label>
+        <label class="field">
+          <span class="f-label">密码</span>
+          <input class="f-input" type="password" placeholder="至少 8 位" />
+        </label>
+        <label class="field">
+          <span class="f-label">确认密码</span>
+          <input class="f-input" type="password" placeholder="再输入一遍" />
+        </label>
+        <button class="submit">完成初始化</button>
+      </div>
+    </div>
+    <span class="vermark">SETUP WIZARD · 仅首启可达</span>
+  </div>
+
+  <!-- ============ VIEW.13 管理后台 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.13 · /admin — 管理后台（胶囊 tabs + 概览面板）</p>
+    <div class="apage">
+      <div class="ph">
+        <span class="eyebrow">11</span><h1>管理后台</h1>
+        <span class="sub">用户、角色、任务、审计与系统配置</span>
+      </div>
+
+      <div class="seg">
+        <button class="on">概览</button><button>用户</button><button>账号策略</button><button>角色</button>
+        <button>权限</button><button>任务</button><button>转码</button><button>网络</button>
+        <button>审计</button><button>地图配置</button><button>存储</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="sicon">◉</div><div class="sinfo"><span class="sname">用户总数</span><span class="sval">4</span></div><span class="sbig">+1 本周</span></div>
+        <div class="stat"><div class="sicon">▤</div><div class="sinfo"><span class="sname">媒体总量</span><span class="sval">1284</span></div><span class="sbig">86.4 GB</span></div>
+        <div class="stat"><div class="sicon">⟳</div><div class="sinfo"><span class="sname">后台任务</span><span class="sval">6</span></div><span class="sbig">队列空闲</span></div>
+        <div class="stat"><div class="sicon">◫</div><div class="sinfo"><span class="sname">分享链接</span><span class="sval">3</span></div><span class="sbig">2 有效期 7 天</span></div>
+      </div>
+
+      <div class="jobs">
+        <h3>最近任务</h3>
+        <div class="jsub">JOBS · 最近 10 条 · Job 编号连续递增</div>
+        <div class="jrow"><span class="jid">Job000139</span><span class="jname">分享视频回退端点</span><span class="jst done">done</span><span class="jtime">09-30 21:04</span></div>
+        <div class="jrow"><span class="jid">Job000138</span><span class="jname">移动端 360 播放适配</span><span class="jst done">done</span><span class="jtime">09-30 18:22</span></div>
+        <div class="jrow"><span class="jid">Job000140</span><span class="jname">转码远程调试通道</span><span class="jst run">running</span><span class="jtime">10-02 09:12</span></div>
+      </div>
+    </div>
+    <span class="vermark">ADMIN · admin:users / admin:system 双级门禁</span>
+  </div>
+
+  <!-- ============ GSAP 账本 ============ -->
+  <div class="ledger">
+    <div class="li"><div class="lt">MOTION · GSAP 账本</div><div class="ln">card-in</div><div class="ld">启动/初始化卡 y16 淡入 0.55（同登录卡 · 一次）</div></div>
+    <div class="li"><div class="lt">STATE</div><div class="ln">boot-pulse</div><div class="ld">依赖等待点 CSS pulse 1.6s（非 GSAP 循环）· 就绪转灰绿</div></div>
+    <div class="li"><div class="lt">SWITCH</div><div class="ln">panel-fade</div><div class="ld">后台页签切换 y12 淡入 0.35（gsap watch · v-show 面板）</div></div>
+    <div class="li"><div class="lt">REUSE</div><div class="ln">tabs-capsule</div><div class="ld">11 页签胶囊分段（对齐工具箱/空间页语言）</div></div>
+    <div class="li"><div class="lt">GUARD</div><div class="ln">reduced-motion</div><div class="ld">prefers-reduced-motion 全部跳过</div></div>
+  </div>
+
+</div>
+</body>
+</html>

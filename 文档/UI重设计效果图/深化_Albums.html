@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Albums · 晨雾 Morandi 深化稿 — 列表 + 详情</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e9e4de;--card:#f4f1ed;--card2:#efebe5;--tx:#41403c;--tx2:#7d7a73;--tx3:#a5a29a;
+--line:#ddd8d0;--primary:#4a5a6a;--mist:rgba(143,163,173,.16);
+--ok:#6e8a72;--warn:#8a6d3d;--r:10px;--ease:cubic-bezier(.32,.72,0,1);
+--sh:0 1px 3px rgba(65,64,60,.05),0 10px 34px rgba(65,64,60,.07);
+--sh-lift:0 2px 6px rgba(65,64,60,.06),0 14px 40px rgba(65,64,60,.12)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--tx);font-family:'Outfit','Noto Sans SC',sans-serif;font-weight:300;font-size:14px;-webkit-font-smoothing:antialiased;letter-spacing:.01em}
+.mono{font-family:'IBM Plex Mono',monospace;font-weight:400}
+.wrap{max-width:1400px;margin:0 auto;display:flex;min-height:100vh}
+.side{width:220px;flex:none;background:var(--card);border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:2px}
+.side .brand{font-size:13px;letter-spacing:.24em;padding:6px 12px 18px}
+.side a{color:var(--tx2);text-decoration:none;font-size:13px;padding:9px 14px;border-radius:7px;letter-spacing:.14em}
+.side a.on{color:var(--tx);background:var(--mist)}
+.main{flex:1;min-width:0}
+.top{height:56px;background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 24px}
+.top .ttl{font-size:15px;font-weight:400;letter-spacing:.12em}
+.top .sp{flex:1}
+.top .u{font-size:12px;color:var(--tx2)}
+.pagehead{display:flex;align-items:baseline;gap:14px;padding:26px 28px 0}
+.pagehead .no{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tx3)}
+.pagehead h2{font-size:17px;font-weight:400;letter-spacing:.12em}
+.pagehead .d{margin-left:auto;font-size:12.5px;color:var(--tx2)}
+.pagehead .act{background:var(--primary);color:#f4f1ed;border:none;border-radius:10px;padding:9px 20px;font-size:13px;font-family:inherit;cursor:pointer}
+/* 相册网格 */
+.agrid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;padding:20px 28px 34px}
+.acard{border-radius:var(--r);overflow:hidden;background:var(--card);box-shadow:var(--sh);cursor:pointer;transition:all .55s var(--ease)}
+.acard:hover{box-shadow:var(--sh-lift)}
+.acard .cov{position:relative;aspect-ratio:4/3;overflow:hidden}
+.acard .img{width:100%;height:100%;display:block;transition:transform .7s var(--ease)}
+.acard:hover .img{transform:scale(1.03)}
+.acard .veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(233,228,222,.14),transparent 30%)}
+.acard .tag{position:absolute;top:10px;left:10px;font-size:10.5px;letter-spacing:.08em;padding:4px 11px;border-radius:99px;background:rgba(244,241,237,.8);backdrop-filter:blur(6px);display:flex;align-items:center;gap:6px}
+.acard .tag.smart{color:#4a5a6a}
+.acard .tag.smart .d{width:6px;height:6px;border-radius:50%;background:var(--mist)}
+.acard .tag.fav{color:var(--ok)}
+.acard .tag.fav .d{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.acard .bd{padding:13px 16px 15px;display:flex;align-items:center;gap:10px}
+.acard .bd .nm{font-size:13.5px;font-weight:400;letter-spacing:.03em}
+.acard .bd .mt{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3);margin-top:4px}
+.acard .bd .ops{margin-left:auto;display:flex;gap:6px;opacity:0;transition:opacity .4s var(--ease)}
+.acard:hover .ops{opacity:1}
+.acard .ops .ib{width:26px;height:26px;border-radius:7px;background:var(--card2);display:flex;align-items:center;justify-content:center;color:var(--tx2)}
+.c1{height:100%;background:linear-gradient(155deg,#d0d8d2 0%,#9db0a5 55%,#5f7d6d 100%)}
+.c2{height:100%;background:linear-gradient(150deg,#e0d6c8 0%,#c0ab8e 55%,#8a7355 100%)}
+.c3{height:100%;background:linear-gradient(145deg,#c8ccd6 0%,#98a3b5 55%,#5f7189 100%)}
+.c4{height:100%;background:linear-gradient(160deg,#d5d0d8 0%,#a49eb0 55%,#6f6880 100%)}
+.c5{height:100%;background:linear-gradient(150deg,#e3ddd0 0%,#c8b9a0 55%,#96876c 100%)}
+.c6{height:100%;background:linear-gradient(155deg,#cfd6da 0%,#9fb2bc 55%,#5f7d8d 100%)}
+.c7{height:100%;background:linear-gradient(140deg,#dcd2c2 0%,#b3a184 55%,#6e5f48 100%)}
+.c8{height:100%;background:linear-gradient(150deg,#d2d8cf 0%,#a3b3a5 55%,#647a6c 100%)}
+/* 详情页段 */
+.detail{border-top:1px solid var(--line);margin-top:6px;padding-top:34px}
+.detail-h .dh{display:flex;align-items:baseline;gap:14px;padding:0 28px 0}
+.detail-h .no{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tx3)}
+.detail-h h2{font-size:17px;font-weight:400;letter-spacing:.12em}
+.detail-h .d{margin-left:auto;color:var(--tx2);font-size:12.5px}
+/* 详情：封面头条 + header */
+.abanner{margin:20px 28px 0;border-radius:var(--r);overflow:hidden;position:relative;height:180px;box-shadow:var(--sh)}
+.abanner .bimg{width:100%;height:100%;background:linear-gradient(160deg,#d0d8d2 0%,#9db0a5 45%,#5f7d6d 100%)}
+.abanner .bveil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(233,228,222,.1) 20%,rgba(233,228,222,.82) 92%)}
+.abanner .binfo{position:absolute;left:24px;bottom:18px}
+.abanner .binfo .btag{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.08em;padding:4px 11px;border-radius:99px;background:rgba(244,241,237,.85);color:#4a5a6a;margin-bottom:9px}
+.abanner .binfo .btag .d{width:6px;height:6px;border-radius:50%;background:var(--mist)}
+.abanner .binfo h3{font-size:22px;font-weight:400;letter-spacing:.06em;color:var(--tx)}
+.abanner .binfo .bm{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--tx2);margin-top:6px}
+.abanner .bops{position:absolute;right:20px;bottom:18px;display:flex;gap:9px}
+.abanner .bops button{font-family:inherit;font-size:12.5px;padding:8px 17px;border-radius:9px;cursor:pointer;border:1px solid rgba(65,64,60,.18);background:rgba(244,241,237,.92);color:var(--tx);font-weight:400}
+.abanner .bops button.p{background:var(--primary);color:#f4f1ed;border-color:var(--primary)}
+/* 详情媒体网格 */
+.dgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;padding:18px 28px 8px}
+.dthumb{border-radius:8px;overflow:hidden;position:relative;background:var(--card)}
+.dthumb .img{width:100%;display:block}
+.dthumb .veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(233,228,222,.16),transparent 34%);pointer-events:none}
+.d1{height:150px;background:linear-gradient(155deg,#d0d8d2 0%,#9db0a5 55%,#5f7d6d 100%)}
+.d2{height:150px;background:linear-gradient(150deg,#e0d6c8 0%,#c0ab8e 55%,#8a7355 100%)}
+.d3{height:150px;background:linear-gradient(145deg,#c8ccd6 0%,#98a3b5 55%,#5f7189 100%)}
+.d4{height:150px;background:linear-gradient(160deg,#d5d0d8 0%,#a49eb0 55%,#6f6880 100%)}
+.d5{height:150px;background:linear-gradient(150deg,#e3ddd0 0%,#c8b9a0 55%,#96876c 100%)}
+.d6{height:150px;background:linear-gradient(155deg,#cfd6da 0%,#9fb2bc 55%,#5f7d8d 100%)}
+.dsel{outline:2px solid var(--primary);outline-offset:-2px}
+.dcheck{position:absolute;top:7px;left:7px;width:16px;height:16px;border-radius:5px;background:rgba(244,241,237,.9);display:flex;align-items:center;justify-content:center}
+.dcheck i{width:9px;height:9px;background:var(--primary);border-radius:2px}
+/* 动效账本 */
+.motion{margin:26px 28px 40px;border-top:1px dashed var(--line);padding-top:22px}
+.motion h4{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--tx3);letter-spacing:.18em;margin-bottom:13px;font-weight:400}
+.motion .m-row{display:flex;gap:10px;flex-wrap:wrap}
+.motion .m-chip{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 13px;font-size:11.5px;color:var(--tx2)}
+.motion .m-chip b{color:var(--tx);font-weight:500;font-family:'IBM Plex Mono',monospace;font-size:11px}
+.foot{padding:0 28px 40px;color:var(--tx3);font-size:10.5px;font-family:'IBM Plex Mono',monospace}
+.anim-tag{position:absolute;font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:#4a5a6a;background:rgba(255,209,102,.32);border:1px dashed rgba(74,90,106,.45);padding:2px 7px;border-radius:4px;z-index:10;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="side">
+    <div class="brand">PANOMINT</div>
+    <a href="#">时间轴</a><a href="#">地 图</a><a class="on" href="#">相 册</a><a href="#">人 物</a><a href="#">标 签</a>
+    <div class="grp" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--tx3);letter-spacing:.18em;padding:16px 12px 6px">SPACE</div>
+    <a href="#">共享空间</a><a href="#">文件夹</a>
+    <div class="grp" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--tx3);letter-spacing:.18em;padding:16px 12px 6px">OPS</div>
+    <a href="#">工具箱</a><a href="#">上 传</a><a href="#">搜 索</a>
+    <div class="grp" style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--tx3);letter-spacing:.18em;padding:16px 12px 6px">SYS</div>
+    <a href="#">设 置</a><a href="#">管理后台</a>
+  </aside>
+  <main class="main">
+    <div class="top"><span class="ttl">相 册</span><span class="sp"></span><span class="u">owner@pano.local</span></div>
+
+    <div class="pagehead">
+      <span class="no">VIEW.03</span><h2>相 册</h2><span class="d">8 个相册 · 智能收录 2 · 收藏 1</span>
+      <button class="act">新建相册</button>
+    </div>
+
+    <div class="agrid">
+      <div class="acard"><div class="cov"><div class="img c1"></div><div class="veil"></div><span class="tag smart"><span class="d"></span>智能</span></div>
+        <div class="bd"><div><div class="nm">大理行 · 全集</div><div class="mt">42 项 · 09-14 更新</div></div>
+          <div class="ops"><span class="ib"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20h16M13 6.5l4.5 4.5L8 20H4v-4z"/></svg></span><span class="ib"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></span></div></div>
+        <span class="anim-tag" style="top:52px;left:12px">GSAP: grid stagger 0.06</span></div>
+      <div class="acard"><div class="cov"><div class="img c2"></div><div class="veil"></div><span class="tag fav"><span class="d"></span>收藏</span></div>
+        <div class="bd"><div><div class="nm">精选 · 收藏</div><div class="mt">18 项 · 09-12 更新</div></div></div></div>
+      <div class="acard"><div class="cov"><div class="img c3"></div><div class="veil"></div></div>
+        <div class="bd"><div><div class="nm">夜航记录</div><div class="mt">12 项 · 09-10 更新</div></div></div></div>
+      <div class="acard"><div class="cov"><div class="img c4"></div><div class="veil"></div></div>
+        <div class="bd"><div><div class="nm">山径徒步</div><div class="mt">9 项 · 09-05 更新</div></div></div></div>
+      <div class="acard"><div class="cov"><div class="img c5"></div><div class="veil"></div><span class="tag smart"><span class="d"></span>智能</span></div>
+        <div class="bd"><div><div class="nm">洱海（按条件）</div><div class="mt">自动收录 · 27 项</div></div></div></div>
+      <div class="acard"><div class="cov"><div class="img c6"></div><div class="veil"></div></div>
+        <div class="bd"><div><div class="nm">海岸线</div><div class="mt">7 项 · 09-02 更新</div></div></div></div>
+      <div class="acard"><div class="cov"><div class="img c7"></div><div class="veil"></div></div>
+        <div class="bd"><div><div class="nm">古镇与市集</div><div class="mt">15 项 · 08-28 更新</div></div></div></div>
+      <div class="acard"><div class="cov"><div class="img c8"></div><div class="veil"></div></div>
+        <div class="bd"><div><div class="nm">晨雾集</div><div class="mt">5 项 · 08-20 更新</div></div></div></div>
+    </div>
+
+    <div class="detail">
+      <div class="detail-h"><span class="no">VIEW.03-D</span><h2>相 册 详 情</h2><span class="d">封面头条 + 悬浮操作 + 可勾选媒体网格</span></div>
+
+      <div class="abanner">
+        <div class="bimg"></div><div class="bveil"></div>
+        <div class="binfo">
+          <span class="btag"><span class="d"></span>普通相册 · 42 项</span>
+          <h3>大理行 · 全集</h3>
+          <div class="bm">2026-06-02 创建 · 09-14 更新 · 大理白族自治州</div>
+        </div>
+        <div class="bops"><button>添加媒体</button><button>分享</button><button class="p">幻灯播放</button></div>
+        <span class="anim-tag" style="right:16px;top:12px">banner veil: 底部 82% 雾面承托文字</span>
+      </div>
+
+      <div class="dgrid">
+        <div class="dthumb dsel"><div class="img d1"></div><div class="veil"></div><span class="dcheck"><i></i></span></div>
+        <div class="dthumb"><div class="img d2"></div><div class="veil"></div></div>
+        <div class="dthumb"><div class="img d3"></div><div class="veil"></div></div>
+        <div class="dthumb"><div class="img d4"></div><div class="veil"></div></div>
+        <div class="dthumb"><div class="img d5"></div><div class="veil"></div></div>
+        <div class="dthumb"><div class="img d6"></div><div class="veil"></div></div>
+      </div>
+    </div>
+
+    <div class="motion">
+      <h4>MOTION SPEC · GSAP — 本页动效账本</h4>
+      <div class="m-row">
+        <span class="m-chip"><b>grid-stagger</b> 相册卡瀑布：stagger 0.06 · y24 · opacity（非虚拟滚动，全量安全）</span>
+        <span class="m-chip"><b>card-hover</b> 相册卡：阴影 soft→lift + 封面 scale 1.03 + 操作钮浮现</span>
+        <span class="m-chip"><b>banner-in</b> 详情封面头条：clip-path 或 height 展开 + veil 淡入 · dur .65</span>
+        <span class="m-chip"><b>dgrid-enter</b> 详情媒体进入：同 stagger 剧目</span>
+        <span class="m-chip"><b>reduced-motion</b> 全部跳过（gsap.matchMedia）</span>
+      </div>
+    </div>
+
+    <div class="foot">ALBUMS + ALBUM DETAIL · MORANDI DEEP-DIVE · STATIC MOCKUP 2026-10</div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 深化 · 搜索（VIEW.10）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #e9e4de; --surface: #f4f1ed; --surface-hover: #efebe5; --border: #ddd8d0;
+    --text: #41403c; --text2: #7d7a73; --text3: #a5a29a;
+    --primary: #4a5a6a; --primary-hover: #3d4b58; --danger: #b0685c; --success: #6e8a72;
+    --shadow-card: 0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift: 0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font: "Outfit", "Noto Sans SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ded9d2; font-family: var(--font); color: var(--text); font-weight: 300; letter-spacing: .01em; padding: 28px 0 48px; }
+  .canvas { width: 1440px; margin: 0 auto; }
+  .frame { background: var(--bg); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow-card); margin-bottom: 40px; }
+  .view-tag { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; color: var(--text3); padding: 14px 36px 0; }
+  .page { padding: 26px 36px 40px; }
+
+  .ph { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+  .ph .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: var(--text3); }
+  .ph h1 { font-size: 16px; font-weight: 500; letter-spacing: .06em; }
+  .ph h1 .q { color: var(--primary); }
+  .ph .total { font-family: var(--mono); font-size: 11px; color: var(--text2); margin-left: 4px; }
+  .ph .spacer { flex: 1; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: rgba(244,241,237,.85); box-shadow: 0 1px 3px rgba(65,64,60,.08); font-size: 12px; color: var(--text2); }
+  .chip .cv { color: var(--text); font-weight: 500; }
+  .chip .x { font-family: var(--mono); font-size: 11px; color: var(--text3); cursor: pointer; }
+  .chip .x:hover { color: var(--danger); }
+  .clear-all { border: none; background: transparent; font-family: var(--font); font-size: 12.5px; color: var(--text3); cursor: pointer; }
+  .clear-all:hover { color: var(--danger); }
+
+  .fbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 14px 18px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); margin-bottom: 20px; }
+  .fgroup { display: flex; align-items: center; gap: 8px; }
+  .flabel { font-size: 11.5px; color: var(--text3); }
+  .fsel { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--border); background: #efebe5; font-size: 12.5px; color: var(--text); min-width: 96px; }
+  .fsel .ar { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-left: auto; }
+  .fbar .spacer { flex: 1; }
+
+  .sgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 22px; }
+  .sthumb { position: relative; border-radius: 10px; overflow: hidden; aspect-ratio: 1; box-shadow: 0 1px 3px rgba(65,64,60,.05); }
+  .m1 { background: linear-gradient(150deg,#b8c4cd,#93a4b1); } .m2 { background: linear-gradient(150deg,#c9bfae,#a99a83); }
+  .m3 { background: linear-gradient(150deg,#a89aa4,#8a7d88); } .m4 { background: linear-gradient(150deg,#a9b8a6,#8b9c89); }
+  .m5 { background: linear-gradient(150deg,#c4ae9e,#a68e7e); } .m6 { background: linear-gradient(150deg,#9aa5ad,#7e8a93); }
+  .m7 { background: linear-gradient(150deg,#b3a795,#96897a); } .m8 { background: linear-gradient(150deg,#8a97a3,#6d7a88); }
+  .m9 { background: linear-gradient(150deg,#b8aeb9,#988e9a); } .m10 { background: linear-gradient(150deg,#adb5ab,#8f988d); }
+  .veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(233,228,222,.16), transparent 34%); pointer-events: none; }
+  .fav { position: absolute; bottom: 7px; right: 7px; width: 15px; height: 15px; border-radius: 50%; background: rgba(244,241,237,.85); display: flex; align-items: center; justify-content: center; font-size: 8px; color: var(--danger); }
+
+  .endnote { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--text3); padding: 14px 0 2px; border-top: 1px solid var(--border); }
+
+  .empty-demo { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 0 8px; color: var(--text3); }
+  .empty-demo .eicon { width: 56px; height: 56px; border-radius: 50%; background: rgba(74,90,106,.08); display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--text2); }
+  .empty-demo .et { font-size: 13.5px; color: var(--text); font-weight: 500; }
+  .empty-demo .ed { font-size: 12px; }
+
+  .ledger { width: 1440px; margin: 0 auto; background: var(--primary); border-radius: 14px; padding: 16px 26px; display: flex; gap: 26px; }
+  .ledger .lt { color: rgba(238,241,244,.65); font-family: var(--mono); font-size: 10px; letter-spacing: .16em; margin-bottom: 4px; }
+  .ledger .li { flex: 1; }
+  .ledger .ln { color: #eef1f4; font-size: 12px; font-weight: 400; }
+  .ledger .ld { color: rgba(238,241,244,.55); font-size: 10.5px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ============ VIEW.10 搜索 ============ -->
+  <div class="frame">
+    <p class="view-tag">VIEW.10 · /search — 搜索（页头关键词 + 磨砂 chips + 筛选条 + 结果网格）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">10</span>
+        <h1><span class="q">“海边”</span><span class="total">共 86 项</span></h1>
+        <div class="spacer"></div>
+        <div class="chips">
+          <span class="chip">类型 <span class="cv">照片</span> <span class="x">×</span></span>
+          <span class="chip">时间 <span class="cv">2026</span> <span class="x">×</span></span>
+          <span class="chip">地点 <span class="cv">大理</span> <span class="x">×</span></span>
+        </div>
+        <button class="clear-all">清除</button>
+      </div>
+
+      <div class="fbar">
+        <div class="fgroup"><span class="flabel">类型</span><span class="fsel">全部 <span class="ar">▾</span></span></div>
+        <div class="fgroup"><span class="flabel">拍摄时间</span><span class="fsel">2026 年 <span class="ar">▾</span></span></div>
+        <div class="fgroup"><span class="flabel">地点</span><span class="fsel">大理 <span class="ar">▾</span></span></div>
+        <div class="fgroup"><span class="flabel">人物</span><span class="fsel">不限 <span class="ar">▾</span></span></div>
+        <div class="spacer"></div>
+        <button class="btn primary" style="display:inline-flex;align-items:center;padding:8px 18px;border-radius:10px;border:1px solid var(--primary);background:var(--primary);color:#eef1f4;font-family:var(--font);font-size:12.5px;cursor:pointer">应用筛选</button>
+      </div>
+
+      <div class="sgrid">
+        <div class="sthumb m1"><div class="veil"></div><span class="fav">♥</span></div>
+        <div class="sthumb m2"><div class="veil"></div></div>
+        <div class="sthumb m3"><div class="veil"></div></div>
+        <div class="sthumb m4"><div class="veil"></div><span class="fav">♥</span></div>
+        <div class="sthumb m5"><div class="veil"></div></div>
+        <div class="sthumb m6"><div class="veil"></div></div>
+        <div class="sthumb m7"><div class="veil"></div></div>
+        <div class="sthumb m8"><div class="veil"></div><span class="fav">♥</span></div>
+        <div class="sthumb m9"><div class="veil"></div></div>
+        <div class="sthumb m10"><div class="veil"></div></div>
+      </div>
+
+      <div class="endnote">已加载全部 86 条</div>
+
+      <div class="empty-demo">
+        <div class="eicon">◌</div>
+        <p class="et">没有找到匹配的媒体</p>
+        <p class="ed">换个关键词或调整筛选条件试试</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GSAP 账本 ============ -->
+  <div class="ledger">
+    <div class="li"><div class="lt">MOTION · GSAP 账本</div><div class="ln">results-in</div><div class="ld">首屏结果瀑布 y24 stagger 0.05（虚拟滚动安全版 · clearProps）</div></div>
+    <div class="li"><div class="lt">STATE</div><div class="ln">chips-in</div><div class="ld">筛选 chip scale 0.94→1（CSS 软曲线 · 随 chips 数组变化）</div></div>
+    <div class="li"><div class="lt">FEEDBACK</div><div class="ln">fallback-fade</div><div class="ld">地名回退横幅 y8 淡入（CSS · 出现一次）</div></div>
+    <div class="li"><div class="lt">REUSE</div><div class="ln">thumb-veil</div><div class="ld">ThumbItem veil / hover 抬升自动继承（时间轴同源）</div></div>
+    <div class="li"><div class="lt">GUARD</div><div class="ln">reduced-motion</div><div class="ld">prefers-reduced-motion 全部跳过</div></div>
+  </div>
+
+</div>
+</body>
+</html>
