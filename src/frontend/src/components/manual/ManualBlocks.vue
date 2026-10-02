@@ -47,48 +47,77 @@ function fmt(s) {
 <style scoped>
 .mb-h3 {
   margin: 20px 0 8px;
-  font-size: 15px;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
   color: var(--color-text-primary);
 }
 .mb-p {
   margin: 8px 0;
-  line-height: 1.8;
+  line-height: 1.9;
   color: var(--color-text-primary);
 }
 .mb-note,
 .mb-warn {
   margin: 10px 0;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  border-radius: 0 9px 9px 0;
   line-height: 1.7;
   font-size: var(--font-size-sm);
 }
+/* 提示条：语义色左线 + 浅底（DESIGN.md 深化稿 VIEW.14） */
 .mb-note {
-  background: var(--color-primary-active-bg);
-  color: var(--color-text-primary);
+  border-left: 2px solid var(--color-success);
+  background: rgba(110, 138, 114, 0.08);
+  color: var(--color-text-secondary);
 }
 .mb-warn {
-  background: var(--color-warning-bg);
-  color: var(--color-warning-text);
+  border-left: 2px solid var(--stat-pano-photo);
+  background: rgba(196, 165, 122, 0.1);
+  color: var(--color-text-secondary);
 }
 .mb-code {
   margin: 10px 0;
-  padding: 10px 12px;
-  background: var(--color-surface-hover);
-  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  background: #3a4652;
+  color: #d9e0e6;
+  border-radius: 10px;
   overflow-x: auto;
-  font-size: var(--font-size-sm);
-  line-height: 1.6;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.7;
 }
 .mb-list,
 .mb-steps {
   margin: 8px 0;
-  padding-left: 22px;
   line-height: 1.8;
   color: var(--color-text-primary);
 }
+.mb-list {
+  padding-left: 22px;
+}
+/* 步骤列表：mono 计数胶囊（DESIGN.md 深化稿 VIEW.14） */
 .mb-steps {
-  list-style: decimal;
+  list-style: none;
+  counter-reset: mbst;
+  padding-left: 0;
+}
+.mb-steps li {
+  counter-increment: mbst;
+  position: relative;
+  padding: 0 0 10px 34px;
+}
+.mb-steps li::before {
+  content: counter(mbst, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-primary);
+  background: rgba(74, 90, 106, 0.1);
+  border-radius: 6px;
+  padding: 2px 6px;
 }
 .mb-table-wrap {
   margin: 10px 0;
@@ -110,7 +139,7 @@ function fmt(s) {
 .mb-table th {
   background: var(--color-surface-hover);
   color: var(--color-text-secondary);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 .mb-table td {
@@ -124,8 +153,9 @@ function fmt(s) {
 .mb-table :deep(code) {
   padding: 1px 5px;
   border-radius: 4px;
-  background: var(--color-surface-hover);
-  font-size: 12px;
+  background: rgba(74, 90, 106, 0.08);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
   color: var(--color-text-primary);
 }
 </style>
