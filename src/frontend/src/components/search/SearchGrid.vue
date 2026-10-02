@@ -38,9 +38,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+import gsap from 'gsap'
 import ThumbItem from '../timeline/ThumbItem.vue'
 import { useSearchStore } from '../../stores/search'
 
@@ -76,6 +77,32 @@ const rows = computed(() => {
   }
   return out
 })
+
+// DESIGN.md §8 results-in：首屏结果瀑布（虚拟滚动安全版——仅首次有结果时一次性
+// stagger + clearProps，后续滚动加载不动画；reduced-motion 跳过。与 TimelineGrid 同模式）
+let staggerDone = false
+watch(
+  () => store.results.length,
+  async (n) => {
+    if (n > 0 && !staggerDone) {
+      staggerDone = true
+      await nextTick()
+      requestAnimationFrame(() => {
+        const mm = gsap.matchMedia()
+        mm.add('(prefers-reduced-motion: no-preference)', () => {
+          gsap.from('.grid-wrap .row .thumb', {
+            y: 24,
+            opacity: 0,
+            duration: 0.55,
+            ease: 'power2.out',
+            stagger: 0.05,
+            clearProps: 'transform,opacity'
+          })
+        })
+      })
+    }
+  }
+)
 
 let resizeObserver = null
 let intersectionObserver = null

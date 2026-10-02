@@ -95,10 +95,16 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 </script>
 
 <style scoped>
+/* 筛选条面板化（DESIGN.md 深化稿 VIEW.10）：米白面板卡内承载筛选钮组 */
 .filter-bar {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
+  padding: 12px 16px;
+  background-color: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
 }
 
 .fb-item {
@@ -109,24 +115,26 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 30px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 14px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background-color: var(--color-surface);
-  color: var(--color-text-secondary);
+  border-radius: 9px;
+  background-color: #efebe5;
+  color: var(--color-text-primary);
   font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: border-color 0.35s cubic-bezier(0.32, 0.72, 0, 1), color 0.35s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .fb-btn:hover {
-  background-color: var(--color-surface-hover);
+  border-color: var(--color-primary);
 }
 
 .fb-btn.active {
   border-color: var(--color-primary);
   color: var(--color-primary);
-  background-color: var(--color-primary-active-bg);
-  font-weight: 600;
+  background-color: rgba(74, 90, 106, 0.08);
+  font-weight: 500;
 }
 
 .fb-panel {
@@ -139,7 +147,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-lift);
 }
 
 .fb-panel-actions {

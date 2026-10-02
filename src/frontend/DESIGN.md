@@ -118,7 +118,7 @@
 | PeopleView / TagsView | `/people` `/tags` | ✅ 确认 | ✅ 实装 | 圆形头像卡体系/聚类虚线卡/磨砂云 chip/cloud-in |
 | SpacesView / FoldersView | `/spaces` `/folders` | ✅ 确认 | ✅ 实装 | 2:1 空间双卡/胶囊分段/树导航 1:2.5/cards-in |
 | ToolboxView / UploadView | `/toolbox` `/upload` | ✅ 确认 | ✅ 实装 | 胶囊 tabs/tabs-fade/雾蓝虚线 dropzone/queue-in |
-| SearchResultsView | `/search` | ⏳ 排队 | tokens 已生效 | |
+| SearchResultsView | `/search` | ✅ 确认 | ✅ 实装 | 页头 10/磨砂 chips/筛选条面板化/results-in |
 | PlayerView / SharePublicView | `/player/:id` `/share/:token` | ⏳ 排队 | 独立暗底不受影响 | 播放器保持暗底 |
 | LoginView / RegisterView / BootView / SetupView | 独立路由 | ⏳ 排队 | tokens 已生效 | |
 | ManualView | `/manual` | ⏳ 排队 | tokens 已生效 | |

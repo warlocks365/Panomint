@@ -1,11 +1,14 @@
 <template>
   <div class="search-page">
     <header class="search-head">
-      <h1 class="search-title">
-        <template v-if="store.query">“{{ store.query }}”</template>
-        <template v-else>搜索</template>
-        <span v-if="store.searched && !store.loading" class="search-total">共 {{ store.total }} 项</span>
-      </h1>
+      <div class="ph-heading">
+        <span class="ph-eyebrow">10</span>
+        <h1 class="search-title">
+          <template v-if="store.query">“{{ store.query }}”</template>
+          <template v-else>搜索</template>
+          <span v-if="store.searched && !store.loading" class="search-total">共 {{ store.total }} 项</span>
+        </h1>
+      </div>
 
       <div class="head-side">
         <ActiveFilterChips :chips="store.chips" @remove="store.removeChip" />
@@ -133,16 +136,33 @@ function openPlayer(item) {
   flex-shrink: 0;
 }
 
+/* 页头规范（DESIGN.md §5）：mono 序号 + 关键词雾蓝 + 字距 */
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
+}
+
 .search-title {
   margin: 0;
   font-size: var(--font-size-lg);
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: 0.06em;
   color: var(--color-text-primary);
 }
 
 .search-total {
   margin-left: 8px;
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   font-weight: 400;
   color: var(--color-text-secondary);
 }
