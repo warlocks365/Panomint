@@ -83,20 +83,27 @@ const barClass = computed(() => ({
 .upload-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 14px;
+  padding: 13px 16px;
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
 }
 
 .upload-item--error {
-  border-color: var(--color-danger);
+  outline: 1.5px solid rgba(176, 104, 92, 0.55);
+  outline-offset: -1.5px;
 }
 
 .file-icon {
-  color: var(--color-text-disabled);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background-color: rgba(74, 90, 106, 0.08);
+  color: var(--color-primary);
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 
@@ -116,7 +123,8 @@ const barClass = computed(() => ({
 }
 
 .file-name {
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
   color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -124,7 +132,8 @@ const barClass = computed(() => ({
 }
 
 .file-status {
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   color: var(--color-text-secondary);
   flex-shrink: 0;
 }
@@ -143,16 +152,16 @@ const barClass = computed(() => ({
 
 .progress-track {
   height: 4px;
-  border-radius: 2px;
-  background-color: var(--color-bg);
+  border-radius: 999px;
+  background-color: var(--color-surface-hover);
   overflow: hidden;
 }
 
 .progress-bar {
   height: 100%;
   background-color: var(--color-primary);
-  border-radius: 2px;
-  transition: width 0.2s ease;
+  border-radius: 999px;
+  transition: width 0.3s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .bar--done {
@@ -167,7 +176,9 @@ const barClass = computed(() => ({
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
 }
 
 .muted {

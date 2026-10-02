@@ -1,10 +1,14 @@
 <template>
   <div class="upload-view">
-    <h1 class="page-title">上传</h1>
-
-    <div v-if="targetLabel" class="target-banner" data-testid="upload-target">
-      将上传到：{{ targetLabel }}
-      <router-link v-if="backTo" :to="backTo" class="done-link">返回</router-link>
+    <div class="ph-line">
+      <div class="ph-heading">
+        <span class="ph-eyebrow">09</span>
+        <h1 class="page-title">上传</h1>
+      </div>
+      <div v-if="targetLabel" class="target-banner" data-testid="upload-target">
+        将上传到：<span class="t-mono">{{ targetLabel }}</span>
+        <router-link v-if="backTo" :to="backTo" class="done-link">返回</router-link>
+      </div>
     </div>
 
     <div
@@ -48,8 +52,9 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import gsap from 'gsap'
 import UploadItem from '../components/upload/UploadItem.vue'
 import { addFiles, clearFinished, queue, retryItem } from '../components/upload/uploadManager'
 
@@ -103,24 +108,37 @@ function onPick(e) {
   e.target.value = ''
 }
 
+// DESIGN.md §8 queue-in：队列项首屏一次性浮现（clearProps 还原；reduced-motion 跳过）
+let queueDone = false
+watch(
+  () => queue.items.length,
+  async (n) => {
+    if (n > 0 && !queueDone) {
+      queueDone = true
+      await nextTick()
+      requestAnimationFrame(() => {
+        const mm = gsap.matchMedia()
+        mm.add('(prefers-reduced-motion: no-preference)', () => {
+          gsap.from('.queue-list .upload-item', {
+            y: 16,
+            opacity: 0,
+            duration: 0.45,
+            ease: 'power2.out',
+            stagger: 0.05,
+            clearProps: 'transform,opacity'
+          })
+        })
+      })
+    }
+  }
+)
+
 function onClearFinished() {
   clearFinished()
 }
 </script>
 
 <style scoped>
-.target-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  margin-bottom: 14px;
-  border-radius: var(--radius-md);
-  background-color: var(--color-primary-active-bg);
-  color: var(--color-primary);
-  font-size: var(--font-size-sm);
-}
-
 .upload-view {
   display: flex;
   flex-direction: column;
@@ -128,50 +146,102 @@ function onClearFinished() {
   max-width: 860px;
 }
 
-.page-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
+/* 页头规范（DESIGN.md §5）+ 内联目标徽章（深化稿 VIEW.09） */
+.ph-line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
 }
 
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
+}
+
+.page-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  color: var(--color-text-primary);
+}
+
+.target-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  background-color: rgba(74, 90, 106, 0.08);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary);
+}
+
+/* dropzone 深化：米白面 + 雾蓝虚线 + 磨砂圆图标 + hover 雾蓝浅底（软曲线） */
 .dropzone {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 56px 24px;
+  gap: 10px;
+  padding: 48px 24px;
   background-color: var(--color-surface);
-  border: 2px dashed var(--color-border);
+  border: 1.5px dashed rgba(74, 90, 106, 0.4);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   cursor: pointer;
   text-align: center;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition: border-color 0.5s cubic-bezier(0.32, 0.72, 0, 1), background-color 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .dropzone:hover {
   border-color: var(--color-primary);
+  background-color: rgba(74, 90, 106, 0.04);
 }
 
 .dropzone--over {
   border-color: var(--color-primary);
-  background-color: var(--color-primary-active-bg);
+  background-color: rgba(74, 90, 106, 0.08);
 }
 
 .drop-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: rgba(74, 90, 106, 0.1);
   color: var(--color-primary);
-  display: inline-flex;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .drop-title {
   margin: 0;
-  font-size: var(--font-size-lg);
-  font-weight: 600;
+  font-size: var(--font-size-md);
+  font-weight: 500;
   color: var(--color-text-primary);
 }
 
 .drop-desc {
   margin: 0;
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
 }
 

@@ -1,8 +1,11 @@
 <template>
   <div class="toolbox-page">
     <header class="tb-head">
-      <h2 class="tb-title">工具箱</h2>
-      <p class="tb-sub">查找重复媒体、找回误删内容</p>
+      <div class="ph-heading">
+        <span class="ph-eyebrow">08</span>
+        <h2 class="tb-title">工具箱</h2>
+      </div>
+      <p class="tb-sub">查找重复媒体 · 找回误删内容</p>
     </header>
 
     <div class="tb-tabs" data-testid="toolbox-tabs" role="tablist">
@@ -48,27 +51,32 @@
       </button>
     </div>
 
-    <ToolboxDupPanel v-if="tab === 'dup'" />
+    <!-- tabs-fade：面板切换 y12 淡入（CSS 过渡；prefers-reduced-motion 由 media 禁用） -->
+    <Transition name="tf" mode="out-in">
+      <div :key="tab" class="tb-panel-zone">
+        <ToolboxDupPanel v-if="tab === 'dup'" />
 
-    <!-- 最近删除 / 已恢复：只做引导，回收站本体唯一实现在时间轴面板里 -->
-    <section v-else-if="tab === 'trash'" class="tb-panel tb-guide">
-      <h3 class="guide-title">最近删除</h3>
-      <p class="guide-text">
-        删除是软删：媒体会先进入回收站，随时可以恢复。回收站的列表与恢复操作统一在
-        时间轴的「回收站」面板里，这里只提供入口 —— 同一套逻辑放两处实现，迟早会各改各的。
-      </p>
-      <button class="btn primary" @click="goTrash">打开时间轴回收站</button>
-    </section>
+        <!-- 最近删除 / 已恢复：只做引导，回收站本体唯一实现在时间轴面板里 -->
+        <section v-else-if="tab === 'trash'" class="tb-panel tb-guide">
+          <h3 class="guide-title">最近删除</h3>
+          <p class="guide-text">
+            删除是软删：媒体会先进入回收站，随时可以恢复。回收站的列表与恢复操作统一在
+            时间轴的「回收站」面板里，这里只提供入口 —— 同一套逻辑放两处实现，迟早会各改各的。
+          </p>
+          <button class="btn primary" @click="goTrash">打开时间轴回收站</button>
+        </section>
 
-    <ToolboxRestoredPanel v-else-if="tab === 'restored'" :active="tab === 'restored'" />
+        <ToolboxRestoredPanel v-else-if="tab === 'restored'" :active="tab === 'restored'" />
 
-    <!-- 扫描导入（Job000123）：管理员分配扫描根后，成员自助导入挂载目录里的媒体 -->
-    <ToolboxScanPanel v-else-if="tab === 'scan'" />
+        <!-- 扫描导入（Job000123）：管理员分配扫描根后，成员自助导入挂载目录里的媒体 -->
+        <ToolboxScanPanel v-else-if="tab === 'scan'" />
 
-    <!-- Job000134：我的分享——列表/状态/观看统计/吊销/二维码（ShareManageList 内聚） -->
-    <div v-if="tab === 'shares'" class="tb-shares" data-testid="toolbox-my-shares">
-      <ShareManageList />
-    </div>
+        <!-- Job000134：我的分享——列表/状态/观看统计/吊销/二维码（ShareManageList 内聚） -->
+        <div v-if="tab === 'shares'" class="tb-shares" data-testid="toolbox-my-shares">
+          <ShareManageList />
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -99,32 +107,55 @@ function goTrash() {
   margin-bottom: 14px;
 }
 
+/* 页头规范（DESIGN.md §5） */
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
+}
+
 .tb-title {
   font-size: var(--font-size-lg);
+  letter-spacing: 0.12em;
   color: var(--color-text-primary);
 }
 
 .tb-sub {
   margin-top: 4px;
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
 }
 
+/* 胶囊分段 tabs（对齐空间页分段切换语言，DESIGN.md 深化稿 VIEW.08） */
 .tb-tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 16px;
+  display: inline-flex;
+  gap: 2px;
+  background-color: var(--color-surface);
+  border-radius: 999px;
+  padding: 3px;
+  box-shadow: 0 1px 3px rgba(65, 64, 60, 0.06);
+  margin-bottom: 20px;
 }
 
 .tb-tab {
   border: none;
   background: transparent;
-  padding: 9px 14px;
-  font-size: var(--font-size-md);
+  padding: 7px 18px;
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  cursor: pointer;
+  font-family: var(--font-family);
+  transition: background-color 0.5s cubic-bezier(0.32, 0.72, 0, 1), color 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .tb-tab:hover {
@@ -132,8 +163,33 @@ function goTrash() {
 }
 
 .tb-tab.active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+  background-color: var(--color-primary);
+  color: #eef1f4;
+  border-bottom-color: transparent;
+  font-weight: 500;
+}
+
+/* tabs-fade 面板切换过渡（CSS；reduced-motion 禁用） */
+.tf-enter-active,
+.tf-leave-active {
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.tf-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.tf-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tf-enter-active,
+  .tf-leave-active {
+    transition: none;
+  }
 }
 
 .tb-guide {
