@@ -49,5 +49,5 @@ docker pull warlocks/panomint-app:1.9.2
 | --- | --- |
 | warlocks/panomint-web | `sha256:c3092cda9627…`（深化 dist + 限流豁免前端） |
 | warlocks/panomint-app | `sha256:4cec9097e1c5…`（版本串 1.9.2 + 缩略图限流豁免） |
-| warlocks/panomint-worker | `sha256:ee6358df14b3…`（同 1.9.1 内容） |
+| warlocks/panomint-worker | `sha256:cc1383fbbfdd…`（entrypoint 修复版：弃 heredoc 改真实文件，修群晖部署崩溃 · 2026-10-02 深夜重推） |
 | warlocks/panomint-db | `sha256:53f4e33716b0…`（同 1.9.1 内容） |
