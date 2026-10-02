@@ -30,26 +30,53 @@
 
 <script setup>
 // 生命周期：登录会话内常驻（ball 常显），路由切换不销毁；登出由 hidden 403 收敛。
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { getAgentLlmConfig } from '../api/agentLlm'
+import { useAuthStore } from '../stores/auth'
 
+const route = useRoute()
+const auth = useAuthStore()
 const hidden = ref(true)
 const expanded = ref(false)
 const pending = ref(null) // {tool, input, allowLabel, resolve}
 let agent = null
 let confirmTimer = null
 
-onMounted(async () => {
-  try {
-    const cfg = await getAgentLlmConfig()
-    hidden.value = false
-    if (!cfg.enabled) markDisabled()
-  } catch (e) {
-    hidden.value = true // 403/未登录：整组件不渲染
+// 公开路由（登录/注册/引导/初始化）不发权限试探——未登录时 GET /admin/* 是
+// 401 而非 403，会白耗一次刷新链（实测 1.9.2 巡检逮住）；等进入 authed 路由再试探。
+const PUBLIC_PATHS = ['/login', '/register', '/boot', '/setup']
+
+async function probe() {
+  if (auth.user && !PUBLIC_PATHS.includes(route.path)) {
+    try {
+      const cfg = await getAgentLlmConfig()
+      hidden.value = false
+      if (!cfg.enabled) markDisabled()
+      return
+    } catch (e) {
+      hidden.value = true // 403/未登录：整组件不渲染
+      return
+    }
   }
+  hidden.value = true
+}
+
+onMounted(() => {
+  probe()
 })
 
+// 登录成功/登出回登录页时重试探一次（登录页不再发 /admin/* 请求）
+let lastPath = ''
+function onRouteChange() {
+  if (route.path === lastPath) return
+  lastPath = route.path
+  probe()
+}
+
 onUnmounted(dispose)
+
+watch(() => route.path, onRouteChange)
 
 function markDisabled() {
   // LLM 上游未启用：球保留但点击提示配置（引导到设置页）。
