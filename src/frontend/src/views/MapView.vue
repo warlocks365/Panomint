@@ -258,6 +258,8 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   min-height: 0;
   background: var(--color-surface-hover);
+  /* 瓦片 Morandi 调和（DESIGN.md MapView 深化）：压饱和入晨雾色系，不触碰地图引擎 */
+  filter: saturate(0.42) brightness(1.04);
 }
 
 /* 浮层容器：绝对定位在画布左上；pointer-events:none 让地图交互完全不受容器遮挡 */
