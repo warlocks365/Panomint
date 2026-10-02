@@ -120,7 +120,7 @@
 | ToolboxView / UploadView | `/toolbox` `/upload` | ✅ 确认 | ✅ 实装 | 胶囊 tabs/tabs-fade/雾蓝虚线 dropzone/queue-in |
 | SearchResultsView | `/search` | ✅ 确认 | ✅ 实装 | 页头 10/磨砂 chips/筛选条面板化/results-in |
 | PlayerView / SharePublicView | `/player/:id` `/share/:token` | ⏳ 排队 | 独立暗底不受影响 | 播放器保持暗底 |
-| LoginView / RegisterView / BootView / SetupView | 独立路由 | ⏳ 排队 | tokens 已生效 | |
+| LoginView / RegisterView / BootView / SetupView | 独立路由 | ✅ 确认 | ✅ 实装 | 雾面氛围/卡片规范/card-in；Boot 暗底特例保留 |
 | ManualView | `/manual` | ⏳ 排队 | tokens 已生效 | |
 
 **实施状态**：Phase 1（tokens 全局换肤）✅ 已在 115 运行。Phase 2（逐页组件深化：veil / 页头规范 / GSAP 进入动效）⏳ 按本账本逐页「效果图 → 用户确认 → 实装 → CDP 截图」推进。

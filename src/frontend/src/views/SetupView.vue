@@ -156,15 +156,17 @@ function goLogin() {
   width: 380px;
   padding: 40px 36px;
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
 }
 
 .setup-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   text-align: center;
+  color: var(--color-text-primary);
 }
 
 .setup-subtitle {

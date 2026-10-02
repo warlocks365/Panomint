@@ -1,6 +1,8 @@
 <template>
   <div class="login-page">
+    <span class="wordmark">PANOMINT</span>
     <div class="login-card">
+      <p class="card-eyebrow">PANOMINT · 自托管全景相册</p>
       <h1 class="login-title">全景相册</h1>
       <p class="login-subtitle">登录你的账号</p>
 
@@ -31,20 +33,25 @@
              不在页面加载时就摆出一个空格子，免得没开二次验证的人以为自己漏填了什么。
              autocomplete="one-time-code" 让 iOS/Android 能从短信/验证码自动填充里认出它；
              inputmode="numeric" 在手机上直接弹数字键盘。 -->
-        <label v-if="needCode" class="field">
-          <span class="field-label">动态口令</span>
-          <input
-            ref="codeInput"
-            v-model.trim="totpCode"
-            data-testid="login-totp"
-            type="text"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            maxlength="7"
-            placeholder="认证器中的 6 位数字"
-          />
-          <span class="field-hint">打开认证器 App，输入当前显示的 6 位数字</span>
-        </label>
+        <template v-if="needCode">
+          <div class="mfa-note">
+            <p class="mfa-title">动态口令 · 已要求二次验证</p>
+            <p class="mfa-desc">打开认证器 App，输入当前显示的 6 位数字</p>
+          </div>
+          <label class="field">
+            <span class="field-label">动态口令</span>
+            <input
+              ref="codeInput"
+              v-model.trim="totpCode"
+              data-testid="login-totp"
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="7"
+              placeholder="认证器中的 6 位数字"
+            />
+          </label>
+        </template>
 
         <label class="remember">
           <input v-model="remember" type="checkbox" />
@@ -74,12 +81,14 @@
         </template>
       </form>
     </div>
+    <span class="vermark">self-hosted</span>
   </div>
 </template>
 
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import gsap from 'gsap'
 import { useAuthStore, errCode, errMessage, MFA_REQUIRED, MFA_INVALID } from '../stores/auth'
 import { getRegisterStatus } from '../api/admin'
 import { safeInternalPath } from '../utils/url'
@@ -131,6 +140,20 @@ function startLockCountdown(seconds) {
   tick()
   lockTimer.value = setInterval(tick, 1000)
 }
+
+// DESIGN.md §8 card-in：登录卡 y16 淡入（页面加载一次；reduced-motion 跳过）
+let cardCtx = null
+onMounted(() => {
+  const mm = gsap.matchMedia()
+  mm.add('(prefers-reduced-motion: no-preference)', () => {
+    cardCtx = gsap.context(() => {
+      gsap.from('.login-card', { y: 16, opacity: 0, duration: 0.55, ease: 'power2.out' })
+    })
+  })
+})
+onUnmounted(() => {
+  if (cardCtx) cardCtx.revert()
+})
 
 // SSO 回调（Job000054）：IdP 授权后跳回 /login?code=..&state=..。
 // 有回调参数就直奔 token 交换，不渲染表单流程；失败提示与登录失败同区显示。
@@ -219,29 +242,67 @@ async function onSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   background-color: var(--color-bg);
+  /* mist-wash：双团超淡雾色（bg 色相 ±3% 明度内，非装饰渐变横幅） */
+  background-image: radial-gradient(900px 420px at 12% -8%, rgba(244, 241, 237, 0.55), transparent 60%),
+    radial-gradient(760px 380px at 92% 108%, rgba(74, 90, 106, 0.06), transparent 60%);
 }
 
+.wordmark {
+  position: absolute;
+  top: 18px;
+  left: 36px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--color-text-disabled);
+}
+
+.vermark {
+  position: absolute;
+  bottom: 16px;
+  right: 36px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--color-text-disabled);
+}
+
+/* 卡片规范（DESIGN.md §4）：无边框米白面 + 双层漫射阴影 */
 .login-card {
-  width: 360px;
-  padding: 40px 36px;
+  width: 380px;
+  padding: 40px 36px 30px;
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
 }
 
+.card-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-align: center;
+  color: var(--color-text-disabled);
+  margin-bottom: 10px;
+}
+
 .login-title {
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
   text-align: center;
+  color: var(--color-text-primary);
 }
 
 .login-subtitle {
-  margin: 8px 0 28px;
+  margin: 6px 0 26px;
   text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
-  font-size: var(--font-size-sm);
 }
 
 .login-form {
@@ -319,10 +380,35 @@ async function onSubmit() {
 .submit-btn {
   height: 40px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 10px;
   background-color: var(--color-primary);
   color: #fff;
   font-size: var(--font-size-md);
+  letter-spacing: 0.08em;
+  transition: background-color 0.5s cubic-bezier(0.32, 0.72, 0, 1), transform 0.15s ease;
+}
+
+.submit-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* 动态口令按需提示块（燕麦左线，DESIGN.md 深化稿 VIEW.11） */
+.mfa-note {
+  border-left: 2px solid var(--stat-pano-photo);
+  padding-left: 10px;
+  margin-bottom: 14px;
+}
+
+.mfa-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-warning-text);
+}
+
+.mfa-desc {
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  margin-top: 2px;
 }
 
 .submit-btn:hover:not(:disabled) {
