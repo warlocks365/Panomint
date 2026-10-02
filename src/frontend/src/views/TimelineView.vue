@@ -72,22 +72,28 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useGSAP } from '@gsap/react'
 import gsap from 'gsap'
 import TimelineGrid from '../components/timeline/TimelineGrid.vue'
 import MediaViewer from '../components/viewer/MediaViewer.vue'
 import TrashPanel from '../components/timeline/TrashPanel.vue'
 
 const rootEl = ref(null)
-// DESIGN.md §8 page-enter：工具栏 y24 淡入（reduced-motion 降级；scope 限定本页根元素）
-useGSAP(() => {
+// DESIGN.md §8 page-enter（GSAP 官方 Vue 模式：gsap.context + 生命周期清理；
+// 注意 @gsap/react 是 React 专用绑定，Vue 中引入会因缺少 React hooks 崩掉整个 chunk）
+let pageCtx = null
+onMounted(() => {
   const mm = gsap.matchMedia()
   mm.add('(prefers-reduced-motion: no-preference)', () => {
-    gsap.from('.tl-toolbar', { y: 24, opacity: 0, duration: 0.6, ease: 'power2.out' })
+    pageCtx = gsap.context(() => {
+      gsap.from('.tl-toolbar', { y: 24, opacity: 0, duration: 0.6, ease: 'power2.out' })
+    }, rootEl.value)
   })
-}, { scope: rootEl })
+})
+onBeforeUnmount(() => {
+  if (pageCtx) pageCtx.revert()
+})
 
 const route = useRoute()
 const router = useRouter()

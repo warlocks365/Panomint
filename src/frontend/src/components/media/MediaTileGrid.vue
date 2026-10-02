@@ -68,7 +68,8 @@
 <script setup>
 // 通用媒体磁贴网格（Job000065 抽出；Job000066 增批量选择）：selectable 开启勾选模式，
 // 勾选后吸底操作栏——七模块行为统一（useBatchOps → /media/batch）。
-import { reactive, watch } from 'vue'
+import { nextTick, reactive, watch } from 'vue'
+import gsap from 'gsap'
 import { loadThumbUrl } from '../timeline/mediaLoader'
 import BatchBar from './BatchBar.vue'
 import { useBatchOps } from './useBatchOps'
@@ -130,6 +131,32 @@ function formatDate(iso) {
 }
 
 watch(() => props.items, (list) => ensureThumbs(list), { immediate: true })
+
+// DESIGN.md §8 dgrid-enter：网格首屏一次性瀑布渐显（clearProps 还原，不残留 transform；
+// prefers-reduced-motion 跳过；后续增量变更不再动画——与 TimelineGrid 首屏 stagger 同模式）
+let dgridDone = false
+watch(
+  () => props.items.length,
+  async (n) => {
+    if (n > 0 && !dgridDone) {
+      dgridDone = true
+      await nextTick()
+      requestAnimationFrame(() => {
+        const mm = gsap.matchMedia()
+        mm.add('(prefers-reduced-motion: no-preference)', () => {
+          gsap.from('.media-grid .media-tile', {
+            y: 20,
+            opacity: 0,
+            duration: 0.5,
+            ease: 'power2.out',
+            stagger: 0.03,
+            clearProps: 'transform,opacity'
+          })
+        })
+      })
+    }
+  }
+)
 </script>
 
 <style scoped>

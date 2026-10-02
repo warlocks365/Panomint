@@ -11,8 +11,11 @@
         <span v-if="!album.media_count" class="acard-placeholder-text">暂无内容</span>
       </div>
 
-      <span v-if="album.kind === 'smart'" class="acard-tag tag-smart">智能</span>
-      <span v-else-if="isFavorites" class="acard-tag tag-fav">收藏</span>
+      <!-- 雾面 veil：顶部薄雾让媒体「沉」进界面（DESIGN.md §4 媒体卡） -->
+      <div v-if="coverUrl" class="acard-veil" aria-hidden="true"></div>
+
+      <span v-if="album.kind === 'smart'" class="acard-tag tag-smart"><i class="tag-dot"></i>智能</span>
+      <span v-else-if="isFavorites" class="acard-tag tag-fav"><i class="tag-dot"></i>收藏</span>
     </div>
 
     <div class="acard-body">
@@ -82,18 +85,18 @@ function formatDate(iso) {
 </script>
 
 <style scoped>
+/* 卡片规范（DESIGN.md §4）：米白面、无边框、双层漫射阴影；hover = 阴影升至 lift 层（不位移不描边） */
 .acard {
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
   box-shadow: var(--shadow-card);
-  transition: border-color 0.15s ease;
+  transition: box-shadow 0.5s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .acard:hover {
-  border-color: var(--color-primary);
+  box-shadow: var(--shadow-lift);
 }
 
 .acard-cover {
@@ -101,6 +104,7 @@ function formatDate(iso) {
   width: 100%;
   aspect-ratio: 4 / 3;
   background-color: var(--color-surface-hover);
+  overflow: hidden;
 }
 
 .acard-img {
@@ -108,6 +112,18 @@ function formatDate(iso) {
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.acard:hover .acard-img {
+  transform: scale(1.03);
+}
+
+.acard-veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(233, 228, 222, 0.16), transparent 34%);
+  pointer-events: none;
 }
 
 .acard-placeholder {
@@ -125,22 +141,35 @@ function formatDate(iso) {
   font-size: var(--font-size-sm);
 }
 
+/* 状态 chip：磨砂圆角胶囊 + 语义色圆点（DESIGN.md §4） */
 .acard-tag {
   position: absolute;
   top: 8px;
   left: 8px;
-  padding: 2px 8px;
-  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2.5px 9px;
+  border-radius: 999px;
   font-size: 11px;
   line-height: 1.5;
-  color: #fff;
+  color: var(--color-text-primary);
+  background: rgba(244, 241, 237, 0.82);
+  box-shadow: 0 1px 3px rgba(65, 64, 60, 0.08);
 }
 
-.tag-smart {
+.tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tag-smart .tag-dot {
   background-color: var(--color-primary);
 }
 
-.tag-fav {
+.tag-fav .tag-dot {
   background-color: var(--color-danger);
 }
 
@@ -159,7 +188,7 @@ function formatDate(iso) {
 .acard-name {
   font-size: var(--font-size-md);
   color: var(--color-text-primary);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -167,7 +196,9 @@ function formatDate(iso) {
 
 .acard-meta {
   margin-top: 2px;
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
 }
 
@@ -175,6 +206,23 @@ function formatDate(iso) {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.35s cubic-bezier(0.32, 0.72, 0, 1), transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.acard:hover .acard-actions,
+.acard:focus-within .acard-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 触屏无 hover：操作钮恒显 */
+@media (hover: none) {
+  .acard-actions {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .icon-btn {

@@ -1,7 +1,10 @@
 <template>
   <div class="albums-page">
     <header class="page-toolbar">
-      <h2 class="page-title">相册</h2>
+      <div class="ph-heading">
+        <p class="ph-eyebrow">03</p>
+        <h2 class="page-title">相册</h2>
+      </div>
       <div class="spacer"></div>
       <button class="btn primary" @click="createOpen = true">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none">
@@ -63,8 +66,9 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import gsap from 'gsap'
 import AlbumCard from '../components/albums/AlbumCard.vue'
 import AlbumFormDialog from '../components/albums/AlbumFormDialog.vue'
 import { deleteAlbum, errMsg, getAlbum, listAlbums } from '../components/albums/albumApi'
@@ -140,6 +144,32 @@ async function confirmDelete() {
 }
 
 onMounted(load)
+
+// DESIGN.md §8 grid-stagger：首屏一次性瀑布入场（clearProps 还原，不残留 transform；
+// prefers-reduced-motion 时整体跳过——与 TimelineGrid 首屏 stagger 同模式）
+let gridStaggerDone = false
+watch(
+  () => albums.value.length,
+  async (n) => {
+    if (n > 0 && !gridStaggerDone) {
+      gridStaggerDone = true
+      await nextTick()
+      requestAnimationFrame(() => {
+        const mm = gsap.matchMedia()
+        mm.add('(prefers-reduced-motion: no-preference)', () => {
+          gsap.from('.album-grid .acard', {
+            y: 24,
+            opacity: 0,
+            duration: 0.55,
+            ease: 'power2.out',
+            stagger: 0.05,
+            clearProps: 'transform,opacity'
+          })
+        })
+      })
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -153,8 +183,23 @@ onMounted(load)
   margin-bottom: 16px;
 }
 
+/* 页头规范（DESIGN.md §5）：mono 灰序号 + 16px 标题（字距 .12em）+ 右侧主操作 */
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
+}
+
 .page-title {
   font-size: var(--font-size-lg);
+  letter-spacing: 0.12em;
   color: var(--color-text-primary);
 }
 
