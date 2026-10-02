@@ -1,1 +1,26 @@
+# 行尾规范（Job000121 worker 崩溃事故根治）
+#
+# 背景：1.9.2 群晖部署实测 index/transcode-worker 崩溃
+#   `exec /usr/local/bin/worker-entrypoint.sh: no such file or directory`。
+# 两个独立根因：
+#   ① Dockerfile heredoc 内容在 Windows 工作区被转成 CRLF，
+#      容器内 shebang 变 `#!/bin/sh\r` → exec 找不到解释器。
+#   ② heredoc 段被错误编辑后残留，脚本正文当 Dockerfile 指令解析，
+#      构建产物**根本没有** entrypoint 文件（同样报 no such file）。
+#
+# 根治措施（两条，缺一不可）：
+#   1. worker-entrypoint.sh 以**真实文件**提交（src/backend/），Dockerfile 只 COPY。
+#      heredoc 一律不用——git archive / Windows 工作区 / 群晖构建链对 heredoc
+#      内容的行尾处理都不稳。
+#   2. 本文件把 sh 与 Dockerfile 的行尾**钉死为 LF**，杜绝 Windows 侧
+#      core.autocrlf 把已修正的文件再次转回 CRLF（本次事故的隐性放大器）。
+#
+# 影响范围：worker 镜像构建（docker/worker/Dockerfile + src/backend/worker-entrypoint.sh）。
+# 已在 115 端到端实证：镜像内 shebang 为纯 LF、entrypoint 可执行、非法
+# WORKER_KIND 正确返回 exit 2。
+
 *.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+docker-compose*.yml text eol=lf
+*.Dockerfile text eol=lf

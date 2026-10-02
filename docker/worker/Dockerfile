@@ -25,29 +25,6 @@ COPY --from=build /out/indexctl /out/transcodectl /out/storagectl /usr/local/bin
 # worker-entrypoint.sh 以真实文件提交（src/backend/worker-entrypoint.sh，LF）；
 # 弃用 Dockerfile heredoc——群晖/Windows 构建链对 heredoc 内容的 CRLF 不稳（1.9.2 首发实测踩坑）。
 COPY worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
-RUN chmod 0755 /usr/local/bin/worker-entrypoint.sh' /usr/local/bin/worker-entrypoint.sh
-#!/bin/sh
-set -e
-case "${WORKER_KIND:-}" in
-  index)
-    # Job000070 F4：挂载执行器与缩略图 worker 同容器（共享 mount 命名空间——
-    # rclone mount 的 FUSE 挂载点只有同容器进程可见，跨容器需传播挂载更脆）。
-    # storagectl 崩溃不拖垮 indexctl（& 后台 + 无 set -e 关联）。
-    /usr/local/bin/storagectl run &
-    exec /usr/local/bin/indexctl worker -thumbdir "${THUMB_DIR:-/data/thumbnails}"
-    ;;
-  storage)
-    exec /usr/local/bin/storagectl run
-    ;;
-  transcode)
-    exec /usr/local/bin/transcodectl worker -hlsdir "${HLS_DIR:-/data/hls}"
-    ;;
-  *)
-    echo "WORKER_KIND 必须为 index|transcode|storage，当前: '${WORKER_KIND:-<空>}'" >&2
-    exit 2
-    ;;
-esac
-EOF
-RUN chmod +x /usr/local/bin/worker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/worker-entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/worker-entrypoint.sh"]
