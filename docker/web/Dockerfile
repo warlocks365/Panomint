@@ -133,6 +133,15 @@ server {
     # PWA：Service Worker 必须 no-cache（否则旧 SW 长期驻留，升级不生效）
     location = /sw.js {
         add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.autonavi.com https://*.amap.com; connect-src 'self' https://*.autonavi.com https://*.is.autonavi.com https://dashscope.aliyuncs.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         try_files $uri =404;
     }
 
@@ -140,6 +149,15 @@ server {
     location = /manifest.webmanifest {
         types { }
         default_type application/manifest+json;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.autonavi.com https://*.amap.com; connect-src 'self' https://*.autonavi.com https://*.is.autonavi.com https://dashscope.aliyuncs.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         try_files $uri =404;
     }
 
@@ -188,33 +206,72 @@ server {
         # XHR（导航组路径 /albums/:id 等的 getAlbum 与页面同 URL；无 Vary 时缓存键
         # 不含 Accept → 刷新详情页时 XHR 命中 HTML 缓存 → 相册详情页整页坏）。
         add_header Vary Accept always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.autonavi.com https://*.amap.com; connect-src 'self' https://*.autonavi.com https://*.is.autonavi.com https://dashscope.aliyuncs.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         try_files /index.html =404;
     }
 
     # Vue SPA history 路由回退（/timeline /player/:id /share/:token /login 等）
     location / {
         add_header Vary Accept always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.autonavi.com https://*.amap.com; connect-src 'self' https://*.autonavi.com https://*.is.autonavi.com https://dashscope.aliyuncs.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
         try_files $uri $uri/ /index.html;
     }
 
     # ===== 安全响应头（Job000141，审查报告 L-1）=====
-    # 放在 server 块末尾：nginx 的 add_header 在**子块内**会覆盖父块继承，
-    # 所以放最后、且用 always 让 4xx/5xx 也带上（否则错误页裸奔）。
-    # 逐条理由：
-    #   nosniff            —— 禁 MIME 嗅探，配合本项目严格 serve 的静态产物
+    # ⚠️⚠️ **nginx add_header 的继承规则是本条生效的前提，务必读懂**：
+    #     「子 location 只要出现**任意一条** add_header，就完全不再继承父级
+    #      server 块的 add_header」—— 不是合并，是**整体覆盖**。
+    #     本文件里 `location /`、`@spa`、`= /sw.js`、`= /manifest.webmanifest`
+    #     都各自带了 add_header（Vary / Cache-Control / nosniff 四条），
+    #     所以**把安全头写在 server 块里一条都不会下发**（实测：容器内 grep 到
+    #     5 处配置，HTTP 响应里一条都没有，只剩 Vary: Accept）。
+    #     正解：每个 location **重复声明** 下面这四条。
+    #
+    # 用 include 片段而非复制粘贴：nginx 的 include 在同一层级展开，
+    # 写在 server 块里对「**本块内没有 add_header 的** location」有效，
+    # 但对上面那些自带 add_header 的 location 依然无效 —— 故这里用
+    # `$secure_headers` 变量无法解决（变量不能承载 add_header 指令）。
+    # 因此采用**显式重复**（4 条 × 5 处），并在下面每处都写明「勿删」。
+    #
+    # 为什么选这四条（逐条理由）：
+    #   nosniff            —— 禁 MIME 嗅探；本项目严格 serve 已构建产物，不依赖嗅探
     #   SAMEORIGIN         —— 禁第三方 iframe 嵌入（点击劫持）。
     #                        /public/shares/:token 是**无鉴权公开页**，最需要这条
-    #   Referrer-Policy    —— URL 里带 ?at=<access_token>（Job000129 的 video 读路径），
-    #                        严格来源可避免 token 经 Referer 外泄到第三方站
+    #   Referrer-Policy    —— URL 里可带 ?at=<access_token>（Job000129 的 video
+    #                        读路径），strict-origin 可避免 token 经 Referer 外泄
     #   Permissions-Policy —— 显式关闭不需要的传感器（geolocation 仅自用）
     #
-    # ⚠️ **未启用 CSP** 是刻意的：maplibre-gl worker、瓦片请求、内联样式在收紧
-    #    CSP 后会连带失败（已实测踩坑模式：nginx 前缀漏配 → SPA 假 200）。
-    #    待单独窗口按最小可用集逐步放开（script-src 'self' → 再放开 connect-src），
-    #    放开后必须走 headless CDP e2e 真实打开全部 15 条路由验证。
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "geolocation=(self), camera=(), microphone=()" always;
+    # 5 条头（含 Content-Security-Policy）逐 location 重复声明，勿删任何一个。
+    #
+    # CSP 的放行依据（Job000142 实测得出，非猜）：
+    #   style-src  fonts.googleapis.com — index.html 用 <link> 引 Google Fonts
+    #                        （Outfit + Noto Sans SC），且 :style 动态绑定需要
+    #                        'unsafe-inline'（地图/图表按数据算样式）
+    #   font-src   fonts.gstatic.com    — 字体文件实际托管处（实测根路径 404
+    #                        属正常，字体文件路径由 CSS 给出）
+    #   img-src    *.autonavi.com       — 地图瓦片（实测 webrd01 200）
+    #   connect-src dashscope.aliyuncs.com — LLM 上游（实测 401=可达仅需鉴权；
+    #                        page-agent 在浏览器侧直连，服务端代理见 agentllm）
+    #   worker-src blob:                — maplibre-gl worker（实测 200）
+    #
+    # ⚠️ CSP 与 add_header 覆盖规则叠加：**同样必须逐 location 写**。
+    #    已用 headless CDP e2e 真实打开全部路由验证无阻断（见
+    #    文档/代码审查报告_v1.9.2.md 的 L-1 闭环段）。
 }
 EOF
