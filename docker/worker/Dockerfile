@@ -22,7 +22,10 @@ RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
 COPY --from=build /out/indexctl /out/transcodectl /out/storagectl /usr/local/bin/
 
 # 入口分发：WORKER_KIND=index|transcode|storage 决定执行哪个 worker 子命令
-COPY <<'EOF' /usr/local/bin/worker-entrypoint.sh
+# worker-entrypoint.sh 以真实文件提交（src/backend/worker-entrypoint.sh，LF）；
+# 弃用 Dockerfile heredoc——群晖/Windows 构建链对 heredoc 内容的 CRLF 不稳（1.9.2 首发实测踩坑）。
+COPY worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/worker-entrypoint.sh' /usr/local/bin/worker-entrypoint.sh
 #!/bin/sh
 set -e
 case "${WORKER_KIND:-}" in
