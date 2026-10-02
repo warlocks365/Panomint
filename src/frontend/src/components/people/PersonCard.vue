@@ -29,7 +29,7 @@
   <!-- cluster 形态：整卡点击勾选（合并用），picked 高亮 -->
   <div v-else class="card cluster-card" :class="{ picked: selected }" @click="$emit('pick', person.cluster_id)">
     <span class="pick" :class="{ on: selected }"></span>
-    <div class="cover">
+    <div class="cover cover-cluster">
       <img v-if="cover" :src="cover" alt="" />
       <div v-else class="cover-empty">?</div>
     </div>
@@ -62,12 +62,24 @@ function countOf(entry) {
 </script>
 
 <style scoped>
+/* 人物卡（DESIGN.md 深化稿 VIEW.04）：纵向圆形头像卡体系——
+   无边框米白面 + 双层漫射阴影，hover 阴影升 lift + 头像 scale 1.03；
+   cluster 形态虚线圆与已命名形成视觉区分 */
 .card {
-  position: relative; /* named 卡片的 .pick 勾选圆点绝对定位 */
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  position: relative; /* .pick 勾选圆点绝对定位 */
+  border-radius: var(--radius-lg);
   background-color: var(--color-surface);
   overflow: hidden;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 12px 12px;
+  transition: box-shadow 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-lift);
 }
 
 .card.dimmed {
@@ -75,24 +87,23 @@ function countOf(entry) {
 }
 
 .cluster-card {
-  position: relative;
   cursor: pointer;
 }
 
 .cluster-card.picked {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px var(--color-primary-active-bg);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .pick {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 18px;
-  height: 18px;
+  top: 10px;
+  right: 10px;
+  width: 17px;
+  height: 17px;
   border-radius: 50%;
   border: 1.5px solid #fff;
-  background-color: rgba(0, 0, 0, 0.35);
+  background-color: rgba(65, 64, 60, 0.34);
   z-index: 1;
 }
 
@@ -102,13 +113,26 @@ function countOf(entry) {
 }
 
 .cover {
-  aspect-ratio: 1 / 1;
-  background-color: var(--color-surface-hover);
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: linear-gradient(150deg, var(--color-surface-hover), var(--color-border));
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.card:hover .cover {
+  transform: scale(1.03);
+}
+
+.cover-cluster {
+  background: transparent;
+  border: 1.5px dashed var(--color-text-disabled);
 }
 
 .cover img {
@@ -119,17 +143,22 @@ function countOf(entry) {
 }
 
 .cover-empty {
-  font-size: 28px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 400;
   color: var(--color-text-disabled);
+  font-family: var(--font-mono);
 }
 
 .card-body {
-  padding: 8px 10px 4px;
+  padding: 10px 6px 2px;
+  text-align: center;
+  width: 100%;
+  min-width: 0;
 }
 
 .card-name {
   font-size: var(--font-size-md);
+  font-weight: 500;
   color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -137,14 +166,35 @@ function countOf(entry) {
 }
 
 .card-meta {
-  font-size: var(--font-size-sm);
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
 }
 
 .card-actions {
   display: flex;
   gap: 6px;
-  padding: 4px 10px 10px;
+  padding: 8px 0 2px;
+  width: 100%;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.35s cubic-bezier(0.32, 0.72, 0, 1), transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.card:hover .card-actions,
+.card:focus-within .card-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 触屏无 hover：操作钮恒显 */
+@media (hover: none) {
+  .card-actions {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .mini {
@@ -153,12 +203,13 @@ function countOf(entry) {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
   cursor: pointer;
 }
 
 .mini:hover {
   background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
 }
 </style>

@@ -174,12 +174,16 @@ async function onDelete(t) {
 
 .detail-title {
   font-size: var(--font-size-lg);
+  letter-spacing: 0.04em;
+  font-weight: 500;
   color: var(--color-text-primary);
 }
 
 .detail-count {
   margin-left: 8px;
-  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
   color: var(--color-text-secondary);
   font-weight: 400;
 }

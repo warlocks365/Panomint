@@ -1,7 +1,10 @@
 <template>
   <div class="tags-page">
     <header class="page-toolbar">
-      <h2 class="page-title">标签</h2>
+      <div class="ph-heading">
+        <span class="ph-eyebrow">05</span>
+        <h2 class="page-title">标签</h2>
+      </div>
       <input
         v-model.trim="filter"
         class="filter-input"
@@ -38,6 +41,7 @@
           :title="`${t.name} · ${t.usage_count} 项${t.kind === 'ai' && !t.confirmed ? ' · 待确认' : ''}`"
           @click="selectTag(t)"
         >
+          <i v-if="t.kind === 'ai' && !t.confirmed" class="ai-dot" aria-hidden="true"></i>
           {{ t.name }}
           <span class="chip-count">{{ t.usage_count }}</span>
           <i v-if="t.kind === 'ai' && !t.confirmed" class="chip-pending" title="AI 待确认">待</i>
@@ -57,7 +61,8 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
+import gsap from 'gsap'
 import http from '../api/http'
 import TagDetailPanel from './tags/TagDetailPanel.vue'
 import { dialogs } from '../components/dialogs/dialogs'
@@ -141,6 +146,31 @@ function onSelectionCleared() {
 }
 
 onMounted(loadTags)
+
+// DESIGN.md §8 cloud-in：标签云 chip 首屏一次性浮现（scale 0.92→1 + 透明度；clearProps 还原）
+let cloudDone = false
+watch(
+  () => loading.value,
+  async (isLoading) => {
+    if (!isLoading && !cloudDone) {
+      cloudDone = true
+      await nextTick()
+      requestAnimationFrame(() => {
+        const mm = gsap.matchMedia()
+        mm.add('(prefers-reduced-motion: no-preference)', () => {
+          gsap.from('.cloud .tag-chip', {
+            scale: 0.92,
+            opacity: 0,
+            duration: 0.45,
+            ease: 'power2.out',
+            stagger: 0.03,
+            clearProps: 'transform,opacity'
+          })
+        })
+      })
+    }
+  }
+)
 </script>
 
 <style scoped>
@@ -155,8 +185,23 @@ onMounted(loadTags)
   margin-bottom: 16px;
 }
 
+/* 页头规范（DESIGN.md §5） */
+.ph-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ph-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-disabled);
+}
+
 .page-title {
   font-size: var(--font-size-lg);
+  letter-spacing: 0.12em;
   color: var(--color-text-primary);
 }
 
@@ -254,21 +299,33 @@ onMounted(loadTags)
 .cloud {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  gap: 12px 14px;
+  padding: 20px 22px;
   margin-bottom: 22px;
+  background-color: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
 }
 
+/* 磨砂胶囊 chip（DESIGN.md 深化稿 VIEW.05）；自定义色标签的内联底色优先保留其色彩语义 */
 .tag-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
-  border-radius: 14px;
+  padding: 6px 14px;
+  border-radius: 999px;
   border: 1px solid transparent;
   font-size: var(--font-size-sm);
-  background-color: var(--color-primary-active-bg);
-  color: var(--color-primary);
+  background-color: rgba(244, 241, 237, 0.82);
+  box-shadow: 0 1px 3px rgba(65, 64, 60, 0.08);
+  color: var(--color-text-primary);
   cursor: pointer;
+  transition: box-shadow 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.tag-chip:hover {
+  box-shadow: var(--shadow-lift);
 }
 
 .tag-chip.ai {
@@ -277,12 +334,23 @@ onMounted(loadTags)
 }
 
 .tag-chip.active {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 1px;
+  border-color: var(--color-primary);
+  background-color: var(--color-primary);
+  color: #eef1f4;
+  box-shadow: var(--shadow-card);
+}
+
+.ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--stat-pano-photo);
+  flex-shrink: 0;
 }
 
 .chip-count {
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   opacity: 0.75;
 }
 
@@ -292,8 +360,9 @@ onMounted(loadTags)
   font-weight: 700;
   padding: 0 4px;
   border-radius: 4px;
-  background-color: var(--color-warning-text);
-  color: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-text);
+  color: var(--color-warning-text);
+  background-color: transparent;
 }
 
 </style>

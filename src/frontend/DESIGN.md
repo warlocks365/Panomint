@@ -115,7 +115,7 @@
 | SettingsView（含 LLM 上游卡） | `/settings` | ✅ 已截 | ✅ | CDP 实拍确认 |
 | AdminView | `/admin` | ⏳ 排队 | tokens 已生效 | |
 | MapView / PlacesView | `/map` `/places` | ⏳ 排队 | tokens 已生效 | 地图瓦片底色需单独调和 |
-| PeopleView / TagsView | `/people` `/tags` | ⏳ 排队 | tokens 已生效 | |
+| PeopleView / TagsView | `/people` `/tags` | ✅ 确认 | ✅ 实装 | 圆形头像卡体系/聚类虚线卡/磨砂云 chip/cloud-in |
 | SpacesView / FoldersView | `/spaces` `/folders` | ⏳ 排队 | tokens 已生效 | |
 | ToolboxView / UploadView | `/toolbox` `/upload` | ⏳ 排队 | tokens 已生效 | |
 | SearchResultsView | `/search` | ⏳ 排队 | tokens 已生效 | |
