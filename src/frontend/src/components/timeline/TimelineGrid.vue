@@ -31,6 +31,7 @@
                   :selected="batch.selected.has(m.id)"
                   @toggle="batch.toggle($event.id)"
                   @open="$emit('open', $event)"
+                  @thumb-action="(a, it) => $emit('thumb-action', a, it)"
                 />
               </div>
             </DynamicScrollerItem>
@@ -108,7 +109,7 @@ const props = defineProps({
   place: { type: String, default: '' }, // Job000062：地点过滤（地点页点入）
   selectable: { type: Boolean, default: false } // Job000079 时间轴批量操作（勾选 + 吸底操作栏）
 })
-const emit = defineEmits(['open', 'changed'])
+const emit = defineEmits(['open', 'changed', 'thumb-action'])
 
 // 选中集按媒体 id 存于本组件（虚拟滚动只复用 DOM，选中态不丢）；操作完成后 emit changed 让宿主 reload
 const batch = useBatchOps(() => emit('changed'))

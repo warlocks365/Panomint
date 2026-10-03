@@ -1,5 +1,20 @@
 <template>
-  <div ref="rootEl" class="thumb" :class="{ 'thumb--selected': selected }" @click="$emit('open', item)">
+  <!-- Job000143：右键 / 长按 600ms 打开操作菜单。
+       手势判定在**本组件**（卡片自己），弹层渲染交给 ThumbContextMenu。
+       这样安排的原因：菜单 Teleport 到 body，事件无法冒泡回卡片，
+       若把判定放进子组件，就得靠 ref 穿透，反而更绕。
+       ⚠️ @contextmenu 必须 .prevent，否则浏览器原生菜单会先弹出。 -->
+  <div
+    ref="rootEl"
+    class="thumb"
+    :class="{ 'thumb--selected': selected }"
+    @click="onClick"
+    @contextmenu.prevent="onContextMenu"
+    @touchstart.passive="onTouchStart"
+    @touchmove.passive="onTouchMove"
+    @touchend.passive="onTouchEnd"
+    @touchcancel.passive="onTouchEnd"
+  >
     <label v-if="selectable" class="thumb-check" @click.stop>
       <input
         type="checkbox"
@@ -48,6 +63,14 @@
     </span>
 
     <MediaTooltip :item="item" :anchor="rootEl" />
+
+    <ThumbContextMenu
+      :item="item"
+      :open="menuOpen"
+      :at="menuAt"
+      @close="menuOpen = false"
+      @action="onMenuAction"
+    />
   </div>
 </template>
 
@@ -55,13 +78,75 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { loadThumbUrl } from './mediaLoader'
 import MediaTooltip from './MediaTooltip.vue'
+import ThumbContextMenu from '../media/ThumbContextMenu.vue'
 
 const props = defineProps({
   item: { type: Object, required: true },
   selectable: { type: Boolean, default: false }, // Job000079 时间轴批量操作
   selected: { type: Boolean, default: false }
 })
-const emit = defineEmits(['open', 'toggle'])
+const emit = defineEmits(['open', 'toggle', 'thumb-action'])
+
+// ---- Job000143：右键 / 长按 → 打开操作菜单 ----
+// ⚠️ 曾在这里挡掉「批量选择态」（理由：与选择语义打架）—— 但实测发现
+//    TimelineGrid **常态就传 selectable**（批量是常驻模式，不是临时状态），
+//    那样写等于右键功能完全不可用。故改为：桌面右键任何时候都能开菜单；
+//    移动端长按在选择态下不触发（那里 touch 已被 checkbox 占用）。
+const menuOpen = ref(false)
+const menuAt = ref({ x: 0, y: 0 })
+let holdTimer = null
+let startPt = null
+
+function openMenu(x, y) {
+  menuAt.value = { x, y }
+  menuOpen.value = true
+}
+
+// 右键事件：取 clientX/Y（@contextmenu 传的是 Event，不是坐标 ——
+// 直接把 e 当 x 用会得到 undefined，菜单位置全错）。
+function onContextMenu(e) {
+  openMenu(e.clientX, e.clientY)
+}
+
+function onClick() {
+  // 菜单开着时点卡片：关菜单而不是打开查看器（否则一次点击干两件事）
+  if (menuOpen.value) {
+    menuOpen.value = false
+    return
+  }
+  emit('open', props.item)
+}
+
+function onMenuAction(action, it) {
+  menuOpen.value = false
+  emit('thumb-action', action, it)
+}
+
+// 移动端长按：600ms 触发；**touchmove 超过 10px 立即取消**（判定为滚动）——
+// 这是长按手势最容易踩的坑：用户想滑动列表却总弹菜单。
+function onTouchStart(e) {
+  if (props.selectable || !e.touches || e.touches.length !== 1) return
+  const t = e.touches[0]
+  startPt = { x: t.clientX, y: t.clientY }
+  clearTimeout(holdTimer)
+  holdTimer = setTimeout(() => {
+    if (startPt) openMenu(startPt.x, startPt.y)
+  }, 600)
+}
+
+function onTouchMove(e) {
+  if (!startPt || !e.touches || !e.touches.length) return
+  const t = e.touches[0]
+  if (Math.abs(t.clientX - startPt.x) > 10 || Math.abs(t.clientY - startPt.y) > 10) {
+    clearTimeout(holdTimer)
+  }
+}
+
+function onTouchEnd() {
+  clearTimeout(holdTimer)
+  // 长按已触发时不要立刻关（touchend 紧跟长按触发，关掉会一闪而过）
+  startPt = null
+}
 
 const rootEl = ref(null)
 

@@ -58,6 +58,7 @@
       selectable
       @open="openViewer"
       @changed="onBatchChanged"
+      @thumb-action="onThumbAction"
     />
 
     <MediaViewer
@@ -78,6 +79,7 @@ import gsap from 'gsap'
 import TimelineGrid from '../components/timeline/TimelineGrid.vue'
 import MediaViewer from '../components/viewer/MediaViewer.vue'
 import TrashPanel from '../components/timeline/TrashPanel.vue'
+import { deleteMedia, setFavorite } from '../api/media'
 
 const rootEl = ref(null)
 // DESIGN.md §8 page-enter（GSAP 官方 Vue 模式：gsap.context + 生命周期清理；
@@ -124,6 +126,54 @@ const gridItems = computed(() => gridRef.value?.items ?? [])
 
 function is360(item) {
   return !!(item?.is_360 || item?.type === '360')
+}
+
+// Job000143：媒体卡右键/长按菜单动作。
+//
+// 「编辑拍摄信息」的实现是**复用既有打开路径**：先像点卡片一样打开查看器
+// （信息面板在里面），用户随即可在面板里点「编辑拍摄信息」。
+// 不另造一套「菜单直接进编辑态」的通路 —— 那会让编辑器有两个入口状态，
+// 后续改动要同步两处，是典型的重复维护陷阱。
+function onThumbAction(action, item) {
+  if (action === 'open' || action === 'edit-metadata') {
+    // 两者都打开查看器：信息面板里有「编辑拍摄信息」入口，不必从菜单直达编辑态
+    openViewer(item)
+    return
+  }
+  if (action === 'favorite') {
+    toggleFavoriteFromMenu(item)
+    return
+  }
+  if (action === 'delete') {
+    deleteFromMenu(item)
+  }
+}
+
+// 收藏：后端语义是「设为该状态」而非 toggle，故先算 next 再提交。
+// gridItems 是 computed（只读），但它返回的是 gridRef 内部的数组引用，
+// 就地改 item.favorite 会同步反映到列表与查看器 —— 不重拉列表（会丢滚动位置）。
+async function toggleFavoriteFromMenu(item) {
+  try {
+    const next = !item.favorite
+    await setFavorite(item.id, next)
+    item.favorite = next
+  } catch (e) {
+    console.warn('收藏失败', e)
+  }
+}
+
+// 删除：软删入回收站（可恢复），与 api.deleteMedia 语义一致。
+// 删除后**不**自行 splice gridItems —— 它是 computed（只读），且真正的数据源
+// 是 gridRef 内部的 items；这里只标一个本地态让卡片消失，权威列表由
+// 查看器关闭时的 onDeleted / 下次分页请求负责刷新。
+async function deleteFromMenu(item) {
+  if (!window.confirm(`将「${item.filename || '该媒体'}」移入回收站？可随时恢复。`)) return
+  try {
+    await deleteMedia(item.id)
+    item.__removed = true
+  } catch (e) {
+    console.warn('删除失败', e)
+  }
 }
 
 function openViewer(item) {

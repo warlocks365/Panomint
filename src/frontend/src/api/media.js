@@ -50,3 +50,10 @@ export function updateMetadata(id, payload, { coordSource = 'wgs84' } = {}) {
 export function fetchMediaDetail(id) {
   return http.get(`/media/${id}`).then((r) => r.data)
 }
+
+// setFavorite 收藏/取消收藏（Job000143：媒体卡右键菜单用）。
+// 后端是 POST /media/:id/favorite { favorite: bool }，语义为**设为**该状态
+// （不是 toggle），故调用方需自己算好 next。
+export function setFavorite(id, favorite) {
+  return http.post(`/media/${id}/favorite`, { favorite }).then((r) => r.data)
+}

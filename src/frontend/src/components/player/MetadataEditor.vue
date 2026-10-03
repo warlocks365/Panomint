@@ -156,9 +156,18 @@ function pickCandidate(c) {
 }
 
 function onPicked(pos) {
-  // 地图选点返回的仍是 GCJ-02（与高德底图一致），由 coordFromAmap 标记提交时转换。
+  // 🔴 字段名：GeoPickerModal emit 的是 { lat, lon }（与 maplibre 的 LngLat 同名），
+  //    这里原本读 pos.lng → undefined → 表单里出现 NaN，
+  //    而弹层内的坐标显示正常（用的是 pos.lon），所以「看着对、存下去是 NaN」。
+  //    e2e 实测逮到：回填值 "39.909000, NaN"。
+  if (!pos || typeof pos.lat !== 'number' || typeof pos.lon !== 'number') {
+    errMsg.value = '选点结果无效，请重新选点'
+    pickerOpen.value = false
+    return
+  }
+  // 选点结果是 GCJ-02（与高德底图一致），由 coordFromAmap 标记提交时转 WGS-84。
   form.lat = pos.lat
-  form.lng = pos.lng
+  form.lng = pos.lon
   coordFromAmap.value = true
   pickerOpen.value = false
 }
