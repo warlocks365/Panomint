@@ -363,10 +363,41 @@ OIDC 回调：`{ "code", "state" }` → `{ "access_token", "refresh_token" }`（
 
 ### PATCH /media/:id
 
-更新备注 / 编辑参数（Job000005；v1.2 补录）。
-- 请求：`{ "notes"?: "...", "edits"?: {...} | null }`——**仅允许 `notes` / `edits` 两个字段**，其余字段一律拒收 400（白名单显式优于静默忽略）；两者至少提供其一。
+更新备注 / 编辑参数 / **地理与时间元数据**（Job000005 起；Job000143 补录元数据五字段）。
+- 请求：`{ "notes"?: "...", "edits"?: {...} | null, "taken_at"?: string, "place"?: string, "address"?: string, "lat"?: number, "lng"?: number }`——**仅允许这 6 个字段**，其余一律拒收 400（`DisallowUnknownFields`，白名单显式优于静默忽略）；至少提供其一。
 - `edits` 语义为**整体提交**（整对象替换；显式 `null` 即清空/重置），不做单维度合并——单维度合并走 `POST /media/:id/rotate`。
-- 响应：`{ "id", "notes"?, "edits"? }`；媒体不存在或已删除 404 `NOT_FOUND`。
+- 响应：`{ "id", "notes"?, "edits"?, "taken_at"?, "place"?, "address"?, "gps"? }`；媒体不存在或已删除 404 `NOT_FOUND`。
+
+#### 元数据三态语义（Job000143）
+
+| 请求形态 | 语义 |
+| --- | --- |
+| 字段**缺席** | **不动**该字段 |
+| `place`/`address` 为 `""` | **清空**（置 NULL） |
+| `taken_at` 为 `""` | **清空**（置 NULL） |
+| `lat`/`lng` 均为 `0` | **清空** `gps` |
+
+> 调用方**只提交变化了的字段**。全量提交会把未编辑但为空的字段清掉 —— 这是本端点最容易误用的一点。
+
+#### 字段与坐标系
+
+| 字段 | 语义 | 说明 |
+| --- | --- | --- |
+| `taken_at` | 拍摄时间 | **只接受 RFC3339**（带时区），如 `2026-08-15T14:30:00+08:00`；不带时区的字符串一律 400（猜时区会写错 8 小时且用户无感） |
+| `place` | 拍摄地**短地名** | 如「景山前街」。≤256 字 |
+| `address` | **详细地址** | 如「北京市东城区景山前街 4 号」。≤512 字 |
+| `lat` / `lng` | 坐标 | **必须成对**，只给一个 → 400 `BAD_METADATA`（半截坐标会污染 `geometry` 列且用户无感）。范围 `lat ∈ [-90,90]`、`lng ∈ [-180,180]`，越界 400 |
+
+> **坐标系声明头 `X-Coord-Source`**（Job000143）：
+> 库内 `media.gps` 是 `geometry(Point,4326)` = **WGS-84**；而高德地图的搜索候选与
+> 地图选点返回的是 **GCJ-02**（偏 300~500 米）。请求带 `X-Coord-Source: gcj02` 时
+> 服务端转成 WGS-84 再落库；**缺省一律假定已是 WGS-84**（EXIF / GPS 设备本就是 WGS-84，
+> 再转一次是不可逆的精度损失）。境外坐标不做转换（转换公式只对国内有效）。
+> 转换的**唯一收口点在服务端** `media.Handler.normalizeMetadataRequest`。
+>
+> 响应回的 `gps` 永远是 WGS-84，与 `GET /media/:id` 一致。
+
+> ⚠️ **本端点只写 `media` 表**：不写 EXIF、不改 sidecar、不触碰 `path` 指向的原媒体文件。
 
 ### POST /media/upload
 
