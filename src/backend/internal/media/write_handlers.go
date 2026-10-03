@@ -309,7 +309,15 @@ func (h *Handler) Patch(c *gin.Context) {
 // coordSource 坐标系来源标记。⚠️ 缺省（前端未声明）时**假定已是 WGS-84**：
 // 宁可让用户手动纠偏，也不能把已经是 WGS-84 的坐标（EXIF、GPS 设备）
 // 再转一次 —— 那是不可逆的精度损失。
-const coordSourceKey = "coord_source"
+// coordSourceKey 坐标系声明头。
+//
+// ⚠️ 必须是 **连字符** X-Coord-Source —— 这与前端 api/media.js 里
+// `headers: { 'X-Coord-Source': coordSource }` 以及契约文档一致。
+// 原先这里写成 "coord_source"（下划线），于是前端发的头在 net/http 的
+// canonical 规则下落到 "Coord-Source"，而代码查的是 "coord_source" →
+// **永远读不到 → GCJ-02 坐标从未被转换**（表现为地图上整体偏 300~500 米，
+// 但接口 200、无任何报错）。这类 bug 只有端到端断言才抓得到。
+const coordSourceKey = "X-Coord-Source"
 
 // c 仅用于读 X-Coord-Source 头（判坐标系来源），除此之外不碰请求体。
 func (h *Handler) normalizeMetadataRequest(

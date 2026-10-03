@@ -8,6 +8,7 @@ package media
 // 所以必须用「往返转换后回到原值」这类**可量化的断言**锁死。
 
 import (
+	"net/http"
 	"testing"
 
 	"panoalbum/internal/geocoord"
@@ -121,5 +122,33 @@ func TestCoordSourceHeaderSwitch(t *testing.T) {
 	doubleLng, doubleLat := geocoord.WGS84ToGCJ02(gotLng, gotLat)
 	if doubleLng == gotLng && doubleLat == gotLat {
 		t.Fatal("前置条件失效：正向转换本应产生偏移，无法区分标记行为")
+	}
+}
+
+// TestCoordSourceHeaderName 锁死坐标系声明头的**准确拼写**。
+//
+// 🔴 这条测试是被真实 bug 逼出来的：常量一度写成 "coord_source"（下划线），
+// 而前端发的是 "X-Coord-Source"（连字符）。net/http 会把两者分别规范化成
+// "Coord_Source" 与 "X-Coord-Source"，于是 GetHeader 永远取不到值 ——
+// GCJ-02 坐标**从未被转换**，地图上整体偏 300~500 米，而接口 200、零报错。
+//
+// 断言方式用 net/http 的 canonical 规则实测（建请求 → 设置头 → 读回），
+// 而不是简单比较字符串常量 —— 后者会在两边一起写错时「假通过」。
+func TestCoordSourceHeaderName(t *testing.T) {
+	if coordSourceKey != "X-Coord-Source" {
+		t.Fatalf("坐标系声明头名不符契约：got %q, want %q", coordSourceKey, "X-Coord-Source")
+	}
+	// 实测：前端（api/media.js）设置该头后，handler 能否读回。
+	req, _ := http.NewRequest("PATCH", "http://x/media/1", nil)
+	req.Header.Set("X-Coord-Source", "gcj02")
+	if got := req.Header.Get(coordSourceKey); got != "gcj02" {
+		t.Fatalf("前端设置 X-Coord-Source 后 handler 读不到（得到 %q）—— "+
+			"检查 net/http 规范化与常量拼写是否一致", got)
+	}
+	// 反向：设置为下划线形式不应被误接受（那是这次 bug 的错误形态）
+	req2, _ := http.NewRequest("PATCH", "http://x/media/1", nil)
+	req2.Header.Set("X-Coord_Source", "gcj02")
+	if got := req2.Header.Get(coordSourceKey); got == "gcj02" {
+		t.Fatal("下划线形式被误接受 —— 契约里的头名有歧义")
 	}
 }
