@@ -138,7 +138,22 @@ exec /usr/local/bin/worker-entrypoint.sh: no such file or directory
 
 ---
 
-## 六、验证记录
+## 六、镜像产物（Docker Hub）
+
+| 镜像 | `:1.9.3` 与 `:latest` digest（两者一致） |
+| --- | --- |
+| `warlocks/panomint-app` | `sha256:b3213ccb78c4505f21df7acf6bda540412c26302defba2ee3467df593a450cf3` |
+| `warlocks/panomint-worker` | `sha256:c715f10a7cd038bc4a29f8f2a2b136aa1402f67d161c824bdd4cd88a10b031b4` |
+| `warlocks/panomint-db` | `sha256:53f4e33716b0803896ce1f95ecd5b59bb799de1559be8fa37a9e9a26a9791f76` |
+| `warlocks/panomint-web` | `sha256:eaf0913eae6206b85abe18f4f7492c184856c86bfec6da2b121fdcd6a15c811a` |
+
+体积：app 1.16GB / db 658MB / worker 353MB / web 52.2MB。
+
+验证方式：**删除本地 `warlocks/*` 镜像后从 Hub 重新拉取**，比对 `RepoDigests` —— 不依赖本地 `inspect` 的推送记录，确保 Hub 侧真的可拉。
+
+---
+
+## 七、验证记录
 
 | 项 | 结果 |
 | --- | --- |
@@ -152,7 +167,7 @@ exec /usr/local/bin/worker-entrypoint.sh: no such file or directory
 
 ---
 
-## 七、遗留未做
+## 八、遗留未做
 
 | 项 | 原因 |
 | --- | --- |
