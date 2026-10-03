@@ -193,8 +193,13 @@ func TestMapSearchCacheKey(t *testing.T) {
 	if k1 == k2 {
 		t.Fatalf("不同 provider 的 key 必须不同，两者都是 %q", k1)
 	}
-	if k1 != "fwd:amap:西湖" || k2 != "fwd:nominatim:西湖" {
+	// key 含结构版本前缀（Job000143）：加字段后必须 bump 版本，
+	// 否则改动前写入的缓存会命中并返回**缺该字段**的旧载荷（address 永远为空）。
+	if k1 != "fwd:"+mapSearchCacheVer+":amap:西湖" || k2 != "fwd:"+mapSearchCacheVer+":nominatim:西湖" {
 		t.Fatalf("key 格式不符：%q / %q", k1, k2)
+	}
+	if !strings.Contains(k1, mapSearchCacheVer) {
+		t.Fatalf("key 必须含结构版本 %q，否则改字段后旧缓存会串味：%q", mapSearchCacheVer, k1)
 	}
 	// 与逆地理 rev: 及单结果正向 fwd:<query> 命名空间隔离
 	if strings.HasPrefix(k1, "rev:") || k1 == "fwd:西湖" {

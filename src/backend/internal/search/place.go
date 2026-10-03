@@ -91,6 +91,10 @@ type Place struct {
 	Name string
 	Lon  float64
 	Lat  float64
+	// Address 详细地址（Job000143）：Nominatim 的 display_name 本身就是完整
+	// 地址（如 "西湖, 杭州市, 浙江省, 中国"），与 Name（短名）语义不同，故分列。
+	// 上游无 display_name 时为空。
+	Address string
 }
 
 const (
@@ -246,7 +250,13 @@ func (g NominatimGeocoder) Search(ctx context.Context, query string, limit int) 
 		if name == "" {
 			name = query
 		}
-		out = append(out, Place{Name: name, Lon: lon, Lat: lat})
+		// Address 取 display_name（Nominatim 的完整地址），与短名 name 区分。
+		out = append(out, Place{
+			Name:    name,
+			Address: strings.TrimSpace(c.DisplayName),
+			Lon:     lon,
+			Lat:     lat,
+		})
 	}
 	return out, nil
 }

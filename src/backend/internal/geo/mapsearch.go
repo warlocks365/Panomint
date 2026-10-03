@@ -256,7 +256,14 @@ func (a nominatimForwarder) Forward(ctx context.Context, query string, limit int
 	}
 	hits := make([]ForwardHit, 0, len(places))
 	for _, p := range places {
-		hits = append(hits, ForwardHit{Name: p.Name, Lon: p.Lon, Lat: p.Lat, Provider: nominatimProvider})
+		// Address 透传（Nominatim 的 display_name）；上游无此字段时为空。
+		hits = append(hits, ForwardHit{
+			Name:     p.Name,
+			Lon:      p.Lon,
+			Lat:      p.Lat,
+			Provider: nominatimProvider,
+			Address:  p.Address,
+		})
 	}
 	return hits, nil
 }
@@ -317,16 +324,27 @@ func (c *pgCacheStore) Put(ctx context.Context, key, provider string, hits []For
 		key, provider, raw, fmt.Sprintf("%d seconds", int(ttl.Seconds())))
 }
 
-// MapSearchCacheKey /map/search 的缓存 key："fwd:<provider>:<query>"。
+// mapSearchCacheVer 缓存结构版本。
+//
+// 🔴 为什么需要（Job000143 实测踩到）：缓存 key 原本只含 provider+query，
+// **不含载荷结构版本**。给 ForwardHit 加 Address 字段后，**改动前写入的缓存**
+// 命中后仍缺该字段 —— 表现为「接口 200 但 address 永远是空」，且**清缓存前无法自愈**。
+// 凡是给缓存载荷**加字段**（或改语义），都必须 bump 这个版本号，让旧缓存自然失效、
+// 由新请求重建。这是缓存与结构演进的通用纪律，不是本次的特例。
+//
+// v2 = Job000143 起，ForwardHit 含 Address（详细地址）。
+const mapSearchCacheVer = "v2"
+
+// MapSearchCacheKey /map/search 的缓存 key："fwd:<ver>:<provider>:<query>"。
 // provider 参与 key，避免高德与 Nominatim 结果互相串味；与逆地理 "rev:..." 及
 // 单结果正向 "fwd:<query>"（search.CachedResolver）分属不同命名空间，互不覆盖。
 // key 列上限 128 字节，超长查询退化为查询词的 md5，避免写库失败。
 func MapSearchCacheKey(provider, query string) string {
 	q := normalizeQuery(query)
-	key := "fwd:" + provider + ":" + q
+	key := "fwd:" + mapSearchCacheVer + ":" + provider + ":" + q
 	if len(key) > 128 {
 		sum := md5.Sum([]byte(q))
-		key = "fwd:" + provider + ":" + hex.EncodeToString(sum[:])
+		key = "fwd:" + mapSearchCacheVer + ":" + provider + ":" + hex.EncodeToString(sum[:])
 	}
 	return key
 }
@@ -504,7 +522,17 @@ func (s *MapSearchService) Candidates(ctx context.Context, query, displayProvide
 	out := make([]MapCandidate, 0, len(hits))
 	for _, h := range hits {
 		lon, lat := toDisplayCoord(h, displayProvider)
-		out = append(out, MapCandidate{Name: h.Name, Lon: lon, Lat: lat, Provider: h.Provider})
+		// Job000143：透传 Address（详细地址）。漏掉这一处的话，
+		// ForwardHit 有值而 MapCandidate 永远为空 —— 表现与「缓存未刷新」完全一样，
+		// 极易误判（本次就是这样先怀疑了缓存 key）。三处都要齐：
+		// 上游解析 → ForwardHit.Address → **这里**。
+		out = append(out, MapCandidate{
+			Name:     h.Name,
+			Lon:      lon,
+			Lat:      lat,
+			Provider: h.Provider,
+			Address:  h.Address,
+		})
 	}
 	return out, strings.Join(degraded, "+")
 }

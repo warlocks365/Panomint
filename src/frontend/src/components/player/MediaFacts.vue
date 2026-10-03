@@ -26,14 +26,36 @@
         <dd>{{ formatSize(detail.filesize) }}</dd>
       </div>
       <div v-if="detail.place" class="info-row">
-        <dt>地点</dt>
+        <dt>拍摄地</dt>
         <dd>{{ detail.place }}</dd>
       </div>
-      <div v-else-if="gpsText" class="info-row">
+      <div v-if="detail.address" class="info-row">
+        <dt>详细地址</dt>
+        <dd>{{ detail.address }}</dd>
+      </div>
+      <div v-if="gpsText" class="info-row">
         <dt>GPS</dt>
         <dd>{{ gpsText }}</dd>
       </div>
     </dl>
+
+    <!-- Job000143：元数据编辑入口。四类媒体（照片/视频/360照片/360视频）共用本面板，
+         故此处一次改动即全覆盖，无需按类型分别实现。 -->
+    <button v-if="!editing" class="edit-meta-btn" type="button" data-testid="edit-metadata" @click="startEdit">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 20h4l10-10-4-4L4 16v4z" />
+        <path d="M13.5 6.5l4 4" />
+      </svg>
+      <span>编辑拍摄信息</span>
+    </button>
+
+    <MetadataEditor
+      v-else
+      :detail="detail"
+      @saved="onSaved"
+      @cancel="editing = false"
+    />
   </section>
 
   <section v-if="hasExif" class="info-section">
@@ -72,11 +94,32 @@
 <script setup>
 // MediaInfoPanel 拆解（Job000082）：基本信息 / EXIF / 视频信息 三个纯展示 section。
 // 只读 detail，无任何写操作或本地状态。
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import MetadataEditor from './MetadataEditor.vue'
 
 const props = defineProps({
   detail: { type: Object, required: true }
 })
+const emit = defineEmits(['metadata-saved'])
+
+const editing = ref(false)
+function startEdit() {
+  editing.value = true
+}
+function onSaved(resp) {
+  editing.value = false
+  // 用服务端归一化后的值就地更新面板，避免整条 detail 重拉（那会打断正在播放的媒体）
+  if (resp) {
+    const d = props.detail
+    if ('taken_at' in resp) d.taken_at = resp.taken_at
+    if ('place' in resp) d.place = resp.place
+    if ('address' in resp) d.address = resp.address
+    if ('gps' in resp) {
+      d.gps = resp.gps ? { lat: resp.gps.lat, lon: resp.gps.lng } : null
+    }
+  }
+  emit('metadata-saved', resp)
+}
 
 const is360 = computed(() => !!(props.detail?.is_360 || props.detail?.type === '360'))
 const typeLabel = computed(() => (is360.value ? '360 全景' : props.detail?.type === 'video' ? '视频' : '照片'))
@@ -165,5 +208,28 @@ function formatSize(bytes) {
   margin: 0;
   color: var(--color-text-primary);
   word-break: break-all;
+}
+
+/* 编辑入口：低调的胶囊按钮，与面板内既有的操作钮同语言 */
+.edit-meta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 5px 12px;
+  font-size: var(--font-size-xs, 11px);
+  font-family: inherit;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--color-border, rgba(74, 90, 106, 0.22));
+  cursor: pointer;
+  transition: color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.edit-meta-btn:hover {
+  color: var(--color-text-primary);
+  box-shadow: inset 0 0 0 1px var(--color-primary, #4a5a6a);
 }
 </style>

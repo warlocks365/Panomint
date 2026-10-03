@@ -26,3 +26,27 @@ export function getRestoreHistory({ limit = 50, cursor = '' } = {}) {
   if (cursor) params.cursor = cursor
   return http.get('/media/restore-history', { params }).then((r) => r.data)
 }
+
+// updateMetadata 编辑媒体元数据（Job000143：拍摄时间 / 拍摄地 / 详细地址 / GPS）。
+//
+// 三态语义（与后端 media.MetadataUpdate 一致）：
+//   - 字段不在 payload 里 → **不动**
+//   - 值为 ''（或 lat/lng 为 0）→ **清空**该字段
+//   - 其余 → 更新
+// 故「只改拍摄地」时只传 { place }，不要把其它字段一起带上（带上空串会清空它们）。
+//
+// coordSource：坐标系来源标记。'gcj02' 表示坐标来自高德底图（地图选点 / 高德搜索候选），
+// 后端会转成 WGS-84 再落库（库内 geometry(Point,4326) 是 WGS-84，**必须转换**，
+// 否则地图页聚合点整体偏 300~500 米）。
+// **不确定就传 'wgs84'**（或不传 = 默认 WGS-84）：把已经是 WGS-84 的坐标
+// 再转一次是不可逆的精度损失；反过来顶多让用户手动纠偏。
+export function updateMetadata(id, payload, { coordSource = 'wgs84' } = {}) {
+  return http
+    .patch(`/media/${id}`, payload, { headers: { 'X-Coord-Source': coordSource } })
+    .then((r) => r.data)
+}
+
+// fetchMediaDetail 拉单个媒体详情（元数据编辑的初始值来源）。
+export function fetchMediaDetail(id) {
+  return http.get(`/media/${id}`).then((r) => r.data)
+}
