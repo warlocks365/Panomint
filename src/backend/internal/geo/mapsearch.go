@@ -65,6 +65,10 @@ type MapCandidate struct {
 	Lon      float64 `json:"lon"`
 	Lat      float64 `json:"lat"`
 	Provider string  `json:"provider"` // amap|nominatim，标注来源
+	// Address 详细地址（Job000143）：供媒体元数据编辑使用。
+	// 高德 = formatted_address；Nominatim = display_name。上游无此字段时为空，
+	// 前端应回退为「仅填 name + 坐标」。
+	Address string `json:"address,omitempty"`
 }
 
 // ForwardHit 上游返回的单条候选；坐标为**上游原生坐标系**（amap=GCJ-02/nominatim=WGS-84）。
@@ -74,6 +78,9 @@ type ForwardHit struct {
 	Lon      float64 `json:"lon"`
 	Lat      float64 `json:"lat"`
 	Provider string  `json:"provider"`
+	// Address 详细地址（Job000143）：高德 formatted_address / Nominatim display_name。
+	// 与 Name 分开：Name 是**短地名**（供 place 列），Address 是完整地址（供 address 列）。
+	Address string `json:"address,omitempty"`
 }
 
 // AmapForwarder 高德正向地理编码能力。Key/Secret 逐次注入（而非实例字段），
@@ -179,6 +186,10 @@ func (g *AmapForwardGeocoder) ForwardWithKey(ctx context.Context, key, secret, q
 		if !ok {
 			continue // 单条候选坐标缺失/非法：跳过，不影响其余候选
 		}
+		// ⚠️ Name 语义**保持不变**（= formatted_address 完整地址）：地图页的
+		// MapSearchBox 直接展示 c.name，改成短地名会变更地图搜索的既有行为
+		// （超出 Job000143 范围）。短地名的提取由调用方按需调 ShortPlaceName，
+		// 媒体元数据编辑（internal/media）就是那个调用方。
 		name := strings.TrimSpace(gc.FormattedAddress)
 		if name == "" {
 			name = joinNonEmpty(gc.Province, gc.City, gc.District)
@@ -186,7 +197,16 @@ func (g *AmapForwardGeocoder) ForwardWithKey(ctx context.Context, key, secret, q
 		if name == "" {
 			name = query
 		}
-		hits = append(hits, ForwardHit{Name: name, Lon: lng, Lat: lat, Provider: amapProvider})
+		hits = append(hits, ForwardHit{
+			Name:     name,
+			Lon:      lng,
+			Lat:      lat,
+			Provider: amapProvider,
+			// Job000143：完整地址单独给前端，短地名由前端调 media 侧接口或本地提取。
+			// 这里给的是 formatted_address 原文（不是 ShortPlaceName 的结果），
+			// 保持「MapCandidate.Address = 完整地址」这一单一语义。
+			Address: strings.TrimSpace(gc.FormattedAddress),
+		})
 		if len(hits) >= limit {
 			break
 		}

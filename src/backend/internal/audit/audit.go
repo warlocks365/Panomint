@@ -127,6 +127,17 @@ const (
 	// 现有数据反推。用户侧的直接后果是工具箱页的「已恢复」标签没有数据来源。
 	ActionMediaRestore = "media.restore"
 
+	// ActionMediaMetadataEdit 媒体地理/时间元数据编辑（Job000143）。
+	//
+	// 必须单列一个动作而不能并入 media.delete：语义正交 —— delete 改的是
+	// 「媒体是否可见」，本动作改的是「媒体被描述成什么样」，两者生命周期独立
+	// （编辑会反复发生，删除只发生一次）。
+	//
+	// ⚠️ detail 键名必须避开 audit.RedactDetail 的敏感子串（含 token/hash/secret 等）。
+	//    故此处**不记录坐标明文**，只记「改了哪几个字段」—— 坐标属半敏感位置数据，
+	//    且审计表无删除端点（不可撤回），记明文等于永久留档。
+	ActionMediaMetadataEdit = "media.metadata_edit"
+
 	// ActionSettingsPatch 系统配置变更。
 	ActionSettingsPatch = "admin.settings.patch"
 	// ActionIndexRebuild 索引重建。

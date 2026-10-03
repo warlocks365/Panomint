@@ -71,6 +71,9 @@ type Detail struct {
 	Codec         *string        `json:"codec,omitempty"`
 	GPS           *Geo           `json:"gps,omitempty"`
 	Place         *string        `json:"place,omitempty"`
+	// Address 详细地址（Job000143）：与 Place（短地名）分列。
+	// 迁移 00047 起可由用户编辑；迁移前的内容由 place 搬迁而来。
+	Address       *string        `json:"address,omitempty"`
 	Is360         bool           `json:"is_360"`
 	Projection    *string        `json:"projection,omitempty"`
 	ThumbnailSM   *string        `json:"thumbnail_sm,omitempty"`
@@ -115,7 +118,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 		       m.taken_at, m.width, m.height, m.codec,
 		       CASE WHEN m.gps IS NOT NULL THEN ST_Y(m.gps) END,
 		       CASE WHEN m.gps IS NOT NULL THEN ST_X(m.gps) END,
-		       m.place, m.is_360, m.projection,
+		       m.place, m.address, m.is_360, m.projection,
 		       m.thumbnail_sm, m.thumbnail_md, m.thumbnail_lg, m.hls_master,
 		       m.filesize, m.rating, m.live_photo_pair_id, m.notes, m.edits,
 		       m.camera_make, m.camera_model, m.lens_model, m.focal_length, m.aperture,
@@ -126,7 +129,7 @@ func (s *Store) GetDetail(ctx context.Context, id string) (*Detail, error) {
 		FROM media m WHERE m.id = $1 AND m.deleted_at IS NULL`, id,
 	).Scan(&d.ID, &d.Type, &d.Space, &d.OwnerID, &d.Path, &d.FolderPath, &d.Filename,
 		&d.TakenAt, &d.Width, &d.Height, &d.Codec, &lat, &lng,
-		&d.Place, &d.Is360, &d.Projection,
+		&d.Place, &d.Address, &d.Is360, &d.Projection,
 		&d.ThumbnailSM, &d.ThumbnailMD, &d.ThumbnailLG, &d.HLSMaster,
 		&d.Filesize, &d.Rating, &d.LivePhotoPair, &d.Notes, &editsRaw,
 		&d.Exif.CameraMake, &d.Exif.CameraModel, &d.Exif.LensModel, &d.Exif.FocalLength,

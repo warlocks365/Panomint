@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"panoalbum/internal/audit"
+	"panoalbum/internal/geocoord"
 	"panoalbum/internal/httperr"
 	"panoalbum/internal/pgxutil"
 	"panoalbum/internal/queue"
@@ -181,15 +184,26 @@ func (h *Handler) Patch(c *gin.Context) {
 	var req struct {
 		Notes *string         `json:"notes"`
 		Edits json.RawMessage `json:"edits"`
+		// Job000143：地理与时间元数据。指针语义 = 「字段缺席则不动」；
+		// 清空靠传空串 / 坐标传 0（见 normalizeMetadataRequest 的三态归一）。
+		TakenAt *string  `json:"taken_at"` // RFC3339，如 2026-08-15T14:30:00+08:00
+		Place   *string  `json:"place"`    // 拍摄地短地名
+		Address *string  `json:"address"`  // 详细地址
+		Lat     *float64 `json:"lat"`      // ⚠️ 坐标系见 normalizeMetadataRequest
+		Lng     *float64 `json:"lng"`
 	}
 	dec := json.NewDecoder(c.Request.Body)
 	dec.DisallowUnknownFields() // 设计裁决：非白名单字段一律拒收（显式优于静默忽略）
 	if err := dec.Decode(&req); err != nil {
-		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "仅支持更新 notes / edits 字段")
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST",
+			"仅支持更新 notes / edits / taken_at / place / address / lat / lng 字段")
 		return
 	}
-	if req.Notes == nil && req.Edits == nil {
-		errResp(c, http.StatusBadRequest, "BAD_REQUEST", "缺少 notes 或 edits 字段")
+	if req.Notes == nil && req.Edits == nil &&
+		req.TakenAt == nil && req.Place == nil && req.Address == nil &&
+		req.Lat == nil && req.Lng == nil {
+		errResp(c, http.StatusBadRequest, "BAD_REQUEST",
+			"缺少 notes / edits / taken_at / place / address / lat / lng 中的至少一项")
 		return
 	}
 	id := c.Param("id")
@@ -232,7 +246,136 @@ func (h *Handler) Patch(c *gin.Context) {
 		}
 		h.enqueueThumbRegen(c, id)
 	}
+
+	// ---- Job000143：地理与时间元数据 ----
+	// 与 notes/edits 分开处理：前两者是「内容」改动，本段是「定位/时间」改动，
+	// 校验规则（三态、坐标成对、范围）完全不同，混在一起会让错误提示无法定位。
+	meta, fields, mErr := h.normalizeMetadataRequest(c, req.TakenAt, req.Place, req.Address, req.Lat, req.Lng)
+	if mErr != nil {
+		errResp(c, http.StatusBadRequest, "BAD_METADATA", mErr.Error())
+		return
+	}
+	if !meta.Empty() {
+		if err := h.Store.SetMetadata(c.Request.Context(), id, meta); err != nil {
+			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
+			return
+		}
+		// 回显归一化后的值（坐标已转 WGS-84，与库里存的以及 GET 详情返回的一致）。
+		if meta.SetTakenAt {
+			if meta.TakenAt.IsZero() {
+				resp["taken_at"] = nil
+			} else {
+				resp["taken_at"] = meta.TakenAt
+			}
+		}
+		if meta.SetPlace {
+			if meta.Place == "" {
+				resp["place"] = nil
+			} else {
+				resp["place"] = meta.Place
+			}
+		}
+		if meta.SetAddress {
+			if meta.Address == "" {
+				resp["address"] = nil
+			} else {
+				resp["address"] = meta.Address
+			}
+		}
+		if meta.SetGPS {
+			if meta.Lat == 0 && meta.Lng == 0 {
+				resp["gps"] = nil
+			} else {
+				resp["gps"] = Geo{Lat: meta.Lat, Lng: meta.Lng}
+			}
+		}
+		// 审计：只记「改了哪些字段」，**不记坐标明文**（见 ActionMediaMetadataEdit 注释）。
+		h.record(c, audit.ActionMediaMetadataEdit, audit.TargetMedia, id,
+			map[string]any{"fields": fields})
+	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// normalizeMetadataRequest 把 PATCH 请求的元数据字段归一化成 MetadataUpdate。
+//
+// 职责：
+//  1. 三态判定（缺席=不动 / 空串或 0=清空 / 有值=更新）；
+//  2. **坐标系统一**：库内 media.gps 是 geometry(Point,4326)=WGS-84，
+//     而高德地图的搜索候选与选点坐标是 **GCJ-02**。前端不做转换（它不知道
+//     底图用的是哪套坐标），由本函数按来源标记转换后入库 —— 这是**唯一收口点**，
+//     漏一处就会让地图页 geo/clusters 聚合错位 300~500 米。
+//  3. 委托 NormalizeMetadata 做范围/长度校验。
+//
+// coordSource 坐标系来源标记。⚠️ 缺省（前端未声明）时**假定已是 WGS-84**：
+// 宁可让用户手动纠偏，也不能把已经是 WGS-84 的坐标（EXIF、GPS 设备）
+// 再转一次 —— 那是不可逆的精度损失。
+const coordSourceKey = "coord_source"
+
+// c 仅用于读 X-Coord-Source 头（判坐标系来源），除此之外不碰请求体。
+func (h *Handler) normalizeMetadataRequest(
+	c *gin.Context, takenAt, place, address *string, lat, lng *float64) (MetadataUpdate, []string, error) {
+	var m MetadataUpdate
+	var fields []string
+
+	if takenAt != nil {
+		m.SetTakenAt = true
+		fields = append(fields, "taken_at")
+		s := strings.TrimSpace(*takenAt)
+		if s == "" {
+			m.TakenAt = time.Time{} // 清空
+		} else {
+			// 接受 RFC3339（带时区）。不带时区的字符串一律拒：
+			// 猜时区会把时间写错 8 小时，且用户无从察觉。
+			t, err := time.Parse(time.RFC3339, s)
+			if err != nil {
+				return m, nil, fmt.Errorf("拍摄时间格式非法：需 RFC3339（如 2026-08-15T14:30:00+08:00）")
+			}
+			m.TakenAt = t
+		}
+	}
+	if place != nil {
+		m.SetPlace = true
+		m.Place = *place
+		if strings.TrimSpace(m.Place) != "" {
+			fields = append(fields, "place")
+		}
+	}
+	if address != nil {
+		m.SetAddress = true
+		m.Address = *address
+		if strings.TrimSpace(m.Address) != "" {
+			fields = append(fields, "address")
+		}
+	}
+	if lat != nil || lng != nil {
+		if lat == nil || lng == nil {
+			// 明确区分这个错误：半截坐标写入后用户完全无感（另一半保持旧值），
+			// 且下次地图选点会把它当成合法值继续用。
+			return m, nil, fmt.Errorf("经纬度必须成对提供：lat 与 lng 须同时给或同时不给")
+		}
+		m.SetGPS = true
+		m.Lat, m.Lng = *lat, *lng
+		// **坐标系收口**：前端传的若为 GCJ-02（高德底图），转成 WGS-84 落库。
+		// 依据是请求头 X-Coord-Source: gcj02（见前端 GeoPicker/搜索调用点）。
+		if strings.EqualFold(strings.TrimSpace(c.GetHeader(coordSourceKey)), "gcj02") {
+			if geocoord.OutOfChina(m.Lng, m.Lat) {
+				m.Lng, m.Lat = geocoord.GCJ02ToWGS84(m.Lng, m.Lat)
+			}
+			// 境外坐标 GCJ-02 与 WGS-84 等价，不转换（转换公式只对国内有效）
+		}
+		if m.Lat != 0 || m.Lng != 0 {
+			fields = append(fields, "gps")
+		}
+	}
+
+	norm, err := NormalizeMetadata(m)
+	if err != nil {
+		if errors.Is(err, ErrHalfCoords) {
+			return m, nil, fmt.Errorf("经纬度必须成对提供：lat 与 lng 须同时给或同时不给")
+		}
+		return m, nil, err
+	}
+	return norm, fields, nil
 }
 
 // Rotate POST /media/:id/rotate {op:"rotate|crop|auto", angle?, rect?}（契约 §3，非破坏 sidecar）

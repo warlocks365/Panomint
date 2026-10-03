@@ -305,6 +305,7 @@ func TestActionRegistryIsValid(t *testing.T) {
 		"ActionMediaDelete":   ActionMediaDelete,
 		"ActionMediaPurge":    ActionMediaPurge,
 		"ActionMediaRestore":  ActionMediaRestore,
+		"ActionMediaMetadataEdit": ActionMediaMetadataEdit, // Job000143
 		"ActionSettingsPatch": ActionSettingsPatch,
 		"ActionIndexRebuild":  ActionIndexRebuild,
 

@@ -327,6 +327,18 @@ var registeredMediaQueries = map[string]mediaQueryRegistration{
 		Reason:     "写路径回写（rating/notes/edits/软删/恢复），全部在 handler 先 checkAccess 之后才调用；不返回 media 内容。",
 		Evidence:   "media/write.go:52/65/143/199/219；调用方 write_handlers.go（Favorite/Rating/Rotate/Delete/Restore）。",
 	},
+	// Job000143 媒体元数据编辑（拍摄时间/地点/详细地址/GPS）。
+	// 判定准则「会不会把 media 行 / 内容返回给终端用户」= 不会：
+	// 本语句只 UPDATE 四个元数据列、不带 RETURNING，响应体由 handler 用请求值回显
+	// （已转 WGS-84 的坐标等），不读取任何 media 内容；
+	// 调用前同样经过 h.checkAccess（write_handlers.go Patch 的元数据段），
+	// 与既有 notes/edits 写路径同一条鉴权链。
+	regKey("internal/media/metadata.go", "UPDATE media"): {
+		UserFacing: false,
+		Reason: "元数据写路径（taken_at/place/address/gps），仅 UPDATE 四列且无 RETURNING；" +
+			"调用前已过 h.checkAccess（与 notes/edits 同一鉴权链），不返回 media 内容。",
+		Evidence: "media/metadata.go SetMetadata；write_handlers.go Patch 的 Job000143 段。",
+	},
 	regKey("internal/media/write.go", "DELETE FROM media"): {
 		UserFacing: false,
 		Reason: "Purge 永久删除写路径，调用前已过 h.checkAccess（write_handlers.go Purge），只 RETURNING path 供清文件与审计。" +

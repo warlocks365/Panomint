@@ -1,4 +1,4 @@
-package geo
+package geocoord
 
 import (
 	"math"
@@ -43,18 +43,5 @@ func TestWGS84ToGCJ02(t *testing.T) {
 	lng, lat := WGS84ToGCJ02(139.6917, 35.6895) // 东京
 	if lng != 139.6917 || lat != 35.6895 {
 		t.Fatal("境外坐标不应偏移")
-	}
-}
-
-// TestGridSize 网格尺寸随 zoom 减半。
-func TestGridSize(t *testing.T) {
-	if GridSize(0) != 180.0 {
-		t.Fatalf("z0 网格 = %v", GridSize(0))
-	}
-	if GridSize(1) != 90.0 {
-		t.Fatalf("z1 网格 = %v", GridSize(1))
-	}
-	if GridSize(20) != 0.0005 {
-		t.Fatalf("z20 应触底 0.0005，= %v", GridSize(20))
 	}
 }
