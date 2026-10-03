@@ -84,7 +84,11 @@ COMMENT ON COLUMN media.place IS
 
 -- +goose Down
 -- +goose StatementBegin
--- 仅删新增列。place 的原值可从 address 回填（见文件头说明），
--- 故 Down 不做数据回填 —— 避免在用户已编辑过 place 之后被旧数据覆盖。
+-- 🔴 回滚**必须先回填 place 再删列**，否则 Up 的 1.4 已经把 place 置 NULL，
+-- 那些行的详细地址会随 address 列一起消失 —— **不可逆的数据丢失**。
+--
+-- 守卫 `place IS NULL` 解决「怕覆盖用户已编辑的 place」这个原本的顾虑：
+-- 只补 NULL 行，用户改过的非空 place 一律不碰。
+UPDATE media SET place = address WHERE place IS NULL AND address IS NOT NULL;
 ALTER TABLE media DROP COLUMN IF EXISTS address;
 -- +goose StatementEnd

@@ -155,7 +155,7 @@ function confirm() {
 
 .gp-panel {
   width: min(560px, calc(100vw - 32px));
-  background: var(--color-surface, #f4f1ed);
+  background: var(--color-surface);
   border-radius: 14px;
   box-shadow: var(--shadow-lift);
   overflow: hidden;
@@ -188,23 +188,23 @@ function confirm() {
 }
 
 .gp-x:hover {
-  background: var(--color-bg, #e9e4de);
+  background: var(--color-bg);
 }
 
 .gp-map {
   height: 340px;
-  background: var(--color-bg, #e9e4de);
+  background: var(--color-bg);
 }
 
 .gp-hint {
   margin: 0;
   padding: 10px 14px 0;
-  font-size: var(--font-size-xs, 11px);
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
 
 .gp-coord {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   margin-left: 6px;
   color: var(--color-text-primary);
 }
@@ -220,15 +220,15 @@ function confirm() {
   font-size: var(--font-size-sm);
   font-family: inherit;
   color: var(--color-text-primary);
-  background: var(--color-bg, #e9e4de);
+  background: var(--color-bg);
   border: none;
   border-radius: 999px;
   cursor: pointer;
 }
 
 .gp-btn--primary {
-  color: var(--color-on-primary, #f4f1ed);
-  background: var(--color-primary, #4a5a6a);
+  color: var(--color-on-primary);
+  background: var(--color-primary);
 }
 
 .gp-btn:disabled {

@@ -69,6 +69,16 @@ type MapCandidate struct {
 	// 高德 = formatted_address；Nominatim = display_name。上游无此字段时为空，
 	// 前端应回退为「仅填 name + 坐标」。
 	Address string `json:"address,omitempty"`
+	// ShortPlace 拍摄地**短地名**（Job000143 用户裁决：取完整地址的尾部具体地标，
+	// 如「北京市东城区景山前街 4 号」→ 「景山前街」，不取头部行政区名）。
+	//
+	// 独立于 Name：Name 保持完整地址（地图页 MapSearchBox 直接渲染 c.name，
+	// 改它会变更既有展示，属超范围）。前端保存元数据时 place 取本字段、
+	// address 取 Address —— 没有这一项，place 会被写成完整地址，
+	// 退化成迁移 00047 之前的形态。
+	//
+	// 提取失败时为空串，前端应留空让用户手填，不猜。
+	ShortPlace string `json:"short_place,omitempty"`
 }
 
 // ForwardHit 上游返回的单条候选；坐标为**上游原生坐标系**（amap=GCJ-02/nominatim=WGS-84）。
@@ -532,6 +542,10 @@ func (s *MapSearchService) Candidates(ctx context.Context, query, displayProvide
 			Lat:      lat,
 			Provider: h.Provider,
 			Address:  h.Address,
+			// ShortPlace 取尾部地标（用户 2026-10-03 裁决）。
+			// ⚠️ 缓存里存的 h.Name 可能是 Nominatim 源（WGS-84 显示坐标系），
+			//    但那不影响字符串提取 —— 提取是纯字符串处理，与坐标无关。
+			ShortPlace: ShortPlaceName(h.Name),
 		})
 	}
 	return out, strings.Join(degraded, "+")

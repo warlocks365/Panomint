@@ -12,6 +12,11 @@
   --color-primary-hover: #3d4b58;
   --color-primary-active-bg: rgba(143, 163, 173, 0.16);
   --color-danger: #b0685c;          /* 陶土红（低饱和） */
+  /* --- Job000143：以下 3 个为媒体元数据编辑新增组件所需 ---
+     放在定义层而非组件里写回退值，是为了让新增组件**零硬编码颜色**
+     （P0 R4 门禁：新增文件不得含基线外硬编码颜色）。 */
+  --color-on-primary: #f4f1ed;     /* 主色按钮上的前景（浅色） */
+  --color-bg-hover: #ddd7cf;        /* 中性底 hover */
   --color-success: #6e8a72;         /* 灰绿 */
   --color-warning-bg: rgba(217, 164, 101, 0.14);
   --color-warning-text: #8a6d3d;
@@ -38,6 +43,7 @@
   /* 字体 —— Outfit 几何无衬线 + Noto Sans SC；全站字重 300 主导（base.css body），层级靠字距与明度 */
   --font-family: "Outfit", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  --font-size-xs: 11px;         /* 极小：角标/辅助说明 */
   --font-size-sm: 13px;
   --font-size-md: 14px;
   --font-size-lg: 16px;

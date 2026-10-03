@@ -758,3 +758,40 @@ func TestProvidersHandler(t *testing.T) {
 		t.Errorf("/map/providers 不得包含密钥字段: %s", w.Body.String())
 	}
 }
+
+// TestCandidatesExposeShortPlace 锁死 ShortPlace 的**接线**（真跑 Candidates）。
+//
+// 🔴 这条测试是被真实缺陷逼出来的：ShortPlaceName 写了 195 行 + 161 行测试，
+// 但**全仓零调用方** —— /map/search 的候选只给 name(=完整地址) 与
+// address(=同一个完整地址)，于是前端保存时 place === address，
+// 短地名功能等于没上线（且退化成迁移 00047 之前的形态）。
+//
+// ⚠️ 断言方式的关键：必须**真调用 MapSearchService.Candidates**。
+// 自己重一遍字段映射的写法锁不住回归 —— 漏掉 Candidates 里那行赋值时它照样通过。
+// 只测 ShortPlaceName 本身同样不够（那是纯函数，与接线无关）。
+func TestCandidatesExposeShortPlace(t *testing.T) {
+	amap := &fakeAmapForwarder{hits: []ForwardHit{{
+		Name:     "北京市东城区景山前街 4 号",
+		Lon:      116.403744,
+		Lat:      39.910103,
+		Provider: amapProvider,
+		Address:  "北京市东城区景山前街 4 号",
+	}}}
+	svc, _ := newTestService(amap, nil, "k")
+
+	got, _ := svc.Candidates(context.Background(), "景山前街", amapProvider)
+	if len(got) == 0 {
+		t.Fatal("候选为空：fakeAmapForwarder 未能返回结果（测试装配有问题，不是产品问题）")
+	}
+	c := got[0]
+	if c.ShortPlace != "景山前街" {
+		t.Fatalf("Candidates 未填充 ShortPlace 或取值不对:\n  got  %q\n  want %q",
+			c.ShortPlace, "景山前街")
+	}
+	// 关键回归点：place(ShortPlace) 与 address(完整地址) **必须不同** ——
+	// 两者相同时说明又退回了「place 存完整地址」的老形态。
+	if c.ShortPlace == c.Address {
+		t.Fatalf("ShortPlace 与 Address 相同（都是 %q）—— 短地名未生效，"+
+			"媒体 place 会被写成完整地址", c.ShortPlace)
+	}
+}

@@ -132,7 +132,7 @@ func (s *Store) SetMetadata(ctx context.Context, id string, m MetadataUpdate) er
 		gpsWKT = fmt.Sprintf("POINT(%g %g)", m.Lng, m.Lat)
 	}
 
-	_, err := s.Pool.Exec(ctx, `
+	ct, err := s.Pool.Exec(ctx, `
 		UPDATE media SET
 			taken_at = CASE WHEN $2::boolean THEN $3::timestamptz ELSE taken_at END,
 			place    = CASE WHEN $4::boolean THEN nullif($5::varchar, '') ELSE place END,
@@ -149,5 +149,17 @@ func (s *Store) SetMetadata(ctx context.Context, id string, m MetadataUpdate) er
 		m.SetAddress, address,
 		m.SetGPS, gpsWKT,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// 0 行 = 媒体不存在**或已软删**（回收站）。
+	//
+	// ⚠️ 必须检查，否则对回收站媒体发 PATCH 会返回 200 且回显新值，
+	// 但实际一行都没写 —— 前端据此显示「已保存」，刷新即回退，
+	// 用户完全无法察觉丢失。同包的 SetNotes/SetEdits 都有此检查，
+	// 这里漏了会让两条写路径口径不一致。
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

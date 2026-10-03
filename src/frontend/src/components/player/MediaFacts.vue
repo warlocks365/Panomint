@@ -119,7 +119,11 @@ function onSaved(resp) {
     if ('place' in resp) d.place = resp.place
     if ('address' in resp) d.address = resp.address
     if ('gps' in resp) {
-      d.gps = resp.gps ? { lat: resp.gps.lat, lon: resp.gps.lng } : null
+      // 两个键都写上：后端发 lng，但既有代码有读 lon 的地方。
+      // 只写一个会让「保存过一次」与「没保存过」表现不同（实测踩过）。
+      d.gps = resp.gps
+        ? { lat: resp.gps.lat, lng: resp.gps.lng, lon: resp.gps.lng }
+        : null
     }
   }
   emit('metadata-saved', resp)
@@ -240,19 +244,19 @@ function formatSize(bytes) {
   gap: 6px;
   margin-top: 10px;
   padding: 5px 12px;
-  font-size: var(--font-size-xs, 11px);
+  font-size: var(--font-size-xs);
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
   border: none;
   border-radius: 999px;
-  box-shadow: inset 0 0 0 1px var(--color-border, rgba(74, 90, 106, 0.22));
+  box-shadow: inset 0 0 0 1px var(--color-border));
   cursor: pointer;
   transition: color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .edit-meta-btn:hover {
   color: var(--color-text-primary);
-  box-shadow: inset 0 0 0 1px var(--color-primary, #4a5a6a);
+  box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 </style>

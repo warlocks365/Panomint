@@ -46,7 +46,13 @@ function snapshot() {
     place: props.detail?.place || '',
     address: props.detail?.address || '',
     lat: props.detail?.gps?.lat ?? null,
-    lng: props.detail?.gps?.lon ?? null
+    // ⚠️ 键名必须是 **lng**（后端 media.Detail.Geo 的 json tag）。
+    // 原来读 gps.lon → 恒 undefined → form.lng=null 而 form.lat 有真值 →
+    //   ① 编辑弹窗对**有 GPS 的媒体**显示「没有数据」；
+    //   ② 一旦用户碰了「地图选点」又没重新选，coordsChanged 判定成立，
+    //      走 empty 分支发 lat:0,lng:0 → **把已有 GPS 静默清空**。
+    // 兼容 lon/longitude：不同接口的形状不完全一致（MediaFacts 也有同款兼容）。
+    lng: props.detail?.gps?.lng ?? props.detail?.gps?.lon ?? null
   }
 }
 
@@ -144,7 +150,12 @@ async function doSearch(term) {
 // pickCandidate 一次填三项：拍摄地取 name（用户在搜索框输入的就是他想记的名字）、
 // 详细地址取 address、坐标取 lon/lat（高德 GCJ-02）。
 function pickCandidate(c) {
-  form.place = c.name || ''
+  // place 取 **short_place**（后端提取的尾部地标，如「景山前街」），
+  // 退回 name 只是兜底 —— name 是完整地址，直接用它会让 place 又存成
+  // 「北京市东城区景山前街 4 号」，与「详细地址」列完全重复
+  // （那正是迁移 00047 之前的老形态）。
+  // short_place 为空 = 后端提取失败（地址无路/街结构），此时留空让用户手填，不猜。
+  form.place = c.short_place || ''
   if (c.address) form.address = c.address
   if (typeof c.lat === 'number' && typeof c.lon === 'number') {
     form.lat = c.lat
@@ -198,9 +209,19 @@ async function save() {
 
   const coordsChanged = form.lat !== o.lat || form.lng !== o.lng
   if (coordsChanged) {
+    // 🛡️ 半截坐标护栏：**只有「两端都没值」才算清空**。
+    // 「一端有值一端为 null」是数据异常（键名不匹配、选点被中断），
+    // 此时清空 GPS = 静默删掉用户已有的位置信息，且不可恢复。
+    // 正确做法是拒绝提交并提示，让用户重选。
+    const halfEmpty =
+      (form.lat === null) !== (form.lng === null)
+    if (halfEmpty) {
+      errMsg.value = '经纬度不完整，请重新选择位置或点「清除」'
+      return
+    }
     const empty = form.lat === null || form.lng === null
     if (empty) {
-      payload.lat = 0 // 后端约定 0 = 清空 gps
+      payload.lat = 0 // 后端约定 0 = 清空 gps（两端皆空才清）
       payload.lng = 0
     } else {
       payload.lat = form.lat
@@ -323,7 +344,7 @@ async function save() {
   gap: 10px;
   margin-top: 10px;
   padding: 12px;
-  background: var(--color-surface, #f4f1ed);
+  background: var(--color-surface);
   border-radius: 10px;
   box-shadow: var(--shadow-card);
 }
@@ -355,7 +376,7 @@ async function save() {
   font-size: var(--font-size-sm);
   font-family: inherit;
   color: var(--color-text-primary);
-  background: var(--color-bg, #e9e4de);
+  background: var(--color-bg);
   border: 1px solid transparent;
   border-radius: 8px;
   outline: none;
@@ -363,7 +384,7 @@ async function save() {
 }
 
 .md-input:focus {
-  border-color: var(--color-primary, #4a5a6a);
+  border-color: var(--color-primary);
 }
 
 .md-cands {
@@ -372,7 +393,7 @@ async function save() {
   gap: 2px;
   margin: -4px 0 0;
   padding: 4px;
-  background: var(--color-surface, #f4f1ed);
+  background: var(--color-surface);
   border-radius: 8px;
   box-shadow: var(--shadow-lift);
   max-height: 190px;
@@ -394,7 +415,7 @@ async function save() {
 }
 
 .md-cand:hover {
-  background: var(--color-bg, #e9e4de);
+  background: var(--color-bg);
 }
 
 .md-cand-name {
@@ -403,7 +424,7 @@ async function save() {
 }
 
 .md-cand-addr {
-  font-size: var(--font-size-xs, 11px);
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
 
@@ -415,19 +436,19 @@ async function save() {
 }
 
 .md-gps-text {
-  font-family: var(--font-mono, monospace);
-  font-size: var(--font-size-xs, 11px);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
 
 .md-hint {
   margin: 0;
-  font-size: var(--font-size-xs, 11px);
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
 }
 
 .md-hint--err {
-  color: var(--color-danger, #b0685c);
+  color: var(--color-danger);
 }
 
 .md-actions {
@@ -441,7 +462,7 @@ async function save() {
   font-size: var(--font-size-sm);
   font-family: inherit;
   color: var(--color-text-primary);
-  background: var(--color-bg, #e9e4de);
+  background: var(--color-bg);
   border: none;
   border-radius: 999px; /* 胶囊：与项目既有的分段切换控件同语言 */
   cursor: pointer;
@@ -449,20 +470,20 @@ async function save() {
 }
 
 .md-btn:hover {
-  background: var(--color-bg-hover, #ddd7cf);
+  background: var(--color-bg-hover);
 }
 
 .md-btn--ghost {
   padding: 4px 10px;
-  font-size: var(--font-size-xs, 11px);
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   background: transparent;
-  box-shadow: inset 0 0 0 1px var(--color-border, rgba(74, 90, 106, 0.22));
+  box-shadow: inset 0 0 0 1px var(--color-border));
 }
 
 .md-btn--primary {
-  color: var(--color-on-primary, #f4f1ed);
-  background: var(--color-primary, #4a5a6a);
+  color: var(--color-on-primary);
+  background: var(--color-primary);
 }
 
 .md-btn:disabled {

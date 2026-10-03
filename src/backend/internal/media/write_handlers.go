@@ -257,6 +257,13 @@ func (h *Handler) Patch(c *gin.Context) {
 	}
 	if !meta.Empty() {
 		if err := h.Store.SetMetadata(c.Request.Context(), id, meta); err != nil {
+			// 0 行 = 媒体已进回收站（soft delete），与 notes/edits 路径同口径返回 404。
+			// 不能吞成 500：那会让前端弹「更新失败」而用户以为是网络问题，
+			// 实际是他刚删掉的东西不能再改。
+			if errors.Is(err, ErrNotFound) {
+				errResp(c, http.StatusNotFound, "NOT_FOUND", "媒体不存在或已删除")
+				return
+			}
 			httperr.Fail(c, http.StatusInternalServerError, "UPDATE_FAILED", "更新失败", err)
 			return
 		}

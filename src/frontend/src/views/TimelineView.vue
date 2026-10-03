@@ -163,14 +163,16 @@ async function toggleFavoriteFromMenu(item) {
 }
 
 // 删除：软删入回收站（可恢复），与 api.deleteMedia 语义一致。
-// 删除后**不**自行 splice gridItems —— 它是 computed（只读），且真正的数据源
-// 是 gridRef 内部的 items；这里只标一个本地态让卡片消失，权威列表由
-// 查看器关闭时的 onDeleted / 下次分页请求负责刷新。
+// gridItems 是 computed（只读），但 gridRef 暴露了 removeById ——
+// 走它才是正确姿势（直接改 items 会与分页/分组状态脱节）。
 async function deleteFromMenu(item) {
   if (!window.confirm(`将「${item.filename || '该媒体'}」移入回收站？可随时恢复。`)) return
   try {
     await deleteMedia(item.id)
-    item.__removed = true
+    // 走既有的 removeById（TimelineGrid 已 defineExpose，专为此类场景准备）。
+    // 原来只标 item.__removed = true，而**没有任何消费者**读它 ——
+    // 删除成功后卡片仍留在时间轴上，可再次点开（已删除的媒体却能打开）。
+    gridRef.value?.removeById?.(item.id)
   } catch (e) {
     console.warn('删除失败', e)
   }

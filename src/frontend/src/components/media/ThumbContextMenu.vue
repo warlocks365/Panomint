@@ -140,7 +140,7 @@ const label = computed(() => props.item?.filename || '该媒体')
   z-index: 70; /* 高于查看器弹层(60)与选点弹层(60) */
   width: 176px;
   padding: 6px;
-  background: var(--color-surface, #f4f1ed);
+  background: var(--color-surface);
   border-radius: 10px;
   box-shadow: var(--shadow-lift);
 }
@@ -150,7 +150,7 @@ const label = computed(() => props.item?.filename || '该媒体')
   padding: 4px 8px 6px;
   font-size: 11px;
   color: var(--color-text-secondary);
-  border-bottom: 1px solid var(--color-border, rgba(74, 90, 106, 0.14));
+  border-bottom: 1px solid var(--color-border));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -178,10 +178,10 @@ const label = computed(() => props.item?.filename || '该媒体')
 }
 
 .tm-item:hover {
-  background: var(--color-bg, #e9e4de);
+  background: var(--color-bg);
 }
 
 .tm-item--danger {
-  color: var(--color-danger, #b0685c);
+  color: var(--color-danger);
 }
 </style>
