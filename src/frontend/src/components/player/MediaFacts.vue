@@ -25,17 +25,21 @@
         <dt>大小</dt>
         <dd>{{ formatSize(detail.filesize) }}</dd>
       </div>
-      <div v-if="detail.place" class="info-row">
+      <!-- 拍摄地 / 详细地址 / GPS：空值也**保留行**（显示「没有数据」）。
+           早期版本用 v-if 门控，空值时整行消失 —— 用户只看到一个「编辑拍摄信息」
+           按钮，看不出这几项存在，也就无从知道可以编辑。
+           拍摄时间是常驻项（媒体必有 EXIF 或导入时间）。 -->
+      <div class="info-row">
         <dt>拍摄地</dt>
-        <dd>{{ detail.place }}</dd>
+        <dd :class="{ 'info-empty': !detail.place }">{{ detail.place || '没有数据' }}</dd>
       </div>
-      <div v-if="detail.address" class="info-row">
+      <div class="info-row">
         <dt>详细地址</dt>
-        <dd>{{ detail.address }}</dd>
+        <dd :class="{ 'info-empty': !detail.address }">{{ detail.address || '没有数据' }}</dd>
       </div>
-      <div v-if="gpsText" class="info-row">
+      <div class="info-row">
         <dt>GPS</dt>
-        <dd>{{ gpsText }}</dd>
+        <dd :class="{ 'info-empty': !gpsText }">{{ gpsText || '没有数据' }}</dd>
       </div>
     </dl>
 
@@ -144,12 +148,25 @@ const exifParams = computed(() => {
   return parts.join(' · ')
 })
 
+// GPS 展示文本。
+//
+// 🔴 键名：后端 `media.Detail.Geo` 的 JSON tag 是 **`lng`**（Go 字段名 Lng），
+//    这里原来读 `gps.lon` → 永远 undefined → 整行被 v-if 隐藏，
+//    表现为「有 GPS 的媒体却不显示 GPS 行」。e2e 实测逮到（API 返回
+//    {"lat":39.909187,"lng":116.397463} 而面板无 GPS 行）。
+//    两种键名都兼容：不同接口（列表 /search、geo/*）的形状不完全一致。
 const gpsText = computed(() => {
   const gps = props.detail?.gps
   if (!gps) return ''
-  if (Array.isArray(gps)) return gps.join(', ')
-  if (gps.lat != null && gps.lon != null) return `${gps.lat}, ${gps.lon}`
-  return ''
+  if (Array.isArray(gps)) {
+    return gps.length >= 2 ? `${gps[1]}, ${gps[0]}` : gps.join(', ')
+  }
+  const lat = gps.lat ?? gps.latitude
+  // lng / lon 都接受：后端 Detail 用 lng，GeoJSON 惯例用 lon
+  const lng = gps.lng ?? gps.lon ?? gps.longitude
+  if (lat == null || lng == null) return ''
+  // 6 位小数 ≈ 0.11 米，足够精确又不至于喧宾夺主
+  return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`
 })
 
 function formatTime(t) {
@@ -211,6 +228,12 @@ function formatSize(bytes) {
 }
 
 /* 编辑入口：低调的胶囊按钮，与面板内既有的操作钮同语言 */
+/* 空值：弱化显示，让用户知道「有这项但没填」而不是「没这项」。
+   用既有的 --color-text-disabled（tokens.css 里没有 tertiary，别硬编码色值）。 */
+.info-empty {
+  color: var(--color-text-disabled);
+}
+
 .edit-meta-btn {
   display: inline-flex;
   align-items: center;

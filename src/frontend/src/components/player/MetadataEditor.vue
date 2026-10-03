@@ -87,7 +87,7 @@ function fromLocalInput(v) {
 }
 
 const gpsLabel = computed(() => {
-  if (form.lat === null || form.lng === null) return '未设置'
+  if (form.lat === null || form.lng === null) return '没有数据'
   return `${Number(form.lat).toFixed(6)}, ${Number(form.lng).toFixed(6)}`
 })
 
