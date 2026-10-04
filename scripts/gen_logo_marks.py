@@ -36,24 +36,28 @@ import sys
 from xml.sax.saxutils import escape as xesc
 
 # ---------------------------------------------------------------- 品牌色
-# 「晨雾 Morandi」：饱和度封顶、无纯黑纯白。三色分工见 ROLE 注释。
-C_MAIN = "#4a5a6a"      # 深雾蓝 —— 轮廓主体
-C_ACCENT = "#c4a57a"    # 燕麦金 —— 语义重点
-C_SECOND = "#b0766a"    # 陶土红 —— 辅助细节
-C_INK = "#41403c"       # 炭灰
+# 🔴 商标用**自己的**品牌色，不套 UI 的莫兰迪色板，两个原因：
+#  ① 用户明确要求商标「与相册风格无关」，套 UI 色板是越界；
+#  ② 低饱和小色块堆叠本就发浑，商标需要对比度与自信。
+# 墨蓝为主（稳、重）、琥珀为辅（暖、点睛）、青绿为第三色（少量使用）。
+C_MAIN = "#16323F"      # 深墨蓝 —— 轮廓主体
+C_ACCENT = "#E4963A"    # 琥珀   —— 语义重点
+C_SECOND = "#3E8E8C"    # 青绿   —— 辅助细节
+C_INK = "#16323F"       # 单色版用
 
 ROLE = {"main": C_MAIN, "accent": C_ACCENT, "secondary": C_SECOND}
 
-TH = {"border": "#ddd8d0", "hair": "#e9e4de", "ink": C_INK,
-       "text2": "#7d7a73", "text3": "#a5a29a", "title": C_INK}
+TH = {"border": "#d8d2c9", "hair": "#e6e1d9", "ink": C_INK,
+       "text2": "#6f6a62", "text3": "#9c968c", "title": C_INK}
 THD = {"border": "#2c333b", "hair": "#232931", "ink": "#e6ebf0",
        "text2": "#9aa7b4", "text3": "#6f7c89", "title": "#f2f5f8"}
 
 FONT = ('"Outfit","Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",'
         '"DejaVu Sans","Liberation Sans","Helvetica Neue",sans-serif')
 
-# 商标线宽（100 网格）≈ 24 网格下的 1.56，与项目现有图标规范一致
-STROKE = 6.5
+# 商标线宽（100 网格）。**6.5 是上一版最主要的败因**：216px 下等于 14px 粗管子，
+# 视觉笨重。4.0 在 216px 下约 8.6px（精致），24px 下约 1.0px（favicon 仍可辨）。
+STROKE = 4.0
 
 
 # ---------------------------------------------------------------- 工具
@@ -124,23 +128,39 @@ def primitive(kind: str, params):
 
 
 def glyph_elements(mark: dict, mono: bool = False, darken: float = 0.0) -> str:
-    """商标图形元素（坐标空间固定 0 0 100 100）"""
+    """商标图形元素（坐标空间固定 0 0 100 100）
+
+    `zoom` 用于把图形放大到充满画布 —— 上一版球体只占 64%，
+    四周大片留白导致图形显得怯懦。放大几何的同时**反向补偿线宽**
+    （sw = STROKE / zoom），保证视觉线宽恒定，不会因放大而变粗。
+    """
     def col_of(role):
         c = C_INK if mono else ROLE[role]
         return lighten_hex(c, darken) if darken else c
 
+    z = float(mark.get("zoom", 1.0))
+
     out = []
-    for kind, params, role in mark["parts"]:
+    for item in mark["parts"]:
+        kind, params, role = item[0], item[1], item[2]
+        # 可选第 4 项：单独指定该部件的视觉线宽（100 空间）。
+        # 用于「线宽对比」——外框粗、内层细，商标才精致；
+        # 若内外等粗，内层小图形会显得过重（叶子里的球会读成「眼睛」）。
+        sw = (float(item[3]) if len(item) > 3 else STROKE) / z
         col = col_of(role)
         tag, attrs = primitive(kind, params)
         a = " ".join(f'{k}="{v}"' for k, v in attrs.items())
         if kind == "dotcircle":
-            out.append(f'<circle {a} fill="{col}"/>')
+            out.append(f'<circle {a} fill="{col}" stroke="none"/>')
         else:
             out.append(f'<{tag} {a} fill="none" stroke="{col}" '
-                       f'stroke-width="{STROKE}" stroke-linecap="round" '
+                       f'stroke-width="{_f(sw)}" stroke-linecap="round" '
                        f'stroke-linejoin="round"/>')
-    return "".join(out)
+    body = "".join(out)
+    if abs(z - 1.0) > 1e-6:
+        body = (f'<g transform="translate(50 50) scale({_f(z)}) '
+                f'translate(-50 -50)">{body}</g>')
+    return body
 
 
 def embed(mark, x, y, size, mono=False, darken=0.0):
@@ -157,120 +177,136 @@ def txt(x, y, s, size=13, weight=400, fill=C_INK, anchor="start", ls=None):
             + f">{xesc(s)}</text>")
 
 
-def _cube_parts(r=45):
+def _cube_parts(r=45, ellipse=True):
     """等轴测立方：六边形轮廓 + 中心 Y 型接缝 + 顶面内切椭圆。
 
     接缝端点必须落在六边形顶点上，否则立方体读不出来 —— 故由顶点
     程序化推导，不手写坐标（手写坐标会随半径调整而漂移）。
+
+    ellipse=False 时省掉顶面内切椭圆：元素越多越像「线框示意图」而不像商标。
     """
     v = ngon(50, 50, r, 6, -90)          # 顺序：T, UR, LR, B, LL, UL
     t, ur, _lr, b, _ll, ul = v
-    return [
+    parts = [
         ("polygon", v, "main"),
         ("path", f"M50 50 L{_f(ul[0])} {_f(ul[1])} "
                  f"M50 50 L{_f(ur[0])} {_f(ur[1])} "
                  f"M50 50 L{_f(b[0])} {_f(b[1])}", "accent"),
-        # 顶面菱形 T-UR-C-UL 的内切椭圆：中心与半轴由顶点推导
-        ("ellipse", (50, (t[1] + 50) / 2,
-                     (ur[0] - ul[0]) / 4, (50 - t[1]) / 4), "secondary"),
     ]
+    if ellipse:
+        # 顶面菱形 T-UR-C-UL 的内切椭圆：中心与半轴由顶点推导
+        parts.append(("ellipse", (50, (t[1] + 50) / 2,
+                                  (ur[0] - ul[0]) / 4, (50 - t[1]) / 4),
+                      "secondary"))
+    return parts
 
 
 # ---------------------------------------------------------------- 10 个语义角度
+# 🔴 设计纪律（2026-10-04 第二轮返工换来的）：**每标只留 2–3 个元素**。
+# 上一版「球 + 经线 + 纬线」是三元素线框，画出来像技术插图而不像商标。
+# 元素越少、形状越果断，越像品牌标识。
 LOGOS = [
     {
         "key": "01-sphere-orbit", "zh": "全景环视", "angle": "空间覆盖",
-        "concept": "球体经纬线框：球轮廓 + 经线 + 纬线。全景最本体的表达，语义零门槛。",
+        "concept": "球轮廓 + 单条经线，两个元素点到为止。全景最本体的表达，语义零门槛。",
+        # zoom 1.30：原始 r=32 只占画布 64%，四周留白会让图形显得怯懦
+        "zoom": 1.30,
         "parts": [
             ("circle", (50, 50, 32), "main"),
-            ("ellipse", (50, 50, 15, 32), "accent"),
-            ("ellipse", (50, 50, 32, 15), "secondary"),
+            # 经线用 2.6 细线：与 4.0 的球轮廓形成线宽对比，球体才立体而非呆板
+            ("ellipse", (50, 50, 14.4, 32), "accent", 2.6),
         ],
     },
     {
         "key": "02-mint-leaf", "zh": "薄荷全景", "angle": "品牌字面",
-        "concept": "品牌名 Pano + mint 的字面双关：薄荷叶片轮廓内嵌全景线框球。形态独有、可注册性最强。",
+        "concept": "品牌名 Pano + mint 的字面双关：薄荷叶片 + 一条贯穿的主脉并延伸为叶柄。形态独有、可注册性最强。",
+        "zoom": 1.12,
         "parts": [
-            # 叶片内嵌线框球（而非人字形叶脉）：既读成薄荷叶，又读成全景球
-            ("path", "M50 5 C80 26 80 74 50 95 C20 74 20 26 50 5 Z", "main"),
-            ("circle", (50, 50, 22), "accent"),
-            ("ellipse", (50, 50, 10.5, 22), "secondary"),
+            ("path", "M50 8 C77 28 77 64 50 80 C23 64 23 28 50 8 Z", "main"),
+            # 一条线同时充当叶脉与叶柄：叶内是脉、出叶尖是柄，避免读成「杏仁/咖啡豆」
+            ("path", "M50 14 V92", "accent", 2.6),
         ],
     },
     {
         "key": "03-dual-lens", "zh": "双目成像", "angle": "成像原理",
-        "concept": "两个交叠的鱼眼圆 + 中缝，直接指向 Insta360 双目合成 360 的成像方式。技术可信感强。",
+        "concept": "两个交叠的鱼眼圆。指向 Insta360 双目合成 360 的成像方式，干净利落。",
+        "zoom": 1.08,
         "parts": [
-            ("circle", (36, 50, 29), "main"),
-            ("circle", (64, 50, 29), "accent"),
-            ("path", "M50 24.8 V75.2", "secondary"),
+            ("circle", (37, 50, 28), "main"),
+            ("circle", (63, 50, 28), "accent"),
         ],
     },
     {
         "key": "04-equirect", "zh": "等距柱状", "angle": "投影数学",
-        "concept": "全景展开后的扭曲网格：上下缘外弓、经线随球面外扩、赤道线居中。开放式网格，不闭合成容器。",
+        "concept": "全景展开后的球面片段：上下缘外弓、中缝随球面外扩。开放式，不闭合成容器。",
+        "zoom": 1.12,
         "parts": [
-            # 不用闭合轮廓：闭合后会被读成「木桶 / 鼓」，开放式网格才读成投影
-            ("path", "M6 34 Q50 16 94 34", "main"),
-            ("path", "M6 66 Q50 84 94 66", "main"),
-            ("path", "M6 50 Q50 42 94 50", "secondary"),
-            ("path", "M28 27.3 Q24.8 50 28 72.7", "secondary"),
-            ("path", "M72 27.3 Q75.2 50 72 72.7", "secondary"),
+            # 不用闭合轮廓：闭合后会被读成「木桶 / 鼓」，开放式才读成球面展开
+            ("path", "M6 32 Q50 14 94 32", "main"),
+            ("path", "M6 68 Q50 86 94 68", "main"),
+            ("path", "M50 23 Q46 50 50 77", "accent"),
         ],
     },
     {
         "key": "05-pano-window", "zh": "超宽画幅", "angle": "构图特征",
-        "concept": "2.6:1 极宽取景框内嵌山峦地平线。用「画幅比例」而非相框表达全景，与方构图相册划清界限。",
+        "concept": "2.3:1 极宽取景框内嵌尖锐山脊。用「画幅比例」而非相框表达全景，与方构图相册划清界限。",
+        # 宽幅标记天然填不满方画布，此处保持 zoom=1，靠加宽画幅本身取得分量
+        "zoom": 1.0,
         "parts": [
-            ("rect", (4, 30, 92, 36, 5), "main"),
-            ("polyline", [(12, 58), (28, 42), (39, 53), (51, 37), (63, 53), (88, 44)], "accent"),
-            ("circle", (76, 41, 4.5), "secondary"),
+            ("rect", (4, 28, 92, 40, 6), "main"),
+            # 山脊必须尖锐：圆缓折线会被读成「折线图 / 数据图表」
+            ("polyline", [(14, 58), (30, 37), (40, 52), (52, 33), (64, 52), (86, 41)], "accent"),
         ],
     },
     {
         "key": "06-time-axis", "zh": "时光全景", "angle": "时间维度",
-        "concept": "横轴串联 3 个全景球节点，中段放大形成主次。强调相册「按时间组织」，而非仅仅是个看图工具。",
+        "concept": "横轴串联 3 个节点，中点为实心大点。强调相册「按时间组织」，而非仅仅是个看图工具。",
+        "zoom": 1.12,
         "parts": [
             ("line", (8, 50, 92, 50), "main"),
-            ("circle", (24, 50, 12), "accent"),
-            ("circle", (50, 50, 15), "accent"),
-            ("circle", (76, 50, 12), "accent"),
-            # 仅中段节点保留经线，避免 20px 下 6 个椭圆互相糊成墨团
-            ("ellipse", (50, 50, 7, 15), "secondary"),
+            # 实心点比描边环果断得多：小尺寸下不糊，视觉也更「商标」
+            ("dotcircle", (24, 50, 6), "secondary"),
+            ("dotcircle", (50, 50, 9.5), "accent"),
+            ("dotcircle", (76, 50, 6), "secondary"),
         ],
     },
     {
         "key": "07-spatial-cube", "zh": "全景立方", "angle": "空间维度",
-        "concept": "等轴测立方线框，顶面承托全景球面投影。承载「空间 / VR 头追 / 陀螺仪」这层系统特色。",
-        "parts": _cube_parts(),
+        "concept": "等轴测立方线框。承载「空间 / VR 头追 / 陀螺仪」这层系统特色。",
+        "zoom": 1.05,
+        "parts": _cube_parts(ellipse=False),
     },
     {
         "key": "08-stitch", "zh": "全景拼接", "angle": "处理工艺",
         "concept": "三块竖板向外递减折叠，模拟全景由多帧缝合、向两侧包裹的空间关系。",
+        "zoom": 1.08,
         "parts": [
-            ("rect", (8, 24, 26, 52, 4), "secondary"),
-            ("rect", (37, 18, 26, 64, 4), "accent"),
-            ("rect", (66, 24, 26, 52, 4), "main"),
+            # 两色逻辑：外侧两块同色（包裹感），中块强调色（当前帧）
+            ("rect", (10, 26, 24, 48, 4), "main"),
+            ("rect", (38, 17, 24, 66, 4), "accent"),
+            ("rect", (66, 26, 24, 48, 4), "main"),
         ],
     },
     {
         "key": "09-ai-semantic", "zh": "智能语义", "angle": "智能维度",
         "concept": "球体 + AI 星芒。指向 Chinese-CLIP 中文语义检索，这是与竞品的硬差距所在。",
+        "zoom": 1.20,
         "parts": [
-            ("circle", (48, 54, 24), "main"),
-            ("ellipse", (48, 54, 11.5, 24), "accent"),
+            ("circle", (46, 56, 22), "main"),
             # 星芒须与球体明确分离并外移：贴着球体边长会在 16–24px 下粘成一团
-            ("polygon", sparkle(82, 18, 13, 4.2), "secondary"),
+            ("polygon", sparkle(81, 17, 13, 4.2), "accent"),
         ],
     },
     {
         "key": "10-p-monogram", "zh": "字母标", "angle": "字形资产",
-        "concept": "字母 P，碗部化为全景线框球。字形即品牌首字母，方形头像位与 favicon 场景最省事。",
+        "concept": "字母 P，D 形碗部内嵌全景经线。字形即品牌首字母，方形头像位与 favicon 场景最省事。",
+        "zoom": 1.22,
         "parts": [
-            ("path", "M26 6 V94", "main"),
-            ("circle", (54, 32, 26), "main"),
-            ("ellipse", (54, 32, 12.5, 26), "accent"),
-            ("ellipse", (54, 32, 26, 12.5), "secondary"),
+            # 碗部用「竖笔 + 上横 + 右半圆 + 下横」拼成，不能用整圆：
+            # 整圆与竖笔只相切于一点，视觉上会读成 φ 或放大镜，而不是字母 P
+            ("path", "M30 92 V22", "main"),
+            ("path", "M30 22 H58 A24 24 0 0 1 58 70 H30", "main"),
+            ("ellipse", (58, 46, 11, 23), "accent"),
         ],
     },
 ]

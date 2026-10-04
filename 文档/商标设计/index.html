@@ -6,8 +6,8 @@
 <title>Panomint 产品商标方案</title>
 <style>
   :root{
-    --bg:#e9e4de; --surface:#f4f1ed; --border:#ddd8d0; --hair:#e9e4de;
-    --ink:#41403c; --t2:#7d7a73; --t3:#a5a29a; --primary:#4a5a6a;
+    --bg:#f2efe9; --surface:#faf8f5; --border:#ddd7cd; --hair:#eae5dd;
+    --ink:#16323F; --t2:#5f6a70; --t3:#94a0a6; --primary:#16323F; --amber:#E4963A;
     --font:"Outfit","Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
   }
   *{box-sizing:border-box}
@@ -51,9 +51,12 @@
                --ink:#e6ebf0;--t2:#9aa7b4;--t3:#6f7c89;--primary:#8fa3ad;--bg:#161b21}
   body.bg-dark button:hover{background:#232a32}
   body.bg-dark button[aria-pressed="true"]{background:#8fa3ad;color:#14181d;border-color:#8fa3ad}
-  .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--primary);
+  .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--amber);
         border-radius:8px;padding:14px 16px;font-size:13px;color:var(--t2);margin:0 0 12px}
   .note b{color:var(--ink);font-weight:600}
+  .swatches{display:flex;gap:0;margin:10px 0 4px;border-radius:8px;overflow:hidden;border:1px solid var(--border)}
+  .sw{flex:1;padding:12px 10px 10px;font-size:11px;line-height:1.5}
+  .sw span{display:block;font-size:10.5px;opacity:.85;margin-top:5px;font-family:ui-monospace,Consolas,monospace}
   ul{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--t2)}
   li{margin:4px 0}
   code{font-family:ui-monospace,Consolas,monospace;font-size:12px;
@@ -79,18 +82,26 @@
 
   <h2>10 个语义角度 <span class="n">每个角度一套独立商标</span></h2>
   <div class="note">
+    <b>品牌色板</b>（商标自有的品牌色，不套 UI 皮肤色 —— 商标必须与界面风格解耦）
+    <div class="swatches">
+      <div class="sw" style="background:#16323F;color:#fff">深墨蓝 · 轮廓主体<span>#16323F</span></div>
+      <div class="sw" style="background:#E4963A;color:#3a2a12">琥珀 · 语义重点<span>#E4963A</span></div>
+      <div class="sw" style="background:#3E8E8C;color:#fff">青绿 · 辅助细节<span>#3E8E8C</span></div>
+    </div>
+  </div>
+  <div class="note">
     <table>
       <tr><th>编号</th><th>语义角度</th><th>抓的系统特质</th><th>轮廓形态</th></tr>
-      <tr><td>01</td><td>全景环视</td><td>360° 球面回放</td><td>圆 + 经纬线</td></tr>
-      <tr><td>02</td><td>品牌字面</td><td>Pano + mint 字面双关</td><td>有机叶片</td></tr>
+      <tr><td>01</td><td>全景环视</td><td>360° 球面回放</td><td>圆 + 单经线</td></tr>
+      <tr><td>02</td><td>品牌字面</td><td>Pano + mint 字面双关</td><td>薄荷叶 + 主脉</td></tr>
       <tr><td>03</td><td>成像原理</td><td>双鱼眼合成 360</td><td>双圆交叠</td></tr>
-      <tr><td>04</td><td>投影数学</td><td>等距柱状 2:1</td><td>枕形条带</td></tr>
-      <tr><td>05</td><td>画幅比例</td><td>超宽全景构图</td><td>极宽取景框</td></tr>
-      <tr><td>06</td><td>时间维度</td><td>时间轴组织</td><td>横轴 + 3 节点</td></tr>
+      <tr><td>04</td><td>投影数学</td><td>等距柱状 2:1</td><td>外弓弧带 + 中缝</td></tr>
+      <tr><td>05</td><td>画幅比例</td><td>超宽全景构图</td><td>2.3:1 极宽框</td></tr>
+      <tr><td>06</td><td>时间维度</td><td>时间轴组织</td><td>横轴 + 3 实心点</td></tr>
       <tr><td>07</td><td>空间维度</td><td>空间 / VR 漫游</td><td>等轴测立方</td></tr>
       <tr><td>08</td><td>拼接工艺</td><td>全景缝合</td><td>三折竖板</td></tr>
-      <tr><td>09</td><td>智能维度</td><td>AI 语义检索</td><td>球 + 节点环 + 星芒</td></tr>
-      <tr><td>10</td><td>部署形态</td><td>自托管 / 私有</td><td>字母 P</td></tr>
+      <tr><td>09</td><td>智能维度</td><td>AI 语义检索</td><td>球 + 星芒</td></tr>
+      <tr><td>10</td><td>字形资产</td><td>品牌首字母</td><td>字母 P（D 形碗）</td></tr>
     </table>
   </div>
 
