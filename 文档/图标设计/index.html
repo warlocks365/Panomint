@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Panomint 图标设计样图</title>
+<style>
+  :root{
+    --bg:#e9e4de; --surface:#f4f1ed; --border:#ddd8d0; --hair:#e9e4de;
+    --ink:#41403c; --t2:#7d7a73; --t3:#a5a29a; --primary:#4a5a6a;
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
+       font-weight:300;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1400px;margin:0 auto;padding:40px 32px 72px}
+  h1{font-size:28px;font-weight:600;margin:0 0 6px;letter-spacing:.3px}
+  .lead{color:var(--t2);font-size:13px;margin:0 0 4px}
+  .meta{color:var(--t3);font-size:12px;margin:0 0 28px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+       background:var(--surface);border:1px solid var(--border);border-radius:10px;
+       padding:12px 14px;margin-bottom:28px}
+  .bar .lbl{font-size:12px;color:var(--t2);margin-right:4px}
+  button{font:inherit;font-size:12px;font-weight:400;color:var(--primary);
+         background:transparent;border:1px solid var(--border);border-radius:6px;
+         padding:5px 12px;cursor:pointer;transition:background .15s,border-color .15s}
+  button:hover{background:#efeae4}
+  button[aria-pressed="true"]{background:var(--primary);border-color:var(--primary);color:#f4f1ed}
+  h2{font-size:17px;font-weight:600;margin:40px 0 4px;letter-spacing:.2px}
+  h2 .n{color:var(--t3);font-size:12px;font-weight:400;margin-left:8px;letter-spacing:1px}
+  .hint{color:var(--t2);font-size:12px;margin:0 0 14px}
+  .card{border:1px solid var(--border);border-radius:10px;overflow:hidden;
+        margin-bottom:14px;background:var(--surface)}
+  .card .cap{display:flex;justify-content:space-between;align-items:baseline;
+             gap:12px;padding:9px 14px;border-bottom:1px solid var(--hair);
+             font-size:12px;color:var(--t2)}
+  .card .cap b{font-size:13px;font-weight:600;color:var(--ink)}
+  .card .cap .fn{font-family:ui-monospace,Consolas,monospace;color:var(--t3);font-size:11px}
+  .stage{padding:0;line-height:0}
+  .stage img{width:100%;height:auto;display:block}
+  /* 三种观察底：白 / 透明棋盘 / 深色 —— 用于判断描边在真实底色下的表现 */
+  body.bg-white .stage{background:#fff}
+  body.bg-checker .stage{background-color:#fff;
+    background-image:linear-gradient(45deg,#e6e6e6 25%,transparent 25%),
+      linear-gradient(-45deg,#e6e6e6 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#e6e6e6 75%),
+      linear-gradient(-45deg,transparent 75%,#e6e6e6 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0}
+  body.bg-dark .stage{background:#14181d}
+  body.bg-dark{--surface:#1d232a;--border:#2c333b;--hair:#232931;
+               --ink:#e6ebf0;--t2:#9aa7b4;--t3:#6f7c89;--primary:#8fa3ad;--bg:#161b21}
+  body.bg-dark button:hover{background:#232a32}
+  body.bg-dark button[aria-pressed="true"]{background:#8fa3ad;color:#14181d;border-color:#8fa3ad}
+  .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--primary);
+        border-radius:8px;padding:14px 16px;font-size:13px;color:var(--t2);margin:0 0 8px}
+  .note b{color:var(--ink);font-weight:600}
+  ul{margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--t2)}
+  li{margin:3px 0}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:12px;
+       background:rgba(74,90,106,.08);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body class="bg-checker">
+<div class="wrap">
+  <h1>Panomint 图标设计样图</h1>
+  <p class="lead">12 个图标语义 × 10 套风格 · 24 网格 · 扁平 2D 矢量 · 彩色描边 · 透明底 · 无阴影</p>
+  <p class="meta">生成脚本 <code>scripts/gen_icon_sheets.py</code> · 全部为纯 SVG 路径输出，无位图、无滤镜、无噪点</p>
+
+  <div class="bar">
+    <span class="lbl">观察底色</span>
+    <button id="b-checker" aria-pressed="true">透明棋盘</button>
+    <button id="b-white" aria-pressed="false">纯白</button>
+    <button id="b-dark" aria-pressed="false">深色 #14181d</button>
+  </div>
+
+  <h2>总览 <span class="n">10 风格 × 12 图标 @42px</span></h2>
+  <p class="hint">一眼看全 10 套风格的差异；切换底色可检查透明通道与暗底表现。</p>
+  <div class="card">
+    <div class="cap"><b>Panomint 图标风格样图</b><span class="fn">sheet_all.png</span></div>
+    <div class="stage"><img src="sheet_all.png" alt="总览"></div>
+  </div>
+
+  <h2>真实尺寸对照 <span class="n">@24px · 选型决策用</span></h2>
+  <p class="hint">按界面实际显示尺寸渲染，一行一个图标、一列一种风格。24px 是最容易暴露缺陷的尺寸——本图已据此修正 4 处可读性问题。</p>
+  <div class="card">
+    <div class="cap"><b>12 图标 × 10 风格 @24px</b><span class="fn">sheet_true24.png</span></div>
+    <div class="stage"><img src="sheet_true24.png" alt="24px 对照"></div>
+  </div>
+
+  <h2>暗色页适配 <span class="n">player / share 暗底</span></h2>
+  <p class="hint">底色 <code>#14181d</code>（播放器主题底）。各色按 HSL 提亮 58% 模拟暗色 token 换色；若同色直出，炭灰与雾蓝描边会不可见。</p>
+  <div class="card">
+    <div class="cap"><b>暗色底预览 @36px</b><span class="fn">sheet_dark.png</span></div>
+    <div class="stage"><img src="sheet_dark.png" alt="暗色预览"></div>
+  </div>
+
+  <h2>逐套独立样图 <span class="n">每套含真实 24px 参照行</span></h2>
+  <p class="hint">主行 42px + 底部真实尺寸参照行，便于单独放大评判。</p>
+
+  <div class="card"><div class="cap"><b>01 · 细线 · 雾蓝单色</b><span class="fn">style_01-hairline-mono.png</span></div><div class="stage"><img src="style_01-hairline-mono.png" alt="01"></div></div>
+  <div class="card"><div class="cap"><b>02 · 标准 · 炭灰线框</b><span class="fn">style_02-standard.png</span></div><div class="stage"><img src="style_02-standard.png" alt="02"></div></div>
+  <div class="card"><div class="cap"><b>03 · 双色 · 雾蓝×燕麦</b><span class="fn">style_03-duotone.png</span></div><div class="stage"><img src="style_03-duotone.png" alt="03"></div></div>
+  <div class="card"><div class="cap"><b>04 · 多色 · 三色分区</b><span class="fn">style_04-multicolor.png</span></div><div class="stage"><img src="style_04-multicolor.png" alt="04"></div></div>
+  <div class="card"><div class="cap"><b>05 · 粗圆头 · 亲和</b><span class="fn">style_05-bold-round.png</span></div><div class="stage"><img src="style_05-bold-round.png" alt="05"></div></div>
+  <div class="card"><div class="cap"><b>06 · 几何 · 硬角网格</b><span class="fn">style_06-geometric.png</span></div><div class="stage"><img src="style_06-geometric.png" alt="06"></div></div>
+  <div class="card"><div class="cap"><b>07 · 描边 · 淡彩填充</b><span class="fn">style_07-outline-tint.png</span></div><div class="stage"><img src="style_07-outline-tint.png" alt="07"></div></div>
+  <div class="card"><div class="cap"><b>08 · 内外双线 · 嵌套</b><span class="fn">style_08-double-line.png</span></div><div class="stage"><img src="style_08-double-line.png" alt="08"></div></div>
+  <div class="card"><div class="cap"><b>09 · 断续线 · 节拍</b><span class="fn">style_09-dashed.png</span></div><div class="stage"><img src="style_09-dashed.png" alt="09"></div></div>
+  <div class="card"><div class="cap"><b>10 · 徽章 · 圆角底座</b><span class="fn">style_10-badge.png</span></div><div class="stage"><img src="style_10-badge.png" alt="10"></div></div>
+
+  <h2>图标语义集 <span class="n">12 项</span></h2>
+  <div class="note">
+    <b>全景专属语义 4 项</b>（深色描边表示系统特色，非通用图标）：
+    <ul>
+      <li><b>全景</b> 线框球 · <b>360视频</b> 球体+播放+自转 · <b>空间</b> 立方体线框（VR 头追/陀螺仪）· <b>AI搜索</b> 放大镜+闪光（Chinese-CLIP 中文语义检索）</li>
+    </ul>
+    <b>通用语义 8 项：</b>相册 · 时间线 · 人物 · 地点 · 幻灯片 · 收藏 · 相机 · GPS定位
+  </div>
+
+  <h2>已知取舍 <span class="n">供决策参考</span></h2>
+  <div class="note">
+    <ul>
+      <li><b>多色在暗底会衰减</b>：04 三色分区在 24px 暗底上三色差异明显变弱，若暗色页需要保持彩色区分，需为暗色单独定义一套更亮的 token。</li>
+      <li><b>09 断续线在 24px 偏碎</b>：虚线风格在极小尺寸下会显得毛糙，建议只用于 ≥32px 的场景（如空状态插图、页头）。</li>
+      <li><b>10 徽章在 24px 偏挤</b>：底座占位导致图形缩到 66%，建议只用于 ≥28px 的入口卡片类场景。</li>
+      <li><b>06 几何风格</b>把圆转为八边形，几何感强但损失圆润度，适合作为可选的「工程感」皮肤而非默认。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  var body = document.body;
+  var btns = {
+    "b-checker": "bg-checker",
+    "b-white": "bg-white",
+    "b-dark": "bg-dark"
+  };
+  Object.keys(btns).forEach(function (id) {
+    document.getElementById(id).addEventListener("click", function () {
+      body.className = btns[id];
+      Object.keys(btns).forEach(function (k) {
+        document.getElementById(k).setAttribute("aria-pressed",
+          k === id ? "true" : "false");
+      });
+    });
+  });
+</script>
+</body>
+</html>
