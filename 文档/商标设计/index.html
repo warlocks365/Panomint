@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Panomint 产品商标方案</title>
+<style>
+  :root{
+    --bg:#e9e4de; --surface:#f4f1ed; --border:#ddd8d0; --hair:#e9e4de;
+    --ink:#41403c; --t2:#7d7a73; --t3:#a5a29a; --primary:#4a5a6a;
+    --font:"Outfit","Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
+       font-weight:300;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1240px;margin:0 auto;padding:44px 32px 80px}
+  h1{font-size:30px;font-weight:600;margin:0 0 8px;letter-spacing:.3px}
+  .lead{color:var(--t2);font-size:13.5px;margin:0 0 4px}
+  .meta{color:var(--t3);font-size:12px;margin:0 0 26px}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+       background:var(--surface);border:1px solid var(--border);border-radius:10px;
+       padding:12px 14px;margin-bottom:30px}
+  .bar .lbl{font-size:12px;color:var(--t2);margin-right:4px}
+  button{font:inherit;font-size:12px;font-weight:400;color:var(--primary);
+         background:transparent;border:1px solid var(--border);border-radius:6px;
+         padding:5px 12px;cursor:pointer;transition:background .15s,border-color .15s}
+  button:hover{background:#efeae4}
+  button[aria-pressed="true"]{background:var(--primary);border-color:var(--primary);color:#f4f1ed}
+  h2{font-size:18px;font-weight:600;margin:42px 0 4px;letter-spacing:.2px}
+  h2 .n{color:var(--t3);font-size:12px;font-weight:400;margin-left:8px;letter-spacing:1px}
+  .hint{color:var(--t2);font-size:12.5px;margin:0 0 14px}
+  .card{border:1px solid var(--border);border-radius:10px;overflow:hidden;
+        margin-bottom:14px;background:var(--surface)}
+  .card .cap{display:flex;justify-content:space-between;align-items:baseline;
+             gap:12px;padding:9px 14px;border-bottom:1px solid var(--hair);
+             font-size:12px;color:var(--t2)}
+  .card .cap b{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .card .cap .fn{font-family:ui-monospace,Consolas,monospace;color:var(--t3);font-size:11px}
+  .stage{line-height:0}
+  .stage img{width:100%;height:auto;display:block}
+  body.bg-white .stage{background:#fff}
+  body.bg-checker .stage{background-color:#fff;
+    background-image:linear-gradient(45deg,#e6e6e6 25%,transparent 25%),
+      linear-gradient(-45deg,#e6e6e6 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#e6e6e6 75%),
+      linear-gradient(-45deg,transparent 75%,#e6e6e6 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0}
+  body.bg-dark .stage{background:#14181d}
+  body.bg-dark{--surface:#1d232a;--border:#2c333b;--hair:#232931;
+               --ink:#e6ebf0;--t2:#9aa7b4;--t3:#6f7c89;--primary:#8fa3ad;--bg:#161b21}
+  body.bg-dark button:hover{background:#232a32}
+  body.bg-dark button[aria-pressed="true"]{background:#8fa3ad;color:#14181d;border-color:#8fa3ad}
+  .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--primary);
+        border-radius:8px;padding:14px 16px;font-size:13px;color:var(--t2);margin:0 0 12px}
+  .note b{color:var(--ink);font-weight:600}
+  ul{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--t2)}
+  li{margin:4px 0}
+  code{font-family:ui-monospace,Consolas,monospace;font-size:12px;
+       background:rgba(74,90,106,.08);padding:1px 5px;border-radius:4px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin:6px 0 0}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--hair);color:var(--t2)}
+  th{color:var(--ink);font-weight:600}
+  td:first-child{color:var(--t3);font-family:ui-monospace,Consolas,monospace;font-size:11.5px}
+</style>
+</head>
+<body class="bg-checker">
+<div class="wrap">
+  <h1>Panomint 产品商标方案</h1>
+  <p class="lead">10 个不同的语义角度，每个角度自成一套商标 · 扁平 2D 矢量 · 彩色线条 · 透明底 · 无阴影 · 无噪点</p>
+  <p class="meta">生成脚本 <code>scripts/gen_logo_marks.py</code> · 纯 SVG 路径输出，不含位图、滤镜与噪点</p>
+
+  <div class="bar">
+    <span class="lbl">观察底色</span>
+    <button id="b-checker" aria-pressed="true">透明棋盘</button>
+    <button id="b-white" aria-pressed="false">纯白</button>
+    <button id="b-dark" aria-pressed="false">深色 #14181d</button>
+  </div>
+
+  <h2>10 个语义角度 <span class="n">每个角度一套独立商标</span></h2>
+  <div class="note">
+    <table>
+      <tr><th>编号</th><th>语义角度</th><th>抓的系统特质</th><th>轮廓形态</th></tr>
+      <tr><td>01</td><td>全景环视</td><td>360° 球面回放</td><td>圆 + 经纬线</td></tr>
+      <tr><td>02</td><td>品牌字面</td><td>Pano + mint 字面双关</td><td>有机叶片</td></tr>
+      <tr><td>03</td><td>成像原理</td><td>双鱼眼合成 360</td><td>双圆交叠</td></tr>
+      <tr><td>04</td><td>投影数学</td><td>等距柱状 2:1</td><td>枕形条带</td></tr>
+      <tr><td>05</td><td>画幅比例</td><td>超宽全景构图</td><td>极宽取景框</td></tr>
+      <tr><td>06</td><td>时间维度</td><td>时间轴组织</td><td>横轴 + 3 节点</td></tr>
+      <tr><td>07</td><td>空间维度</td><td>空间 / VR 漫游</td><td>等轴测立方</td></tr>
+      <tr><td>08</td><td>拼接工艺</td><td>全景缝合</td><td>三折竖板</td></tr>
+      <tr><td>09</td><td>智能维度</td><td>AI 语义检索</td><td>球 + 节点环 + 星芒</td></tr>
+      <tr><td>10</td><td>部署形态</td><td>自托管 / 私有</td><td>字母 P</td></tr>
+    </table>
+  </div>
+
+  <h2>方案总览 <span class="n">方标 / 横版组合 / 32px / 20px</span></h2>
+  <p class="hint">一行一个语义角度。切换底色可检查透明通道与暗底表现。</p>
+  <div class="card">
+    <div class="cap"><b>10 个语义角度总览</b><span class="fn">sheet_logos.png</span></div>
+    <div class="stage"><img src="sheet_logos.png" alt="总览"></div>
+  </div>
+
+  <h2>真实尺寸对照 <span class="n">16 / 24 / 32 / 48px</span></h2>
+  <p class="hint">商标的生死线在 16–24px：放大好看不算数，缩小能认出来才算数。</p>
+  <div class="card">
+    <div class="cap"><b>小尺寸可读性</b><span class="fn">sheet_sizes.png</span></div>
+    <div class="stage"><img src="sheet_sizes.png" alt="尺寸对照"></div>
+  </div>
+
+  <h2>暗色页适配 <span class="n">player / share 暗底</span></h2>
+  <p class="hint">底色 <code>#14181d</code>，各色按 HSL 提亮 58% 模拟暗色 token 换色。</p>
+  <div class="card">
+    <div class="cap"><b>暗色底预览</b><span class="fn">sheet_dark.png</span></div>
+    <div class="stage"><img src="sheet_dark.png" alt="暗色预览"></div>
+  </div>
+
+  <h2>单方案大图 <span class="n">方标 + 横版组合 + 尺寸条</span></h2>
+
+  <div class="card"><div class="cap"><b>01 全景环视 · 空间覆盖</b><span class="fn">logo_01-sphere-orbit.png</span></div><div class="stage"><img src="logo_01-sphere-orbit.png" alt="01"></div></div>
+  <div class="card"><div class="cap"><b>02 薄荷全景 · 品牌字面</b><span class="fn">logo_02-mint-leaf.png</span></div><div class="stage"><img src="logo_02-mint-leaf.png" alt="02"></div></div>
+  <div class="card"><div class="cap"><b>03 双目成像 · 成像原理</b><span class="fn">logo_03-dual-lens.png</span></div><div class="stage"><img src="logo_03-dual-lens.png" alt="03"></div></div>
+  <div class="card"><div class="cap"><b>04 等距柱状 · 投影数学</b><span class="fn">logo_04-equirect.png</span></div><div class="stage"><img src="logo_04-equirect.png" alt="04"></div></div>
+  <div class="card"><div class="cap"><b>05 超宽画幅 · 构图特征</b><span class="fn">logo_05-pano-window.png</span></div><div class="stage"><img src="logo_05-pano-window.png" alt="05"></div></div>
+  <div class="card"><div class="cap"><b>06 时光全景 · 时间维度</b><span class="fn">logo_06-time-axis.png</span></div><div class="stage"><img src="logo_06-time-axis.png" alt="06"></div></div>
+  <div class="card"><div class="cap"><b>07 全景立方 · 空间维度</b><span class="fn">logo_07-spatial-cube.png</span></div><div class="stage"><img src="logo_07-spatial-cube.png" alt="07"></div></div>
+  <div class="card"><div class="cap"><b>08 全景拼接 · 处理工艺</b><span class="fn">logo_08-stitch.png</span></div><div class="stage"><img src="logo_08-stitch.png" alt="08"></div></div>
+  <div class="card"><div class="cap"><b>09 智能语义 · 智能维度</b><span class="fn">logo_09-ai-semantic.png</span></div><div class="stage"><img src="logo_09-ai-semantic.png" alt="09"></div></div>
+  <div class="card"><div class="cap"><b>10 字母标 · 字形资产</b><span class="fn">logo_10-p-monogram.png</span></div><div class="stage"><img src="logo_10-p-monogram.png" alt="10"></div></div>
+
+  <h2>避让红线 <span class="n">刻意不与竞品撞语义</span></h2>
+  <div class="note">
+    <ul>
+      <li><b>风车花瓣</b> —— Google Photos / Apple Photos 已占用</li>
+      <li><b>相框 + 山 + 太阳</b> —— Synology Photos / Immich 已占用（方案 05 用「超宽画幅」而非方相框，是有意区分）</li>
+      <li><b>棱镜</b> —— PhotoPrism 已占用</li>
+      <li><b>相机快门</b> —— 通用相册符号，无区分度</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  var body = document.body;
+  var map = { "b-checker": "bg-checker", "b-white": "bg-white", "b-dark": "bg-dark" };
+  Object.keys(map).forEach(function (id) {
+    document.getElementById(id).addEventListener("click", function () {
+      body.className = map[id];
+      Object.keys(map).forEach(function (k) {
+        document.getElementById(k).setAttribute("aria-pressed", k === id ? "true" : "false");
+      });
+    });
+  });
+</script>
+</body>
+</html>
