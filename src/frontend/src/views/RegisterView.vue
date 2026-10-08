@@ -2,6 +2,7 @@
   <div class="login-page">
     <span class="wordmark">PANOMINT</span>
     <div class="login-card">
+      <BrandLogo variant="full" :height="72" block alt="全景相册" />
       <p class="card-eyebrow">PANOMINT · 自托管全景相册</p>
       <h1 class="login-title">创建账号</h1>
       <p class="login-subtitle">注册后即可上传与管理你的媒体</p>
@@ -90,6 +91,7 @@ import gsap from 'gsap'
 import { useRouter } from 'vue-router'
 import { register, getRegisterStatus } from '../api/admin'
 import { errMessage } from '../stores/auth'
+import BrandLogo from '../components/brand/BrandLogo.vue'
 
 const router = useRouter()
 

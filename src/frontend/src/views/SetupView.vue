@@ -2,6 +2,8 @@
   <div class="setup-page">
     <span class="wordmark">PANOMINT</span>
     <div class="setup-card">
+      <!-- 品牌 Logo（Job000144）：置于两个分支之上，初始化中与完成后都可见 -->
+      <BrandLogo variant="full" :height="72" block alt="全景相册" />
       <template v-if="!done">
         <p class="setup-eyebrow">PANOMINT · 首次初始化</p>
         <h1 class="setup-title">欢迎使用全景相册</h1>
@@ -87,6 +89,7 @@ import { getSetupStatus, invalidateSetupStatus, runSetup } from '../api/setup'
 // 路由闸门的 15s TTL 缓存（router/index.js）：初始化成功后必须主动失效，
 // 否则接下来 15 秒内导航会被 setup 闸门反向弹回 /login（闸门认为已初始化）。
 import { invalidateSetupCache } from '../router'
+import BrandLogo from '../components/brand/BrandLogo.vue'
 
 const router = useRouter()
 

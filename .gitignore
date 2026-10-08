@@ -60,6 +60,11 @@ Thumbs.db
 !assets/brand/
 !assets/brand/logo/
 !assets/brand/logo/*.png
+# 例外：Web 品牌资产（Job000144）。这批 PNG 是**构建产物依赖**——docker/web 只 COPY dist，
+# 而 dist 的 brand/ 来自 src/frontend/public/brand/；漏提交即全站 Logo 404（AC-22）。
+# 与上方 map-icons 同理：不是临时图片，是随代码走的交付资产，必须入库。
+!src/frontend/public/brand/
+!src/frontend/public/brand/*.png
 prototypes/*/streams*/
 prototypes/*/vendor/
 

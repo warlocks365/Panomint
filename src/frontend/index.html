@@ -6,6 +6,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+    <!-- PWA：静态声明 manifest（main.js 的注入是幂等兜底，这里让安装提示不依赖 JS 执行） -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- 站点图标：正式 Logo 盘面版合成 #e9e4de 底（src/frontend/public/brand/）。
+32px 为现代浏览器默认请求档，16px 兜底旧环境；SVG 版仍由 manifest 提供。 -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png" />
+    <!-- iOS 主屏图标：iOS 不支持透明，必须用合成底的 apple-touch-icon-180 -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon-180.png" />
     <title>全景相册</title>
   </head>
   <body>

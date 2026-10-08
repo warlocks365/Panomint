@@ -2,6 +2,9 @@
   <div class="login-page">
     <span class="wordmark">PANOMINT</span>
     <div class="login-card">
+      <!-- 品牌 Logo（Job000144）：72px 是全标记版的最低可辨高度（此尺寸下字标仍清晰）；
+           透明底衬 --color-surface。居中与留白由组件的 block 形态提供。 -->
+      <BrandLogo variant="full" :height="72" block alt="全景相册" />
       <p class="card-eyebrow">PANOMINT · 自托管全景相册</p>
       <h1 class="login-title">全景相册</h1>
       <p class="login-subtitle">登录你的账号</p>
@@ -92,6 +95,7 @@ import gsap from 'gsap'
 import { useAuthStore, errCode, errMessage, MFA_REQUIRED, MFA_INVALID } from '../stores/auth'
 import { getRegisterStatus } from '../api/admin'
 import { safeInternalPath } from '../utils/url'
+import BrandLogo from '../components/brand/BrandLogo.vue'
 
 const router = useRouter()
 const route = useRoute()

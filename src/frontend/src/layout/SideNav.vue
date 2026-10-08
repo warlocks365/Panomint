@@ -1,7 +1,14 @@
 <template>
   <aside class="sidebar" :class="`sidebar--${mode}`">
     <div class="brand">
-      <span class="brand-mark">全</span>
+      <!-- 品牌位（Job000144）：展开态用全标记版（含字标），图标态用盘面版。
+           单个实例 + computed 切variant，不写两套模板结构。
+           深色页（player/share）不放 Logo：字标墨色对 #14181d 仅 1.09:1，等于看不见。 -->
+      <BrandLogo
+        :variant="isIconMode ? 'disc' : 'full'"
+        :alt="isIconMode ? '全景相册' : ''"
+        :height="28"
+      />
       <span class="brand-text">全景相册</span>
     </div>
     <nav class="nav">
@@ -28,12 +35,17 @@
 import { computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { navIcons as icons } from './navIcons'
+import BrandLogo from '../components/brand/BrandLogo.vue'
 
-defineProps({
+const props = defineProps({
   mode: { type: String, default: 'expanded' } // expanded | icon | hidden
 })
 
 const auth = useAuthStore()
+
+// 图标态（56px 栏）放不下全标记版，改用盘面版；收起态（hidden）整块 brand 已 display:none，
+// 不参与渲染，故与展开态同用全标记版即可。
+const isIconMode = computed(() => props.mode === 'icon')
 
 const navItems = computed(() => {
   const items = [
@@ -112,22 +124,8 @@ const navItems = computed(() => {
   border-bottom: 1px solid var(--color-border);
 }
 
-/* 图标态下的品牌方块（展开态不显示，PC 观感不变） */
-.brand-mark {
-  display: none;
-}
-
-.sidebar--icon .brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  background-color: var(--color-primary);
-  color: #fff;
-  font-size: var(--font-size-sm);
-}
+/* 品牌 Logo 尺寸由 BrandLogo 的 height 属性给出（展开态高 28px，字标约 11px 实高可辨）。
+   图标态由组件自身按盘面版方形比例收窄，无需在此覆写。 */
 
 .nav {
   display: flex;
