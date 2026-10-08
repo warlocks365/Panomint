@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import re
 import sys
 
 import numpy as np
@@ -66,13 +67,19 @@ OPAQUE_ICONS = [
 ]
 
 # 透明 UI 类资产（7-10 号）：(文件名, 标记宽, 标记高, 用哪套裁切)
-# 画布 = 标记尺寸，故「偏移 居中」等价于 (0, 0)。
-# 宽高为 Spec §8.2 锁定值；与裁切框原始 aspect 的偏差 < 0.25%，属取整，不重算。
+#
+# 尺寸口径 = **文件名承诺的标称尺寸**（Job000144 返工）。
+# 原实现按裁切框原始像素出图（logo-full-256 实际 663x551），导致文件名说谎：
+#   - manifest 只能被迫写 "sizes": "663x551"，后续维护者会以为「256」是像素数；
+#   - 一个 72px 的显示位要下载 482KB，全品牌资产的一半以上被单个文件吃掉。
+# 现按标称宽等比缩放：全标记版 663:551 → 256x213 / 128x106；
+# 盘面版 411:410 aspect 1.0024，按裁定取正方形 64x64 / 32x32（形变 0.24%，不可见）。
+# 只缩放不裁剪，盘面保持完整圆形不切边；透明底保留（故角 alpha 必须为 0）。
 TRANSPARENT_ICONS = [
-    ("logo-full-256.png", 663, 551, CROP_FULL),
-    ("logo-full-128.png", 332, 276, CROP_FULL),
-    ("logo-disc-64.png",  411, 410, CROP_DISC),
-    ("logo-disc-32.png",  206, 205, CROP_DISC),
+    ("logo-full-256.png", 256, 213, CROP_FULL),
+    ("logo-full-128.png", 128, 106, CROP_FULL),
+    ("logo-disc-64.png",   64,  64, CROP_DISC),
+    ("logo-disc-32.png",   32,  32, CROP_DISC),
 ]
 
 
@@ -233,6 +240,45 @@ def main() -> int:
                 (xs.max()-xs.min()+1) >= mw-3 and (ys.max()-ys.min()+1) >= mh-3)
         ok = ok and fits
         print("%-24s %-14s %-14s %-8s" % (name, got, want, "PASS" if fits else "FAIL"))
+
+    # 文件名承诺自检（Job000144 返工核心）：文件名里的标称数字必须等于实际像素尺寸。
+    # 这条挡住「文件名说谎」——原始缺陷正是 logo-full-256.png 实际为 663x551，
+    # 而文件名与 manifest 都对外承诺 256，体积还白白吃掉 482KB。
+    print("\n文件名承诺自检（文件名标称数字 vs 实际像素）:")
+    print("%-24s %-12s %-14s %-10s %8s" % ("文件", "实际尺寸", "文件名承诺", "判定", "体积B"))
+    for name, p, fmt in made:
+        s = inspect(p)
+        digits = re.findall(r"(\d+)", name)
+        if not digits:
+            continue
+        # 承诺值 = 文件名里唯一的标称数字（favicon-16 / maskable-512 / logo-full-256…）
+        claim = int(digits[-1])
+        # 平台类资产画布是正方形（宽==高==标称）；UI 类按宽或高命中标称即可
+        # （logo-full-256 实际 256x213，宽命中；logo-disc-64 为 64x64 两侧都命中）。
+        match = (claim in s["size"])
+        ok = ok and match
+        print("%-24s %-12s %-14s %-10s %8d" % (
+            name, "%dx%d" % s["size"], str(claim),
+            "PASS" if match else "FAIL", s["bytes"]))
+
+    # 透明资产必须真有透明像素。
+    # 注意：**不能**断言「四角alpha==0」——盘面版（logo-disc-*）的 artwork 本身就
+    # 铺满裁切框（实测源裁切框四边余量均为 0），故其角落是实心画面而非透明留白，
+    # 这是原图特性而非切边缺陷。全标记版（logo-full-*）才是四角全透明。
+    print("\n透明资产透明层自检:")
+    print("%-24s %-6s %-12s %-10s %-12s %8s" % (
+        "文件", "mode", "尺寸", "有alpha通道", "全透明px", "判定"))
+    for name, p, fmt in made:
+        if fmt != "PNG32":
+            continue
+        s = inspect(p)
+        good = s["has_alpha"] and s["clear"] > 0
+        ok = ok and good
+        print("%-24s %-6s %-12s %-10s %-12d %8s" % (
+            name, s["mode"], "%dx%d" % s["size"], "是" if s["has_alpha"] else "否",
+            s["clear"], "PASS" if good else "FAIL"))
+    print("  注：盘面版四角为实心画面（源 artwork 铺满裁切框），非缺陷；")
+    print("      全标记版四角全透明。二者均为 RGBA 且含真透明像素。")
 
     print("\nRESULT: %s  共 %d 个文件" % ("OK" if ok else "FAIL", len(made)))
     return 0 if ok else 1

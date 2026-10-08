@@ -8,7 +8,7 @@
 import { createSSRApp, h } from 'vue'
 import { renderToString } from '@vue/server-renderer'
 import { createServer } from 'vite'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
 
 const results = []
 const check = (name, cond, detail) => results.push({ name, ok: !!cond, detail })
@@ -28,14 +28,14 @@ try {
   const full = await render({})
   check('默认 variant=full → logo-full-128',
     full.includes('/brand/logo-full-128.png'), full.match(/\/brand\/[a-z0-9.-]+/)?.[0])
-  check('全标记版固有尺寸 332x276',
-    full.includes('width="332"') && full.includes('height="276"'), full.match(/width="\d+" height="\d+"/)?.[0])
+  check('全标记版固有尺寸 128x106（与文件真实像素一致）',
+    full.includes('width="128"') && full.includes('height="106"'), full.match(/width="\d+" height="\d+"/)?.[0])
 
   const disc = await render({ variant: 'disc', height: 28, alt: '全景相册' })
   check("variant='disc' → logo-disc-64",
     disc.includes('/brand/logo-disc-64.png'), disc.match(/\/brand\/[a-z0-9.-]+/)?.[0])
-  check('盘面版固有尺寸 411x410',
-    disc.includes('width="411"') && disc.includes('height="410"'), disc.match(/width="\d+" height="\d+"/)?.[0])
+  check('盘面版固有尺寸 64x64（与文件真实像素一致）',
+    disc.includes('width="64"') && disc.includes('height="64"'), disc.match(/width="\d+" height="\d+"/)?.[0])
   check('alt 透传（图标态承担可访问名）', disc.includes('alt="全景相册"'), '')
   // Vue SSR 把空 alt 序列化成裸属性 alt（等价 alt=""），不能断言成 alt=""
   check("alt='' → 装饰性空 alt（避免读屏重复播报）",
@@ -75,6 +75,37 @@ try {
   // 页头 topbar 不放 Logo（Spec §8.2 锁定）
   const shell = readFileSync('src/layout/AppShell.vue', 'utf8')
   check('页头 topbar 未放 Logo（Spec §8.2 锁定）', !/logo-full|logo-disc/.test(shell), '')
+
+  // ---- Job000144 返工回归护栏：组件声明尺寸 / manifest sizes / 文件真实像素 三者必须一致 ----
+  // 原始缺陷正是三者脱节：文件名承诺 256 而文件实为 663x551，组件也照抄了错值。
+  const pngSize = (rel) => {
+    // 传入的是 '/brand/xxx.png' 或 'brand/xxx.png'，统一去掉前导斜杠再落到 public/
+    const buf = readFileSync('public/' + rel.replace(/^\/+/, ''))
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }   // PNG IHDR 宽高
+  }
+  const componentSrc = readFileSync('src/components/brand/BrandLogo.vue', 'utf8')
+  for (const m of componentSrc.matchAll(/(\/brand\/[a-z0-9-]+\.png)',\s*width:\s*(\d+),\s*height:\s*(\d+)/g)) {
+    const [, rel, w, h] = m
+    const real = pngSize(rel)          // rel 形如 /brand/logo-full-128.png
+    check(`BrandLogo 声明 ${rel} = ${w}x${h} 与文件真实像素一致`,
+      real.w === Number(w) && real.h === Number(h), `实际 ${real.w}x${real.h}`)
+  }
+  // manifest 的 sizes 字段必须等于文件真实像素
+  const manifest = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf8'))
+  for (const ic of manifest.icons) {
+    if (!ic.src.startsWith('/brand/')) continue
+    const real = pngSize(ic.src)
+    check(`manifest sizes ${ic.sizes} 与 ${ic.src} 真实像素一致`,
+      ic.sizes === `${real.w}x${real.h}`, `实际 ${real.w}x${real.h}`)
+  }
+  // 文件名标称数字必须命中真实像素（挡住「文件名说谎」）
+  for (const f of readdirSync('public/brand')) {
+    const digits = f.match(/(\d+)\.png$/)?.[1]
+    if (!digits) continue
+    const real = pngSize('brand/' + f)
+    check(`${f} 文件名标称 ${digits} 命中真实像素 ${real.w}x${real.h}`,
+      real.w === Number(digits) || real.h === Number(digits), '')
+  }
 
   // SideNav 三态：单实例按 mode 切资产，不写两套模板。
   const { default: SideNav } = await server.ssrLoadModule('/src/layout/SideNav.vue')

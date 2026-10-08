@@ -24,13 +24,13 @@
     },
     {
       "src": "/brand/logo-full-256.png",
-      "sizes": "663x551",
+      "sizes": "256x213",
       "type": "image/png",
       "purpose": "any"
     },
     {
       "src": "/brand/logo-disc-64.png",
-      "sizes": "411x410",
+      "sizes": "64x64",
       "type": "image/png",
       "purpose": "any"
     },

@@ -20,9 +20,12 @@ import { computed } from 'vue'
 // 两版资产均为「紧裁内容框」的透明底 PNG，天然无冗余留白，落位不必再补padding。
 //   full = 全标记版（含「panomint」字标），仅可用于浅底；深色底上字标对比度 1.09:1 等于消失。
 //   disc = 盘面版（无字标），小尺寸与深色底通用。
+// width/height 必须等于文件真实像素：这两个值是给浏览器的固有宽高比，用来在图片
+// 加载前占位。填错会造成加载瞬间的布局抖动（Job000144 返工：曾误填 332x276/411x410，
+// 而文件实际已是 256x213/64x64）。改资产尺寸时这里必须同步。
 const ASSETS = {
-  full: { src: '/brand/logo-full-128.png', width: 332, height: 276 },
-  disc: { src: '/brand/logo-disc-64.png', width: 411, height: 410 }
+  full: { src: '/brand/logo-full-128.png', width: 128, height: 106 },
+  disc: { src: '/brand/logo-disc-64.png', width: 64, height: 64 }
 }
 
 const props = defineProps({
