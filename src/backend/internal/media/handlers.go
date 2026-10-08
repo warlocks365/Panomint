@@ -133,11 +133,11 @@ func (h *Handler) Duplicates(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-// DateHistogram GET /media/date-histogram?granularity=year|month（Job000005，默认 month）。
+// DateHistogram GET /media/date-histogram?granularity=year|month|day（Job000005，默认 month）。
 // 作用域与 List 完全一致（space 缺省=本人；同一 scopeConds 谓词）；taken_at NULL 归 unknown 桶。
 func (h *Handler) DateHistogram(c *gin.Context) {
 	granularity := c.DefaultQuery("granularity", "month")
-	if granularity != "year" && granularity != "month" {
+	if _, ok := histogramTrunc[granularity]; !ok {
 		httperr.Envelope(c, http.StatusBadRequest, "INVALID_PARAMS", ErrInvalidGranularity.Error())
 		return
 	}

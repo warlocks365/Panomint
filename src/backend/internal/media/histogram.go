@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// 日期密度直方图（Job000005）：GET /media/date-histogram?granularity=year|month。
+// 日期密度直方图（Job000005）：GET /media/date-histogram?granularity=year|month|day。
 // 作用域与 timeline 完全一致：谓词取自 scopeConds（唯一真源，见 scope.go），
 // 均排除软删；space 缺省=本人个人空间，绝不是"全部"。
 
 // ErrInvalidGranularity 粒度非法。
-var ErrInvalidGranularity = errors.New("granularity 仅支持 year|month")
+var ErrInvalidGranularity = errors.New("granularity 仅支持 year|month|day")
 
 // HistogramBucket 直方图桶（taken_at 为 NULL 的媒体归入 "unknown" 桶）。
 type HistogramBucket struct {
@@ -23,6 +23,7 @@ type HistogramBucket struct {
 var histogramTrunc = map[string]struct{ trunc, fmt string }{
 	"year":  {"year", "YYYY"},
 	"month": {"month", "YYYY-MM"},
+	"day":   {"day", "YYYY-MM-DD"},
 }
 
 // DateHistogram 按 taken_at 粒度聚合计数（升序；"unknown" 桶字典序自然落末位）。
