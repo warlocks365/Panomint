@@ -1,11 +1,22 @@
 import { computed } from 'vue'
+import {
+  HEADER_HEIGHT,
+  buildHeaderLookup,
+  headerKeyOf,
+  headerLabelOf,
+  monthKeyOf
+} from './timelineDimensions'
 
-// TimelineGrid 拆解（Job000088）：连续时间流分组逻辑——
-// 按 taken_at（缺省 created_at）内联月/日分组标题，满一行（cols 格）即 flush；
-// offsets 为每个流元素的精确纵向偏移（行高与标题高度均定值），供滑块二分定位；
-// monthIndex 为「月键 → 流索引」，供滑块跳转。itemDate/pad2 供滑块端复用。
-const MONTH_H = 46 // 月标题高度（含下间距，与 CSS 一致）
-const DAY_H = 34 // 日标题高度（含下间距，与 CSS 一致）
+// 时间轴连续流分组（Job000088 拆解，Job000145 参数化为三档维度）——
+// 按 taken_at（缺省 created_at）内联**当前档位唯一**的分组标题，满一行（cols 格）即 flush；
+// offsets 为每个流元素的精确纵向偏移（行高与标题高度均为定值），供锚点定位按 offset 精确命中；
+// headerIndex 为「该档位锚点键 → 流索引」，供 seek 跳转。
+//
+// 语义铁律（ADR-001 已纠正的初稿误读）：档位即**唯一可见**的标题粒度。
+// year 档不产出 month/day 标题，month 档不产出 day 标题，day 档只产出 day 标题。
+// 若改为「三档全渲染」，会导出「年档标题比日档更多」的自相矛盾结果，且违反 AC-01。
+//
+// 标题高度取自 timelineDimensions.HEADER_HEIGHT（单一真源），本文件不再自带魔数。
 
 export function itemDate(m) {
   const t = m.taken_at || m.created_at
@@ -14,14 +25,12 @@ export function itemDate(m) {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-export function pad2(n) { return String(n).padStart(2, '0') }
-
-export function useTimelineGrouping(items, cols, rowHeight) {
+export function useTimelineGrouping(items, cols, rowHeight, dimension) {
   const flat = computed(() => {
+    const dim = dimension.value
     const out = []
     let cells = []
-    let lastMonth = ''
-    let lastDay = ''
+    let lastKey = ''
 
     const flushRow = () => {
       if (!cells.length) return
@@ -38,32 +47,20 @@ export function useTimelineGrouping(items, cols, rowHeight) {
 
     for (const m of items) {
       const d = itemDate(m)
-      const monthKey = d ? `${d.getFullYear()}-${pad2(d.getMonth() + 1)}` : 'unknown'
-      const dayKey = d ? `${monthKey}-${pad2(d.getDate())}` : 'unknown'
-      if (monthKey !== lastMonth) {
+      const key = headerKeyOf(dim, d)
+      if (key !== lastKey) {
         flushRow()
         out.push({
-          __key: `hm:${monthKey}`,
+          __key: `h:${dim}:${key}`,
           header: true,
-          level: 'month',
-          monthKey,
-          label: d ? `${d.getFullYear()} 年 ${d.getMonth() + 1} 月` : '未知日期',
+          level: dim,
+          anchorKey: key,
+          // monthKey 保留：日历降级定位与「同月首项」兜底按月键查，且与现状兼容
+          monthKey: d ? monthKeyOf(d) : key,
+          label: headerLabelOf(dim, d),
           ts: d ? d.getTime() : 0
         })
-        lastMonth = monthKey
-        lastDay = ''
-      }
-      if (dayKey !== lastDay && d) {
-        flushRow()
-        out.push({
-          __key: `hd:${dayKey}`,
-          header: true,
-          level: 'day',
-          monthKey,
-          label: `${d.getMonth() + 1} 月 ${d.getDate()} 日`,
-          ts: d.getTime()
-        })
-        lastDay = dayKey
+        lastKey = key
       }
       cells.push(m)
       if (cells.length === cols.value) flushRow()
@@ -72,26 +69,20 @@ export function useTimelineGrouping(items, cols, rowHeight) {
     return out
   })
 
-  /* 每个流元素的精确纵向偏移（行高与标题高度均为定值） */
+  /* 每个流元素的精确纵向偏移（行高与标题高度均为定值，与 cols 无关——offsets 不随列数漂移） */
   const offsets = computed(() => {
     const arr = new Array(flat.value.length)
     let y = 0
     for (let i = 0; i < flat.value.length; i++) {
       arr[i] = y
       const it = flat.value[i]
-      y += it.header ? (it.level === 'month' ? MONTH_H : DAY_H) : rowHeight.value
+      y += it.header ? HEADER_HEIGHT[it.level] ?? HEADER_HEIGHT.month : rowHeight.value
     }
     return arr
   })
 
-  /* 月标题 → 流索引（用于滑块跳转） */
-  const monthIndex = computed(() => {
-    const map = new Map()
-    flat.value.forEach((it, i) => {
-      if (it.header && it.level === 'month') map.set(it.monthKey, i)
-    })
-    return map
-  })
+  /* 当前档位锚点键 → 流索引（精确 O(1) + 升序键数组供兜底二分） */
+  const headerIndex = computed(() => buildHeaderLookup(flat.value))
 
-  return { flat, offsets, monthIndex }
+  return { flat, offsets, headerIndex }
 }

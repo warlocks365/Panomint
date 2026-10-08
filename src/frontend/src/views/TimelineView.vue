@@ -39,6 +39,14 @@
         {{ placeFilter }} ×
       </button>
 
+      <!-- Job000145：视图粒度分段控件 + 日期跳转入口（紧贴筛选器，spacer 之前） -->
+      <TimelineDimensionControls
+        :panel="panel"
+        :has-any-media="hasAnyMedia"
+        :day-buckets="dayBuckets"
+        :unknown-count="unknownCount"
+      />
+
       <div class="spacer"></div>
 
       <button class="tool-btn" title="回收站" @click="trashOpen = true">
@@ -49,16 +57,18 @@
       </button>
     </header>
 
-    <!-- 单一连续时间流（最新在前，内联月/日标题 + 右侧日期滑块）；Job000079 批量操作 -->
+    <!-- 单一连续时间流（最新在前，内联当前档位标题 + 右侧日期滑块）；Job000079 批量操作 -->
     <TimelineGrid
       ref="gridRef"
       :type="typeFilter"
       :favorites="favOnly"
       :place="placeFilter"
+      :dimension="panel.dim.dimension.value"
       selectable
       @open="openViewer"
       @changed="onBatchChanged"
       @thumb-action="onThumbAction"
+      @drag-state="panel.dim.setDragLocked"
     />
 
     <MediaViewer
@@ -77,8 +87,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import gsap from 'gsap'
 import TimelineGrid from '../components/timeline/TimelineGrid.vue'
+import TimelineDimensionControls from '../components/timeline/TimelineDimensionControls.vue'
 import MediaViewer from '../components/viewer/MediaViewer.vue'
 import TrashPanel from '../components/timeline/TrashPanel.vue'
+import { useTimelineDimensionPanel } from '../components/timeline/useTimelineDimensionPanel'
 import { deleteMedia, setFavorite } from '../api/media'
 
 const rootEl = ref(null)
@@ -123,6 +135,11 @@ function clearPlace() {
 }
 
 const gridItems = computed(() => gridRef.value?.items ?? [])
+const hasAnyMedia = computed(() => gridItems.value.length > 0)
+// day 粒度直方图由 pager 在挂载时取齐（见 useTimelinePager.loadHistograms），
+// 日历与滑块共用同一份 count，且切档/开日历都不发请求（AC-04）
+const dayBuckets = computed(() => gridRef.value?.dayBuckets ?? [])
+const unknownCount = computed(() => gridRef.value?.unknownCount ?? 0)
 
 function is360(item) {
   return !!(item?.is_360 || item?.type === '360')
@@ -211,6 +228,12 @@ function onBatchChanged() {
 onMounted(() => {
   if (route.query.trash === '1') trashOpen.value = true
 })
+
+/* ---------- Job000145：三档维度 + 日期锚点跳转 ---------- */
+
+// 装配逻辑（切档时序/ 锚点快照 / 挂起切换 / 日历跳转）收敛在 useTimelineDimensionPanel：
+// 那三条时序不变式散在 .vue 里改接线时极易只改一处，故不放在本文件。
+const panel = useTimelineDimensionPanel({ gridRef, hasAnyMedia })
 </script>
 
 <style scoped>

@@ -1,5 +1,5 @@
 <template>
-  <div ref="wrapRef" class="grid-wrap">
+  <div ref="wrapRef" class="grid-wrap" :style="{ '--tl-header-h': headerHeight + 'px' }">
     <div v-if="pager.error.value" class="grid-error">
       <p>加载失败：{{ pager.error.value }}</p>
       <button class="retry-btn" @click="pager.reset">重试</button>
@@ -45,19 +45,19 @@
         </DynamicScroller>
 
         <div v-if="!pager.loading.value && pager.finished.value && !pager.items.length" class="grid-empty">
-          <svg viewBox="0 0 24 24" width="40" height="40" fill="none">
-            <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5" />
-            <path d="M3 16l5-5 4 4 3-3 6 6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
-          </svg>
+          <img src="/brand/logo-disc-64.png" width="40" height="40" alt="" />
           <p>{{ emptyText }}</p>
         </div>
 
         <DateSlider
           class="date-slider"
           :buckets="pager.histogram.value"
+          :dimension="dimension"
+          :truncated="pager.histogramTruncated.value"
           :fraction="seek.scrollFraction.value"
           :busy="seek.seeking.value"
-          @seek="(k) => seek.seekTo(k, scrollEl)"
+          @seek="(p) => seek.seekTo(p, scrollEl)"
+          @drag-state="(v) => emit('drag-state', v)"
         />
       </div>
 
@@ -86,11 +86,10 @@
 </template>
 
 <script setup>
-// Job000088 拆解（逻辑密集组件走 composable 路线，DOM 结构薄不拆 presentation）：
-// - useTimelinePager：分页状态机（items 去重/cursor/三态/代次守卫/histogram）
-// - useTimelineGrouping：月日分组（flat/offsets/monthIndex）
-// - useTimelineSeek：日期滑块双向同步（rAF 节流二分 + seekTo 按需翻页跳转）
-// 宿主保留：布局列宽/行高、空态文案、虚拟滚动 DOM 生命周期（RO/IO/scroller 换绑/清理）。
+// Job000088 拆解（逻辑密集走 composable，DOM 结构薄不拆 presentation）：
+// - useTimelineStream：pager 分页 / grouping 分组 / seek 锚点三层接线
+// 宿主保留：布局列宽行高、空态文案、虚拟滚动 DOM 生命周期。
+// Job000145：档位由宿主 TimelineView 经 prop 下传，本组件**不持有档位状态**。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
@@ -99,17 +98,16 @@ import ThumbItem from './ThumbItem.vue'
 import DateSlider from './DateSlider.vue'
 import BatchBar from '../media/BatchBar.vue'
 import { useBatchOps } from '../media/useBatchOps'
-import { useTimelinePager } from './useTimelinePager'
-import { useTimelineGrouping } from './useTimelineGrouping'
-import { useTimelineSeek } from './useTimelineSeek'
+import { useTimelineStream } from './useTimelineStream'
 
 const props = defineProps({
   type: { type: String, default: '' }, // photo | video | 360 | ''
   favorites: { type: Boolean, default: false },
   place: { type: String, default: '' }, // Job000062：地点过滤（地点页点入）
-  selectable: { type: Boolean, default: false } // Job000079 时间轴批量操作（勾选 + 吸底操作栏）
+  selectable: { type: Boolean, default: false }, // Job000079 时间轴批量操作
+  dimension: { type: String, default: 'month' } // Job000145：分组维度，宿主 TimelineView 持有
 })
-const emit = defineEmits(['open', 'changed', 'thumb-action'])
+const emit = defineEmits(['open', 'changed', 'thumb-action', 'drag-state'])
 
 // 选中集按媒体 id 存于本组件（虚拟滚动只复用 DOM，选中态不丢）；操作完成后 emit changed 让宿主 reload
 const batch = useBatchOps(() => emit('changed'))
@@ -137,8 +135,6 @@ const cellSize = computed(() => {
 
 const rowHeight = computed(() => cellSize.value + GAP)
 
-const pager = useTimelinePager(props)
-
 // DESIGN.md §8 grid-stagger（虚拟滚动安全版）：仅对**首屏首批**渲染的缩略图做一次瀑布进入，
 // 后续滚动加载不做动画（DynamicScroller DOM 复用会让重复动画错位）；clearProps 防残留 transform。
 let firstStaggerDone = false
@@ -165,16 +161,8 @@ watch(
   }
 )
 
-const grouping = useTimelineGrouping(pager.items, cols, rowHeight)
-const seek = useTimelineSeek({
-  flat: grouping.flat,
-  offsets: grouping.offsets,
-  monthIndex: grouping.monthIndex,
-  histogram: pager.histogram,
-  items: pager.items,
-  loadMore: pager.loadMore,
-  finished: pager.finished
-})
+// Job000145：档位真源是 props，本组件只消费不持有；接线见 useTimelineStream 顶部的不变式说明
+const { pager, grouping, seek, headerHeight, captureAnchor, restoreAnchor } = useTimelineStream(props, cols, rowHeight)
 
 const emptyText = computed(() => {
   if (props.favorites) return '暂无收藏的媒体'
@@ -222,7 +210,7 @@ onMounted(() => {
   bindScroll(wrapRef.value?.querySelector('.vue-recycle-scroller') || null)
   makeSentinelIO()
   pager.loadMore()
-  pager.loadHistogram()
+  pager.loadHistograms() // 三档一次取齐：切档零请求（AC-04）
 })
 
 // scroller 与 sentinel 随首屏渲染挂载后补挂
@@ -248,7 +236,19 @@ onBeforeUnmount(() => {
 
 watch(() => [props.type, props.favorites, props.place], () => pager.reset())
 
-defineExpose({ items: pager.items, removeById: pager.removeById, reload: pager.reset })
+// 宿主（TimelineView）用它做切档锚点与日历跳转：capture 抓视口顶部媒体，
+// restore 按新档位重定位，seekTo 接收 {dimension,key}；dayBuckets 与滑块刻度同源（§2.4 规则 2）。
+defineExpose({
+  items: pager.items,
+  removeById: pager.removeById,
+  reload: pager.reset,
+  loading: pager.loading,
+  dayBuckets: pager.histograms.day,
+  unknownCount: pager.unknownCount,
+  captureAnchor: () => captureAnchor(scrollEl),
+  restoreAnchor: (a) => restoreAnchor(scrollEl, a),
+  seekTo: (payload) => seek.seekTo(payload, scrollEl)
+})
 </script>
 
 <style scoped>
@@ -278,17 +278,14 @@ defineExpose({ items: pager.items, removeById: pager.removeById, reload: pager.r
   align-items: flex-end;
   color: var(--color-text-primary);
   overflow: hidden;
-}
-
-.tl-header.month {
-  height: 46px;
+  /* 高度来自 timelineDimensions.HEADER_HEIGHT（JS 经 --tl-header-h 下发，单一真源） */
+  height: var(--tl-header-h, 46px);
   padding-bottom: 8px;
   font-size: var(--font-size-lg);
   font-weight: 600;
 }
 
 .tl-header.day {
-  height: 34px;
   padding-bottom: 6px;
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -318,6 +315,9 @@ defineExpose({ items: pager.items, removeById: pager.removeById, reload: pager.r
   color: var(--color-text-disabled);
   font-size: var(--font-size-md);
 }
+
+/* 空状态品牌标记（Job000145 替换原40px 线框图标）：盘面版，透明底衬暖灰 */
+.grid-empty img { object-fit: contain; opacity: 0.82; }
 
 .grid-error {
   flex: 1;
