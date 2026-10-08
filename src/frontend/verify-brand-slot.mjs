@@ -136,16 +136,25 @@ try {
     logoImgs(navExpanded) === 1 && logoImgs(navIcon) === 1,
     `expanded=${logoImgs(navExpanded)} icon=${logoImgs(navIcon)}`)
 
-  // 三个认证页：全标记版 72px，且不与深色页混淆
+  // 三个认证页：主视觉位用 full-lg（256x213，显示高 72px → 2.96x，2x 屏有余量）
   for (const v of ['views/LoginView.vue', 'views/RegisterView.vue', 'views/SetupView.vue']) {
     const src = readFileSync('src/' + v, 'utf8')
-    check(`${v} 引用 BrandLogo 且传 variant="full" + block`,
-      /<BrandLogo\b/.test(src) && /variant="full"/.test(src) && /\sblock\b/.test(src), '')
+    check(`${v} 引用 BrandLogo 且传 variant="full-lg" + block`,
+      /<BrandLogo\b/.test(src) && /variant="full-lg"/.test(src) && /\sblock\b/.test(src), '')
     check(`${v} 引用了 BrandLogo 的 import`, /import BrandLogo from/.test(src), '')
     // 间距收在组件里（block 形态），页面内不应再有各写一份的 logo 样式
     check(`${v} 未重复定义 Logo 样式（间距由组件 block 提供）`,
       !/\.(login|setup)-logo\s*\{/.test(src), '')
   }
+
+  // 认证三页必须用 2x 有余量的 256 版；侧栏保持 128（28px 显示高已3.8x 余量）
+  const lg = await render({ variant: 'full-lg', height: 72, block: true, alt: '全景相册' })
+  check("variant='full-lg' → logo-full-256",
+    lg.includes('/brand/logo-full-256.png'), lg.match(/\/brand\/[a-z0-9.-]+/)?.[0])
+  check('full-lg 固有尺寸 256x213（与文件真实像素一致）',
+    lg.includes('width="256"') && lg.includes('height="213"'), lg.match(/width="\d+" height="\d+"/)?.[0])
+  check('侧栏紧凑位仍用 logo-full-128（未误改为 256）',
+    navExpanded.includes('/brand/logo-full-128.png'), navExpanded.match(/\/brand\/[a-z0-9.-]+/)?.[0])
 
   // O1 棘轮护栏：本次不得把任何原本 <=300 行的文件顶破 300 行
   // （RegisterView 曾因页内 Logo 样式被顶到 301 行，此处锁死该回归）。

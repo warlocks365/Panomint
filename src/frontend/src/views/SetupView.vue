@@ -3,7 +3,7 @@
     <span class="wordmark">PANOMINT</span>
     <div class="setup-card">
       <!-- 品牌 Logo（Job000144）：置于两个分支之上，初始化中与完成后都可见 -->
-      <BrandLogo variant="full" :height="72" block alt="全景相册" />
+      <BrandLogo variant="full-lg" :height="72" block alt="全景相册" />
       <template v-if="!done">
         <p class="setup-eyebrow">PANOMINT · 首次初始化</p>
         <h1 class="setup-title">欢迎使用全景相册</h1>

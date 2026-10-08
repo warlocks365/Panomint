@@ -17,14 +17,19 @@
 <script setup>
 import { computed } from 'vue'
 
-// 两版资产均为「紧裁内容框」的透明底 PNG，天然无冗余留白，落位不必再补padding。
-//   full = 全标记版（含「panomint」字标），仅可用于浅底；深色底上字标对比度 1.09:1 等于消失。
-//   disc = 盘面版（无字标），小尺寸与深色底通用。
+// 三档资产均为「紧裁内容框」的透明底 PNG，天然无冗余留白，落位不必再补padding。
+//   full    = 全标记版（含「panomint」字标）128×106 —— 紧凑位（侧栏 28px 显示高，3.8x 余量）
+//   full-lg = 全标记版 256×213 —— 主视觉位（登录/注册/Setup，显示高 72px）
+//   disc    = 盘面版（无字标）64×64 —— 小尺寸与深色底通用
+//
+// 全标记版**仅可用于浅底**：深色底上字标墨色对比度仅 1.09:1，等于看不见。
+//
 // width/height 必须等于文件真实像素：这两个值是给浏览器的固有宽高比，用来在图片
 // 加载前占位。填错会造成加载瞬间的布局抖动（Job000144 返工：曾误填 332x276/411x410，
 // 而文件实际已是 256x213/64x64）。改资产尺寸时这里必须同步。
 const ASSETS = {
   full: { src: '/brand/logo-full-128.png', width: 128, height: 106 },
+  'full-lg': { src: '/brand/logo-full-256.png', width: 256, height: 213 },
   disc: { src: '/brand/logo-disc-64.png', width: 64, height: 64 }
 }
 
@@ -34,7 +39,7 @@ const props = defineProps({
     default: 'full',
     // 字面量而非引用 ASSETS：defineProps 会被提升到 setup() 之外，
     // 不能引用 script setup 内声明的局部变量（否则编译期直接报错）。
-    validator: (v) => v === 'full' || v === 'disc'
+    validator: (v) => v === 'full' || v === 'full-lg' || v === 'disc'
   },
   // 展示高度。给数字则按 px；也可传 CSS 长度（如 '2rem'）以跟随根字号缩放。
   height: { type: [Number, String], default: 28 },
