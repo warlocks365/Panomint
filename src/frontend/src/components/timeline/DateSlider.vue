@@ -31,22 +31,14 @@
 // seek 载荷为 { dimension, key } 对象：裸字符串无法自证档位，useTimelineSeek 收到
 // '2024-06' 时无法区分它来自月档的合法请求还是日档的误请求（ADR-001 记录的踩坑）。
 import { computed, ref } from 'vue'
-import {
-  bucketRange,
-  bucketTs,
-  headerLabelOf,
-  keyAtTs,
-  sortedBucketKeys,
-  tsAtFraction
-} from './timelineDimensions'
+import { bucketRange, bucketTs, headerLabelOf, keyAtTs, tsAtFraction } from './timelineDimensions'
+import { TICK_LIMIT, selectTicks } from './histogramBudget'
 
 const props = defineProps({
-  // GET /media/date-histogram?granularity=<dimension> → [{ bucket, count }]
+  // GET /media/date-histogram?granularity=<dimension> → [{ bucket, count }]，升序（最旧在前）
   buckets: { type: Array, default: () => [] },
   // 当前档位，决定桶键形状（year/month/day）
   dimension: { type: String, default: 'month' },
-  // 桶数超上限被截断 → 降级为等宽刻度，不按 count 定宽（否则上万 DOM 节点）
-  truncated: { type: Boolean, default: false },
   // 滚动位置同步进来的当前进度（0=最新，1=最旧）
   fraction: { type: Number, default: 0 },
   // 正在加载/跳转中
@@ -61,31 +53,30 @@ const dragFraction = ref(0)
 const UNIT = { year: '年份', month: '月份', day: '日期' }
 const unitName = computed(() => UNIT[props.dimension] || UNIT.month)
 
-/** 升序有效桶键（taken_at 为空的媒体归unknown 桶，已在 pager 侧剔除）。 */
-const keys = computed(() => sortedBucketKeys(props.dimension, props.buckets))
-
+// 滑块时间范围从**完整**桶数据推导（这是刚修掉的缺陷点：若上游按渲染预算截断过，
+// 范围会整体错位，滚动同步与拖拽跳转都定位到错误位置）
 const range = computed(() => bucketRange(props.dimension, props.buckets))
 
-const byKey = computed(() => {
-  const map = new Map()
-  for (const b of props.buckets) {
-    if (b && typeof b.bucket === 'string') map.set(b.bucket, b.count || 0)
-  }
-  return map
-})
-
-/** 密度刻度：按桶代表时间定位，疏密用宽度 + 透明度表达。 */
+/**
+ * 密度刻度：按桶代表时间定位，疏密用宽度 + 透明度表达。
+ *
+ * 呈现层裁剪在这里做（而非在 pager 存数据时截断）：pager 必须留完整数据，
+ * 因为日历要用它给任意一天打圆点，而 bucketRange 也要用它推导滑块时间范围。
+ * 桶数超 TICK_LIMIT 时 selectTicks 按**时间分箱聚合**（count 求和），
+ * 既守住 DOM 节点上限，又不会像截断那样在时间轴上留下空白、扭曲密度形状。
+ */
 const ticks = computed(() => {
   if (!range.value.newestTs) return []
   const span = Math.max(1, range.value.newestTs - range.value.oldestTs)
-  const counts = keys.value.map((k) => byKey.value.get(k) || 0)
-  const max = Math.max(1, ...counts)
-  return keys.value.map((k, i) => {
-    // 桶被截断时放弃按 count 定宽（ADR-001：day 档桶数可达上万）
-    const ratio = props.truncated ? 1 : (counts[i] || 0) / max
-    const top = Math.min(100, Math.max(0, ((range.value.newestTs - bucketTs(props.dimension, k)) / span) * 100))
+  const shown = selectTicks(props.dimension, props.buckets, TICK_LIMIT)
+  const max = Math.max(1, ...shown.map((b) => b.count || 0))
+  return shown.map((b, i) => {
+    const ratio = (b.count || 0) / max
+    // 聚合箱用箱中点定位；未聚合的原始桶用自身代表时间
+    const ts = b.ts || bucketTs(props.dimension, b.bucket)
+    const top = Math.min(100, Math.max(0, ((range.value.newestTs - ts) / span) * 100))
     return {
-      key: k,
+      key: `${b.bucket}#${i}`,
       top,
       w: 5 + Math.round(9 * ratio),
       o: 0.4 + 0.6 * ratio

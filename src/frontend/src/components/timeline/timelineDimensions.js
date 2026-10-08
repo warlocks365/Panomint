@@ -29,13 +29,6 @@ export const MIN_ITEM_SIZE = 34
 /** 无拍摄日期媒体的占位键。后端 histogram 也会产出同名桶，两者必须同形才可比。 */
 export const UNKNOWN_KEY = 'unknown'
 
-/**
- * 直方图桶渲染上限。day 档桶数上界约 3660/年，跨十年可上万；
- * 超限时按「每 N 桶聚一格」并放弃按 count 定宽，防止上万 DOM 节点拖垮滚动（ADR-001 负面代价）。
- */
-export const TICK_LIMIT = 400
-
-/** 各档位桶键正则。必须与后端 to_char(date_trunc(...), fmt) 的输出逐字对齐。 */
 const BUCKET_PATTERNS = {
   year: /^\d{4}$/,
   month: /^\d{4}-\d{2}$/,
@@ -110,6 +103,9 @@ export function bucketTs(dimension, key) {
   if (dimension === 'day') return new Date(p.y, p.m - 1, p.d, 12).getTime()
   return new Date(p.y, p.m - 1, 15).getTime()
 }
+
+// 桶预算相关的常量与函数（HISTOGRAM_MAX_BUCKETS / TICK_LIMIT / keepNewest / selectTicks）
+// 已拆到 histogramBudget.js —— 「键与标签」与「桶预算」是两个关注点，变更节奏不同。
 
 /** 升序桶键（已剔除 unknown 与形状不符项）。 */
 export function sortedBucketKeys(dimension, buckets) {

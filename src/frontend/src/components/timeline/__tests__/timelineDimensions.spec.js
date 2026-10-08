@@ -3,7 +3,6 @@ import {
   DIMENSIONS,
   HEADER_HEIGHT,
   MIN_ITEM_SIZE,
-  TICK_LIMIT,
   bucketRange,
   buildHeaderLookup,
   buildMonthMatrix,
@@ -39,10 +38,6 @@ describe('维度枚举与高度表', () => {
     const minH = Math.min(...Object.values(HEADER_HEIGHT))
     expect(MIN_ITEM_SIZE).toBeLessThanOrEqual(minH)
     expect(MIN_ITEM_SIZE).toBe(34)
-  })
-
-  it('桶渲染上限为正数（day档桶数上界约 3660/年，需截断保护）', () => {
-    expect(TICK_LIMIT).toBeGreaterThan(0)
   })
 })
 

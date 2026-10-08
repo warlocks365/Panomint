@@ -83,6 +83,8 @@
 </template>
 
 <script setup>
+// 行数坐标：Job000145 接入三档维度接线后本文件 290 行，距 300 行门禁仅剩 10 行余量。
+// 后续若再加功能**须先拆分**（候选：onThumbAction / 收藏 / 删除一族，属Job000143 且与时间轴无关）。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import gsap from 'gsap'

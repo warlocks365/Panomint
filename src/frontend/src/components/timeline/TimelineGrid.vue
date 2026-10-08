@@ -53,7 +53,6 @@
           class="date-slider"
           :buckets="pager.histogram.value"
           :dimension="dimension"
-          :truncated="pager.histogramTruncated.value"
           :fraction="seek.scrollFraction.value"
           :busy="seek.seeking.value"
           @seek="(p) => seek.seekTo(p, scrollEl)"
