@@ -217,3 +217,78 @@ describe('守护点 3 · 日历组件层：末月日期仍可点（端到端不�
     expect(rendered.length).not.toBe(buckets.length)
   })
 })
+
+describe('防御性排序 · 输入乱序也能保住最新的桶', () => {
+  // 后端契约是 `ORDER BY 1 ASC`（histogram.go:42），本应天然升序。
+  // 但一旦后端排序变更（或将来引入缓存/合并打乱顺序），slice(-limit) 会
+  // 静默取到**最旧**的一批 —— 即最坏的那个 bug 原地复活，且开发期毫无征兆。
+  // 故 keepNewest / selectTicks 入口都按桶键排一次：与输入顺序无关。
+
+  it('keepNewest：乱序输入下仍保留最新的那些桶', () => {
+    const asc = ascDayBuckets(500).map((b) => ({ bucket: b.bucket, count: b.count }))
+    const shuffled = [...asc].reverse() // 完全倒序（最坏情况）
+    const kept = keepNewest(shuffled, 100)
+
+    expect(kept).toHaveLength(100)
+    // 保留的必须是最新的 100 个，而不是倒序数组的末尾 100 个（即最旧的）
+    expect(kept[99].bucket).toBe(asc[499].bucket)
+    expect(kept.some((b) => b.bucket === asc[0].bucket)).toBe(false)
+    // 且结果本身是升序的
+    for (let i = 1; i < kept.length; i++) {
+      expect(kept[i].bucket > kept[i - 1].bucket).toBe(true)
+    }
+  })
+
+  it('keepNewest：随机打乱（非单调倒序）同样保住最新', () => {
+    const asc = ascDayBuckets(300).map((b) => ({ bucket: b.bucket, count: b.count }))
+    const shuffled = [...asc]
+    // 确定性「伪随机」：按取模步长重排，避免用例依赖 Math.random 造成不稳定
+    shuffled.sort((a, b) => (a.bucket.charCodeAt(9) % 7) - (b.bucket.charCodeAt(9) % 7))
+    const kept = keepNewest(shuffled, 50)
+    expect(kept[kept.length - 1].bucket).toBe(asc[299].bucket)
+  })
+
+  it('keepNewest：未超上限时也返回升序副本（不污染调用方数组）', () => {
+    const input = ascDayBuckets(50).reverse()
+    const snapshot = input.map((b) => b.bucket)
+    const kept = keepNewest(input, 100)
+    expect(kept).toHaveLength(50)
+    expect(kept[0].bucket < kept[49].bucket).toBe(true)
+    // 原数组未被就地排序（副作用会污染 pager 的响应引用）
+    expect(input.map((b) => b.bucket)).toEqual(snapshot)
+  })
+
+  it('keepNewest：无效桶（null / 非字符串键）沉底，不占用保留名额', () => {
+    const asc = ascDayBuckets(100).map((b) => ({ bucket: b.bucket, count: b.count }))
+    const dirty = [...asc, null, { count: 5 }, { bucket: 123, count: 5 }]
+    const kept = keepNewest(dirty, 10)
+    expect(kept).toHaveLength(10)
+    // 100 个有效桶 + 3 个无效桶，按键排序后无效桶沉底 → 末尾 10 个是最新的 10 个有效桶
+    expect(kept[9].bucket).toBe(asc[99].bucket)
+    expect(kept[0].bucket).toBe(asc[90].bucket)
+    expect(kept.some((b) => !b || typeof b.bucket !== 'string')).toBe(false)
+  })
+
+  it('selectTicks：乱序输入下分箱边界仍正确（首末箱贴时间两端）', () => {
+    const asc = ascDayBuckets(1000).map((b) => ({ bucket: b.bucket, count: b.count }))
+    const shuffled = [...asc].reverse()
+    const ticks = selectTicks('day', shuffled, 100)
+    expect(ticks.length).toBe(100)
+    const width = (bucketTs('day', asc[999].bucket) - bucketTs('day', asc[0].bucket)) / 100
+    // 首箱贴最旧端、末箱贴最新端 —— 若按乱序输入算 list[0]，两端会颠倒
+    expect(ticks[0].ts).toBeLessThan(bucketTs('day', asc[0].bucket) + width)
+    expect(Math.abs(ticks[99].ts - bucketTs('day', asc[999].bucket))).toBeLessThanOrEqual(width)
+    // 乱序与升序输入应得到相同结果
+    const ordered = selectTicks('day', asc, 100)
+    expect(ticks.map((t) => t.ts)).toEqual(ordered.map((t) => t.ts))
+  })
+
+  it('mutation 自证：去掉防御性排序（改回 slice(-limit)）后乱序用例会红', () => {
+    const asc = ascDayBuckets(500).map((b) => ({ bucket: b.bucket, count: b.count }))
+    const shuffled = [...asc].reverse()
+    // 无防御时的行为：直接取倒序数组的末尾 = 最旧的 100 个
+    const naive = shuffled.slice(-100)
+    expect(naive[99].bucket).toBe(asc[0].bucket) // ← 正是原缺陷
+    expect(keepNewest(shuffled, 100)[99].bucket).toBe(asc[499].bucket) // ← 修复后
+  })
+})
