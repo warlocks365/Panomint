@@ -126,9 +126,50 @@ func TestDateHistogramGranularity(t *testing.T) {
 		t.Fatalf("非法粒度应 400，实际 %d: %s", rec.Code, rec.Body.String())
 	}
 	// 白名单映射完整性
-	for _, g := range []string{"year", "month"} {
+	for _, g := range []string{"year", "month", "day"} {
 		if _, ok := histogramTrunc[g]; !ok {
 			t.Fatalf("粒度 %q 应在白名单中", g)
+		}
+	}
+}
+
+// TestDateHistogramDayPassesValidation 守护 handler 的粒度校验与 store 白名单**同源**
+// （改动 D：查 histogramTrunc 而非硬编码 year||month）。
+//
+// 为什么不能用 `&Handler{}`（Store 为 nil）：那种构造下"被校验拒绝"与"被放行后 nil-panic"
+// 无法区分——nil-panic 会让整个测试二进制崩掉，而不是给出可读的断言失败。
+// 故这里接一个必然连不上的 pool：合法粒度**越过校验进入触库** → 500 QUERY_FAILED；
+// 若改动 D 被回退为硬编码，day 会在触库前就返回 400 INVALID_PARAMS。
+//
+// 变异自证：把 handlers.go 的 `if _, ok := histogramTrunc[granularity]; !ok {`
+// 改成 `if granularity != "year" && granularity != "month" {`，本用例必须变红。
+func TestDateHistogramDayPassesValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &Handler{Store: &Store{Pool: unreachablePool(t)}}
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("user_id", "u1"); c.Set("role", "member") })
+	r.GET("/media/date-histogram", h.DateHistogram)
+
+	for _, g := range []string{"year", "month", "day"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+			"/media/date-histogram?granularity="+g, nil))
+
+		// 判据要具体：越过校验 → 触库失败 → 500 且错误码是 QUERY_FAILED。
+		// 缺陷态的签名是 400 + INVALID_PARAMS，正是下面这条断言要区分开的。
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("granularity=%s 应越过校验进入触库（500），实际 %d: %s",
+				g, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Error struct{ Code, Message string } `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("granularity=%s 响应不是错误封套: %v (%s)", g, err, rec.Body.String())
+		}
+		if body.Error.Code != "QUERY_FAILED" {
+			t.Fatalf("granularity=%s 触库失败应回 QUERY_FAILED（证明已越过校验），实际 %q: %s",
+				g, body.Error.Code, rec.Body.String())
 		}
 	}
 }
