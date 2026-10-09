@@ -328,6 +328,82 @@ send_alert() {
   return 3
 }
 
+# ================================================================ 保留策略 ----
+# 告警目录是**运维留档**，不是日志归档。
+# 2026-10-10 实测问题：一条常驻 P1 每 2 分钟产生一份文件，38 分钟 17 份、
+# 23.4KB；按 cron 频率折算约 720 条/天、约 200MB/年。纯噪声。
+# 重复上千次的告警等于没有告警 —— 它只会训练人忽略它。
+#
+# 两条策略（按天数 / 按条数）同时生效，**先满足者先删**：
+#   - 超过 KEEP_DAYS 的文件删掉
+#   - 只保留最近 KEEP_FILES 份，超出的最旧的删掉
+# 取二者中更严格的保留量，避免磁盘被占满。
+#
+# 只删自己产生的 *.txt，不碰目录里的其它东西；删不掉的（权限等）跳过而非报错，
+# 避免轮转本身成为新的故障源。
+prune_alert_spool() {
+  local keep_days="${ALERT_SPOOL_KEEP_DAYS:-30}"
+  local keep_files="${ALERT_SPOOL_KEEP_FILES:-500}"
+  local dir="$ALERT_SPOOL_DIR"
+
+  [ -d "$dir" ] || return 0
+  # 关掉即可停用；0 表示不按该项删
+  [ "$keep_days" -gt 0 ] 2>/dev/null || keep_days=0
+  [ "$keep_files" -gt 0 ] 2>/dev/null || keep_files=0
+  [ "$keep_days" -eq 0 ] && [ "$keep_files" -eq 0 ] && return 0
+
+  local -a files=()
+  local f
+  while IFS= read -r f; do
+    [ -f "$f" ] && files+=("$f")
+  done < <(find "$dir" -maxdepth 1 -type f -name '*.txt' 2>/dev/null | sort)
+
+  local total="${#files[@]}"
+  [ "$total" -eq 0 ] && return 0
+
+  local -a doomed=()
+  local cutoff now
+  now="$(date +%s)"
+
+  # 策略一：按天数
+  if [ "$keep_days" -gt 0 ]; then
+    cutoff=$(( now - keep_days * 86400 ))
+    for f in "${files[@]}"; do
+      local mt; mt="$(stat -c %Y "$f" 2>/dev/null)" || continue
+      [ "$mt" -lt "$cutoff" ] && doomed+=("$f")
+    done
+  fi
+
+  # 策略二：按条数（files 已按名字排序 = 按时间排序，末尾最新）
+  if [ "$keep_files" -gt 0 ] && [ "$total" -gt "$keep_files" ]; then
+    local cut=$(( total - keep_files ))
+    local i=0
+    for f in "${files[@]}"; do
+      [ "$i" -lt "$cut" ] && doomed+=("$f")
+      i=$(( i + 1 ))
+    done
+  fi
+
+  [ "${#doomed[@]}" -eq 0 ] && return 0
+
+  # 去重后再删（两条策略可能命中同一个文件）
+  local -a uniq=()
+  local seen=""
+  for f in "${doomed[@]}"; do
+    case "$seen" in *"|$f|"*) continue ;; esac
+    seen="$seen|$f|"
+    uniq+=("$f")
+  done
+
+  local n=0
+  for f in "${uniq[@]}"; do
+    rm -f "$f" 2>/dev/null && n=$(( n + 1 ))
+  done
+  printf '[prune] 告警目录轮转：删除 %d 份（原有 %d 份，保留策略 天数=%s 条数=%s）\n' \
+    "$n" "$total" "$keep_days" "$keep_files"
+  return 0
+}
+
 # ---------------------------------------------------------------- 状态 ------
 # alert_channel_status：打印一行人类可读状态，返回码语义同 send_alert
 alert_channel_status() {

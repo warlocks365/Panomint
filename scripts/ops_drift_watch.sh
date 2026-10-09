@@ -43,7 +43,35 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8088/health}"
 # 漂移宽限：源码改完后给人一点时间重建，避免边改边重建时刷屏
 DRIFT_GRACE_SEC="${DRIFT_GRACE_SEC:-600}"
 READY_FAIL_THRESHOLD="${READY_FAIL_THRESHOLD:-2}"
+
+# ------------------------------------------------------------------ 节流 ----
+# ⚠️ 节流必须**按告警级别区分**，把两类东西混在一起必然出错。
+#
+#   事件类（P0）：部署失败、回滚失败、告警投递失败、漂移、镜像不一致……
+#     特征是「状态发生了转变」。处置完成后就消失了。
+#     → **不节流，每轮都报**。这是本机制最正确的一条设计，绝不能改。
+#     理由：节流的目的是「别刷屏」，而事件不重复报就等于「没发生」——
+#     人会以为已经通知过了。2026-10-10 的教训正是如此。
+#
+#   常驻条件类（P1）：「未配置外部告警适配器」是最典型的一个——
+#     用户不填配置它就永远存在，是持续状态而不是事件。
+#     → **按状态变化节流**：未变化时只报首次，之后静默；
+#       状态一变（用户填了 webhook、或换了个报法）立刻重新报。
+#
+# 2026-10-10 真实缺陷（team-lead 发现）：上一版只有「同内容 + 冷却期」
+# 一套机制，且**投递失败时不写节流标记**（那条对 P0 是对的）。
+# 两件事叠加导致这条 P1 每 2 分钟重复一次 —— 38 分钟内积了 17 份完全相同的
+# 告警。按 cron 频率折算约 720 条/天、约 200MB/年，纯噪声。
+# 一条重复 720 次的告警等于没有告警：它只会训练人忽略邮件。
 ALERT_MIN_INTERVAL="${ALERT_MIN_INTERVAL:-600}"
+# 常驻条件的静默期。取值大一些没关系 —— 状态一变就立刻报，不受这个值影响。
+ALERT_RESIDENT_SILENCE_SEC="${ALERT_RESIDENT_SILENCE_SEC:-86400}"
+# 告警目录保留策略（见 prune_alert_spool）。
+# 告警目录是**运维留档**，不是日志归档；无限增长没有任何价值。
+# 两条策略同时生效，先满足者先删（更严格的先删 → 更严格即「保留更少」，
+# 这里取「按天数」与「按条数」中更小的保留量，避免磁盘被占满）。
+ALERT_SPOOL_KEEP_DAYS="${ALERT_SPOOL_KEEP_DAYS:-30}"
+ALERT_SPOOL_KEEP_FILES="${ALERT_SPOOL_KEEP_FILES:-500}"
 # 参与漂移检测的服务。
 #
 # ⚠️ 这里**必须覆盖所有复用 app 镜像的服务**，不只是有 build 段的那几个。
@@ -447,46 +475,118 @@ check_alert_channel
 N="${#PROBLEMS[@]}"
 if [ "$N" -eq 0 ]; then
   printf '%s 漂移巡检通过（产物与源码一致 / 镜像与容器一致 / 上次部署成功 / 入口就绪）\n' "$(date -Is)"
+  # 全部恢复正常也算一次「状态变化」：清掉常驻条件的静默标记，
+  # 这样将来再出现同类问题会被当作新事件重新报出，而不是被旧静默期吞掉。
+  rm -f "$STATE_DIR/alert_resident_hash" "$STATE_DIR/alert_resident_ts" 2>/dev/null
   exit 0
 fi
 
-BODY="$(printf '%s\n' "巡检主机: $(hostname)" "巡检时间: $(date -Is)" "" "发现 $N 项问题：" "" "${PROBLEMS[@]}" "" \
-  "本条告警由 scripts/ops_drift_watch.sh 自动生成（cron 每 2 分钟）。" \
-  "若确认是误报或已处置，可执行：bash scripts/ops_drift_watch.sh --accept  重新登记基线。" \
-  "部署请走：bash scripts/deploy.sh <service>  （不要手工按顺序敲多个命令）")"
+# ---- 按级别拆分：P0=事件（不节流） / P1=常驻条件（按状态变化节流）----
+P0_ITEMS=()
+P1_ITEMS=()
+for p in "${PROBLEMS[@]}"; do
+  case "$p" in
+    "[P0]"*) P0_ITEMS+=("$p") ;;
+    *)      P1_ITEMS+=("$p") ;;
+  esac
+done
 
-echo "$BODY"
-printf '%s 发现 %d 项问题\n' "$(date -Is)" "$N" >> "$STATE_DIR/drift.log"
+printf '%s 发现 %d 项问题（P0 事件 %d 项 / 常驻条件 %d 项）\n' \
+  "$(date -Is)" "$N" "${#P0_ITEMS[@]}" "${#P1_ITEMS[@]}" >> "$STATE_DIR/drift.log"
 
 if [ "$MODE" = "--dry-run" ]; then
+  printf '%s\n' "${PROBLEMS[@]}"
   echo "（--dry-run：不发送告警）"
   exit 1
 fi
 
-# 同内容节流，避免每 2 分钟重复发同一封信
+# 常驻条件的指纹：只由 P1 条目构成。
+# 绝不能把 P0 混进来 —— P0 正文带时间戳，每轮都变，
+# 混进去会让指纹每轮都不同，节流彻底失效（这正是上一版的隐患之一）。
+RESIDENT_HASH=""
+[ "${#P1_ITEMS[@]}" -gt 0 ] && \
+  RESIDENT_HASH="$(printf '%s\n' "${P1_ITEMS[@]}" | sha256sum | cut -d' ' -f1)"
+
+RESIDENT_HASH_FILE="$STATE_DIR/alert_resident_hash"
+RESIDENT_TS_FILE="$STATE_DIR/alert_resident_ts"
+prev_resident_hash="$(cat "$RESIDENT_HASH_FILE" 2>/dev/null || true)"
+prev_resident_ts="$(cat "$RESIDENT_TS_FILE" 2>/dev/null || echo 0)"
+now="$(date +%s)"
+
+# 1 = 需要报（首次或状态变化）；2 = 有常驻条件但状态未变，静默中
+resident_state=0
+if [ -n "$RESIDENT_HASH" ]; then
+  if [ "$RESIDENT_HASH" != "$prev_resident_hash" ]; then
+    resident_state=1
+  elif [ $(( now - prev_resident_ts )) -lt "$ALERT_RESIDENT_SILENCE_SEC" ]; then
+    resident_state=2
+  else
+    # 状态没变但已超出静默期：仍不重复报（常驻条件报一次就够）
+    resident_state=2
+  fi
+fi
+
+REPORT_ITEMS=()
+[ "${#P0_ITEMS[@]}" -gt 0 ] && REPORT_ITEMS+=("${P0_ITEMS[@]}")
+[ "$resident_state" = "1" ] && [ "${#P1_ITEMS[@]}" -gt 0 ] && REPORT_ITEMS+=("${P1_ITEMS[@]}")
+M="${#REPORT_ITEMS[@]}"
+
+if [ "$M" -eq 0 ]; then
+  printf '%s\n' "${PROBLEMS[@]}"
+  echo "无新事件：P0 为空，且 ${#P1_ITEMS[@]} 项常驻条件状态未变化（静默期内，不重复告警）"
+  exit 1
+fi
+
+printf '%s\n' "${REPORT_ITEMS[@]}"
+BODY="$(printf '%s\n' \
+  "巡检主机: $(hostname)" \
+  "巡检时间: $(date -Is)" \
+  "" \
+  "本轮新增 $M 项（当前共 $N 项，其中常驻条件 ${#P1_ITEMS[@]} 项）：" \
+  "" "${REPORT_ITEMS[@]}" "" \
+  "本条告警由 scripts/ops_drift_watch.sh 自动生成（cron 每 2 分钟）。" \
+  "节流策略：P0 事件类**不节流**（状态转变，每轮都报）；" \
+  "P1 常驻条件类**按状态变化节流**（同一条件未变化前只报首次，变化后立刻重报）。" \
+  "若确认是误报或已处置，可执行：bash scripts/ops_drift_watch.sh --accept  重新登记基线。" \
+  "部署请走：bash scripts/deploy.sh <service>  （不要手工按顺序敲多个命令）")"
+
+# P0 的同内容冷却仍然保留（防止 2 分钟内连发两条完全一样的 P0），
+# 冷却到期后一定重报，与「事件不节流」不冲突。
 HASH="$(printf '%s' "$BODY" | sha256sum | cut -d' ' -f1)"
 LAST_HASH_FILE="$STATE_DIR/drift_alert_hash"
 LAST_TS_FILE="$STATE_DIR/drift_alert_ts"
 last_hash="$(cat "$LAST_HASH_FILE" 2>/dev/null || true)"
 last_ts="$(cat "$LAST_TS_FILE" 2>/dev/null || echo 0)"
-now="$(date +%s)"
 if [ "$HASH" = "$last_hash" ] && [ $(( now - last_ts )) -lt "$ALERT_MIN_INTERVAL" ]; then
   echo "同内容告警在 ${ALERT_MIN_INTERVAL}s 冷却期内，跳过"
   exit 1
 fi
 
-send_alert "$(hostname) 构建/部署巡检发现 ${N} 项异常" "$BODY"
+send_alert "$(hostname) 构建/部署巡检发现 ${M} 项新增异常" "$BODY"
 send_rc=$?
-# 只有「外部送达」（返回 0）才算送达，才写节流标记。
-# 返回 3（无外部适配器）/ 4（全失败）都不写 —— 否则下一轮会认为「已经告警过」而跳过，
-# 那正是本任务要消灭的静默失效：机制看起来在跑，实际没人被通知过。
+
+# 常驻条件的静默标记：**投递成功与否都要写**。这是它与 P0 的关键区别。
+#   「已报过」属于**本机状态**（留档文件本身就是证据），
+#   不依赖外部通道是否送达 —— 那是两个不同维度的事。
+# 2026-10-10 缺陷根因：此前把「投递失败不写标记」一刀切套到所有级别，
+# 而这条 P1 的投递永远返回 3（没配适配器）→ 标记永远不写 → 每 2 分钟重复一次。
+if [ "$resident_state" = "1" ]; then
+  printf '%s' "$RESIDENT_HASH" > "$RESIDENT_HASH_FILE"
+  printf '%s' "$now"             > "$RESIDENT_TS_FILE"
+  echo "常驻条件已记录指纹，进入静默（${ALERT_RESIDENT_SILENCE_SEC}s；状态变化会立即重报）"
+fi
+
+# P0 相关的节流标记：仍**只在外部送达时写**，保持既有正确行为不变。
 case "$send_rc" in
   0)
     printf '%s' "$HASH" > "$LAST_HASH_FILE"
     printf '%s' "$now"  > "$LAST_TS_FILE"
     ;;
-  3) echo "（本次仅本地留档，未外部送达；不写节流标记，下轮仍会尝试）" ;;
-  4) echo "（外部适配器全部失败；不写节流标记，下轮仍会尝试）" >&2 ;;
+  3) echo "（本次仅本地留档，未外部送达）" ;;
+  4) echo "（外部适配器全部失败；P0 下一轮仍会重报）" >&2 ;;
   *) echo "send_alert 返回异常码 $send_rc" >&2 ;;
 esac
+
+# 告警目录轮转：留档不是日志归档，无限增长没有价值
+prune_alert_spool
 exit 1
