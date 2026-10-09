@@ -19,6 +19,13 @@
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
 ENV GOPROXY=https://goproxy.cn,direct
+# 模块缓存挂载点与 GOMODCACHE 必须分开（2026-10-09 Job000145）：
+# cache mount 挂在 /go/pkgmod，而 GOMODCACHE 指向其子目录 /go/pkgmod/pkg。
+# 若沿用旧写法（mount 挂在 /go/pkgmod 且 GOMODCACHE 就是它本身），
+# `go clean -modcache` 会去 unlink 挂载点自身，Linux 直接拒绝：
+#   go: unlinkat /go/pkg/mod: device or resource busy
+# 分层后被删的是子目录（普通文件操作），挂载点本身不受影响，自愈逻辑才能跑通。
+ENV GOMODCACHE=/go/pkgmod/pkg
 # 版本三元组注入（Job000105）：compose 开发/测试构建不传参 = 默认 dev（行为与引入前一致）；
 # 发布构建由 release/docker/build-images.sh 传 --build-arg 注入真实版本。
 ARG APP_VERSION=dev
@@ -34,20 +41,53 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends gcc libc6-dev; \
     rm -rf /var/lib/apt/lists/*
 COPY src/backend/go.mod src/backend/go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
 COPY src/backend/cmd ./cmd
 COPY src/backend/internal ./internal
 # 编译期嵌入的 goose 迁移（Job000107：api 启动自迁移 + pano-migrate 共用同一 FS）。
 # ⚠️ 漏拷 = 构建期即报 "package panoalbum/migrations is not in std"（2026-09-24 部署实测踩坑）
 COPY src/backend/migrations ./migrations
+# ---- 依赖下载 + 编译合并进同一个 RUN（2026-10-09 Job000145 构建阻塞修复）----
+# 根因：原先「go mod download」与「go build」是两个独立 RUN，共享同一个
+# `--mount=type=cache,target=/go/pkg/mod`。BuildKit 的 exec 层缓存键**不包含
+# cache mount 的内容**，于是 `docker builder prune` 之后：
+#   #12 [build 5/9] go mod download   → CACHED（层被重放，不再真正下载）
+#   #20 [build 9/9] go build...        → 重新挂载这个已被清空的 mount
+# 结果 modcache 处于「已损坏」状态：`go mod verify` 实测报
+#   google.golang.org/protobuf v1.36.11: dir has been modified
+# 说明模块目录文件被改写过（不是"没声明"，也不是"整个 mount 为空"）。
+# `go build` 看到 client_model@v0.6.2 还在，就认为依赖已齐，**根本不触发重新下载**，
+# 于是在 0.878s 内报出
+#   no required module provides package google.golang.org/protobuf/types/known/timestamppb
+# 这也解释了为什么 `docker builder prune -f`（实测清掉 4.441GB）与 `--no-cache`
+# 都修不好：重建的是「层」，坏掉的是「cache mount 的内容」，二者不是一回事。
+#
+# 修法（结构性，不靠运气）：
+#   1. 把下载与编译合并进同一个 RUN，cache mount 在一次 exec 内只挂载一次，
+#      不再跨层依赖 mount 内容；
+#   2. `go clean -modcache` 先把可能残缺/被改写的 modcache 清空再下载（自愈）。
+#      代价只是重下模块（实测全量约 4~8 秒）；真正贵的 CGO 编译缓存挂在
+#      /root/.cache/go-build，不受影响。
+#   3. 用 `go mod download all`覆盖完整模块图（裸 `go mod download` 只覆盖
+#      构建所需子集，缺传递依赖时不会补齐）；
+#   4. 加 `go mod verify` 让「模块缺失/损坏」在下载阶段就大声失败，
+#      而不是延后到 go build 报出难以定位的 "no required module provides package"。
+#      （实测：损坏状态下正是 verify 先报出 "dir has been modified"，
+#        修法第 2 点的自愈就是靠它先把问题喊出来。）
+# 正确性论证：若合并层被重放，说明「下载+编译」曾经整体成功过 → 二进制有效且已
+# 提交进镜像；若该层被执行，则下载与编译在同一 mount 内先后发生 → 必然一致。
+# 代价：源码变动会使合并层失效并重跑下载+校验（命中构建缓存时约数秒），
+# 这是为正确性必须付的时间，不做取舍。
+#
 # 挂载 Go 构建缓存：CGO 全量编译较慢（4 核 VM 上首次约 20 分钟），
 # 缓存后增量重建只需编译变更部分
 # phashgen 与 migrateplan 都是纯 Go，用 CGO_ENABLED=0 编译：不必等 C 工具链，
 # 产物也不依赖 libonnxruntime（pHash 只用标准库 image + golang.org/x/image）。
-RUN --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,target=/go/pkgmod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/api ./cmd/api \
+    go clean -modcache \
+ && go mod download all \
+ && go mod verify \
+ && CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/api ./cmd/api \
  && CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/embedgen ./cmd/embedgen \
  && CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/taggen ./cmd/taggen \
  && CGO_ENABLED=1 go build -trimpath -ldflags "$LDFLAGS" -o /out/facesgen ./cmd/facesgen \
