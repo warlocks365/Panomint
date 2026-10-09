@@ -13,6 +13,13 @@
 #
 # 前置：bash scripts/fetch-all-assets.sh（AI 资产不入库，见 文档/部署方案与兼容性）。
 # 用法：bash release/build.sh [--skip-frontend]   （--skip-frontend 复用现有 dist/，增量调试用）
+#
+# 测试门禁（Job000146 固化）：默认在构建**之前**先跑 scripts/release_test_gate.py
+#（后端 go test -count=1 + 前端 vitest），红则整个脚本退出 1、不产出任何产物。
+# 之所以放在构建前：构建要跑两个容器、耗时数分钟，测试红时先拦下最省。
+# 真正的硬阻断仍在 release/docker/push-images.sh（唯一执行 docker push 的入库脚本）——
+# 构建成功但测试红、且有人手工跳过本步时，推送那一步仍会拦住。
+# 例外：SKIP_TEST_GATE=1 可跳过，须在发版记录里写明理由。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
@@ -25,12 +32,26 @@ SKIP_FE=0
 
 say()  { printf '\n=== %s ===\n' "$*"; }
 die()  { printf '[build] 错误：%s\n' "$*" >&2; exit 1; }
-need() { command -v "$1" >/dev/null 2>&1 || die "缺 $1（本脚本只需要 Docker）"; }
+# 构建本身只需要 Docker；测试门禁额外需要 python（宿主 Go/Node 由门禁脚本自行定位并
+# 在缺失时报 FAIL）。SKIP_TEST_GATE=1 时不要求 python。
+need() { command -v "$1" >/dev/null 2>&1 || die "缺 $1（构建本身只需要 Docker；python 仅测试门禁需要）"; }
 
 need docker
 [ -n "$VERSION" ] || die "VERSION 文件为空"
 case "$VERSION" in *[!0-9.]*|.*|*..*) die "VERSION 非法：$VERSION（应为大.中.小 纯数字）";; esac
 echo "[build] 版本=$VERSION commit=$COMMIT date=$BUILD_DATE"
+
+# ---------------------------------------------------------------- 测试门禁
+# 放在 0/5 之前：测试红就别浪费容器构建的数分钟。
+if [ "${SKIP_TEST_GATE:-0}" != "1" ]; then
+  say "门禁 测试（后端 go test -count=1 + 前端 vitest）"
+  PY="$(command -v python3 || command -v python || true)"
+  [ -n "$PY" ] || die "缺 python，无法运行测试门禁（拒绝在未测的情况下构建发布包）"
+  # 🔴 绝不写成 "$PY" ... | tail —— 管道会把失败洗成退出码 0（本项目已栽过两次）。
+  "$PY" "$ROOT/scripts/release_test_gate.py" || die "测试门禁未通过，拒绝构建发布包"
+else
+  echo "[build] SKIP_TEST_GATE=1：本次跳过测试门禁（例外通道，须在发版记录里写明理由）"
+fi
 
 # ---------------------------------------------------------------- 资产核验
 say "0/5 运行期资产核验"
@@ -45,7 +66,6 @@ n=0; for f in "$ASSETS"/models/faces/*.onnx; do [ -s "$f" ] && n=$((n+1)); done
 [ "$n" -gt 0 ] || die "assets/models/faces 下无人脸模型"
 echo "[build] 资产 OK（ORT x64 + chinese-clip + faces x$n）"
 
-# ---------------------------------------------------------------- 前端
 say "1/5 前端构建（node:22-alpine 容器）"
 if [ "$SKIP_FE" = "1" ] && [ -d "$ROOT/src/frontend/dist" ]; then
   echo "[build] --skip-frontend：复用现有 dist/"

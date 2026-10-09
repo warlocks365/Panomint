@@ -8,6 +8,10 @@
 #
 # 前置：先执行 build-images.sh 产出本地 panomint/*:test<版本号> 四镜像。
 # 用法：bash release/docker/push-images.sh [版本号]   （默认读仓库根 VERSION）
+#
+# 前置门禁：测试门禁（后端 go test -count=1 + 前端 vitest）。默认在推送前自动运行，
+#红则整个脚本退出 1，一个镜像都推不出去。紧急例外可设SKIP_TEST_GATE=1 跳过，
+#但须在发版记录里写明理由。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
@@ -26,6 +30,27 @@ case "$TAG|$V" in
 esac
 
 echo "[push] 通道标签=$TAG（仅推送该标签，不推 latest）"
+
+# ---- 断言 3：测试门禁。测试红= 不许推送任何镜像（Job000146 固化）----
+#
+# 为什么门禁必须插在这里，而不是 build-images.sh 里：
+#   build-images.sh 只产出**本地镜像**，不推送；push-images.sh 是发版链里
+#   **唯一执行 docker push 的入库脚本**（.workbuddy/ 下的历史 push 脚本已被
+#   gitignore 排除，不构成发版链）。门禁插在 push 之前，红了镜像就出不了仓库，
+#   115也就部署不到这个坏版本——这才是「拦住发版」的真实含义。
+#   注意：绝不能把门禁输出接进管道（`| tail` 会把失败洗成 0，本项目已栽过两次）。
+if [ "${SKIP_TEST_GATE:-0}" != "1" ]; then
+  echo "[push] 运行发版测试门禁（后端 go test -count=1 + 前端 vitest）..."
+  PY="$(command -v python3 || command -v python || true)"
+  [ -n "$PY" ] || { echo "[push] 缺 python，无法运行测试门禁（拒绝在未测的情况下推送）" >&2; exit 1; }
+  "$PY" "$ROOT/scripts/release_test_gate.py" || {
+    echo "[push] 测试门禁未通过 —— 阻断推送（不要改测试让门禁变绿）" >&2
+    exit 1
+  }
+  echo "[push] 测试门禁通过"
+else
+  echo "[push] ⚠ SKIP_TEST_GATE=1：本次跳过测试门禁（例外通道，须在发版记录里写明理由）" >&2
+fi
 
 # local:hub 对——本地构建名 → Docker Hub 仓库名
 PAIRS=(
