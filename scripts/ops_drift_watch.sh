@@ -342,6 +342,24 @@ check_alert_channel() {
   fi
 }
 
+# 检查 3b：上次回滚是否失败。
+#
+# 为什么必须单独查（而不是只看部署台账）：
+#   「回滚失败」是最坏的状态 —— 人以为已经退回去了，实际还停在故障版本上。
+#   巡检若只读 last_deploy.txt，这个状态会在下一次成功部署后被覆盖掉，
+#   于是「误以为退回去了」这件事就永远没人知道。
+#   而回滚失败往往发生在**已经出事**的时刻，那正是最需要有人被告知的时刻。
+check_last_rollback() {
+  local f="$STATE_DIR/last_rollback.txt"
+  [ -f "$f" ] || return 0
+  local status; status="$(grep -E '^status=' "$f" 2>/dev/null | head -1 | cut -d= -f2)"
+  [ "$status" = "failed" ] || return 0
+  local base; base="$(grep -E '^baseline=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)"
+  local reason; reason="$(grep -E '^reason=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)"
+  local ts; ts="$(grep -E '^ts_iso=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)"
+  add_problem "[P0] 上次回滚失败（基线=${base:-未知}，原因=${reason:-未知}，时间 ${ts:-未知}）→ **可能仍停在故障版本，且人工可能误以为已退回**。立即人工介入：bash scripts/rollback.sh --status / list"
+}
+
 # ---------------------------------------------------------------- 工具 ------
 fmt_ts() { date -d "@${1:-0}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "?"; }
 human_age() {
@@ -422,6 +440,7 @@ check_drift
 check_image_consistency
 check_tag_image_split
 check_last_deploy
+check_last_rollback
 check_ready
 check_alert_channel
 

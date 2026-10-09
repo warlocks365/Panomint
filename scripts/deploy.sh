@@ -212,6 +212,20 @@ if [ "$up_rc" -ne 0 ]; then
   exit "$up_rc"
 fi
 
+# ---- 反代层必须一起重建（2026-10-10 回滚演练实测到的真实缺陷）----
+#   重建 api/worker 时它们会拿到新的容器 IP，而 web(nginx) 容器没动，
+#   它在启动时解析过一次 api 域名并缓存了旧 IP。结果：
+#     - web 容器内直连 api:8080  → 正常
+#     - 经 nginx 的 /ready        → 一律 502，且 nginx error.log 是空的
+#   也就是说 api 好好的，/ready 却红了；排查极易被引向 api 容器本身。
+#   docker compose 的 restart 策略不会让 web 跟着 api 重建而重载解析。
+#   处置：重建后一并 restart 反代层（不删容器、不碰卷，可逆）。
+if printf '%s\n' "${TARGETS[@]}" | grep -qxE 'api|embed-worker|tag-worker|phash-worker|faces-worker'; then
+  log "重建反代层（让 nginx 重新解析上游 IP）"
+  docker compose restart web caddy >/dev/null 2>&1 || \
+    fail "反代层重启失败：/ready 可能因上游解析过期而报 502（处置：docker compose restart web caddy）"
+fi
+
 # ---------------------------------------------------------------- 验证 ------
 log "验证镜像是否真的换了"
 changed=0
