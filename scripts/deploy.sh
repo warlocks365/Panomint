@@ -102,8 +102,36 @@ cd "$COMPOSE_DIR" || { fail "进不去 $COMPOSE_DIR"; exit 1; }
 log "目标服务: ${TARGETS[*]}"
 log "开始前置检查"
 
+# 服务名存在性校验。
+#
+# ⚠️ 这里必须能区分「服务名真的不存在」与「compose 命令这次没返回结果」。
+#    实测踩坑（2026-10-10）：`docker compose config --services` 偶发返回空
+#    —— 大概与 compose 解析配置时的时序有关（同一命令连跑 5 次都正常，
+#    但在连续构建后的某些时刻会空一次）。原实现写成
+#        docker compose config --services | grep -qx "$svc" || 判为「拼错了」
+#    于是**一次偶发空返回就把合法部署拦下来**，退出码 2，紧急回滚会被卡住。
+#    这类误判最危险：它恰好在「最需要部署成功」的时刻阻止部署。
+#
+#    正确做法：先看命令本身有没有成功拿到名单，拿到但名单里没有才是拼错；
+#    拿不到就重试，重试仍失败则**放行并告警**（宁可部署一次未知服务，
+#    也不能因为一个探测命令的抖动就挡住回滚）。
+svc_known() {
+  local svc="$1" i out
+  for i in 1 2 3; do
+    out="$(docker compose config --services 2>/dev/null)"
+    if [ -n "$out" ]; then
+      printf '%s\n' "$out" | grep -qx "$svc"
+      return $?
+    fi
+    sleep 1
+  done
+  # 三次都拿不到名单：无法判定，不阻塞部署
+  echo "WARN:  docker compose config --services 连续 3 次无输出，无法校验服务名，放行" >&2
+  return 0
+}
+
 for svc in "${TARGETS[@]}"; do
-  if ! docker compose config --services 2>/dev/null | grep -qx "$svc"; then
+  if ! svc_known "$svc"; then
     fail "服务 $svc 不在 compose 定义里（拼错了？）"
     exit 2
   fi

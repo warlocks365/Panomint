@@ -26,7 +26,7 @@
 #   bash scripts/ops_drift_watch.sh              # 巡检 + 有问题才告警
 #   bash scripts/ops_drift_watch.sh --dry-run    # 只打印，不落盘不发信
 #   bash scripts/ops_drift_watch.sh --accept     # 把当前指纹登记为基线（部署成功后用）
-#   bash scripts/ops_drift_watch.sh --selftest   # 自检：故意造漂移，确认能检出
+#   bash scripts/ops_drift_watch.sh --selftest   # 告警适配器自检（逐个实发）
 #   bash scripts/ops_drift_watch.sh --status     # 打印当前状态，不告警
 #
 # 红线：全部只读。不 stop/start/rm 任何容器、镜像或卷；不动宝塔 cron。
@@ -244,6 +244,43 @@ check_image_consistency() {
   done
 }
 
+# 检查 2b：同一个 tag 被不同服务以**不同 image ID** 运行 → 版本错配。
+#
+# 为什么必须单独一条规则（2026-10-10 实测踩到）：
+#   api 与 embed/tag/phash/faces-worker 在 compose 里写的是同一个 tag
+#   （panomint-app:latest），所以「tag → 当前 image ID」这个映射是唯一的，
+#   检查 2 只能报出「哪些容器没跟上」，报不出「这个 tag 正在同时供应两个版本」。
+#   而后者才是滚动升级时真正致命的状态：同一批数据、同一个模型目录，
+#   api 用新逻辑、worker 用旧逻辑，行为不一致且极难归因。
+#   实测就是靠这条发现 worker 停了 6 天而 api 已升级。
+check_tag_image_split() {
+  local json; json="$(compose_services_json)"
+  [ -n "$json" ] || return
+
+  # 收集 tag -> "服务=imageID" 映射
+  local -A tag_map=()
+  local svc tag cid run_id
+  for svc in $WATCH_SERVICES; do
+    tag="$(svc_image_tag "$json" "$svc")"
+    [ -n "$tag" ] || continue
+    cid="$(cd "$COMPOSE_DIR" && docker compose ps -q "$svc" 2>/dev/null | head -1)"
+    [ -n "$cid" ] || continue
+    run_id="$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null | cut -c1-19)"
+    [ -n "$run_id" ] || continue
+    tag_map["$tag"]="${tag_map[$tag]:-}${svc}=${run_id} "
+  done
+
+  local t entries ids uniq_count
+  for t in "${!tag_map[@]}"; do
+    entries="${tag_map[$t]}"
+    ids="$(printf '%s\n' $entries | sed 's/.*=//' | sort -u)"
+    uniq_count="$(printf '%s\n' "$ids" | grep -c . || true)"
+    if [ "$uniq_count" -gt 1 ]; then
+      add_problem "[P0] 同一 tag 供应多个镜像（版本错配）：tag $t 下同时存在 $uniq_count 个不同 image ID → 滚动升级期间 api 与 worker 会跑不同版本。实际映射: $(printf '%s' "$entries" | sed 's/ $//')"
+    fi
+  done
+}
+
 # 检查 3：上次部署是否失败（对应失败形态 A —— 退出码被管道吞掉的场景）。
 check_last_deploy() {
   [ -f "$DEPLOY_LEDGER" ] || return 0   # 没有台账说明没用本脚本部署过，不算异常
@@ -281,12 +318,27 @@ check_ready() {
   fi
 }
 
-# 检查 5：告警通道自身是否可用。通道哑了，上面 1~4 的告警都发不出去，
-# 必须当成 P0 报出来 —— 否则整套机制会安静地退化成「只写日志」。
+# 检查 5：告警通道自身是否可用。
+#
+# 分三级，因为三种情况的处理完全不同，混在一起报等于没报：
+#   无外部适配器（未配 webhook/smtp） → P1：功能受限但本地有留档，等凭据即可
+#   外部适配器全失败（配了但坏了）   → P0：告警正在丢失，必须立刻修
+#   最近一次投递就是全失败            → P0：即使本轮无异常，也要报（说明上轮告警没送达）
 check_alert_channel() {
   local st; st="$(alert_channel_status)"
-  if [ "$st" != "smtp-configured" ]; then
-    add_problem "[P1] 告警仅落本地文件（$ALERT_SPOOL_DIR），SMTP 凭据未配置 → 无人会收到通知，需人工查看或补齐 .env.ops"
+  case "$st" in
+    *adapters=*file*|*无外部适配器*)
+      add_problem "[P1] 告警仅落本地留档（$ALERT_SPOOL_DIR），未配置外部适配器 → 无人会收到通知。请在 $ALERT_ENV_OPS 填 OPS_WEBHOOK_URL（钉钉/企微机器人）或 OPS_SMTP_*（邮件），任一即可" ;;
+  esac
+
+  local f="$ALERT_STATE_DIR/last_delivery"
+  if [ -f "$f" ]; then
+    local rc; rc="$(grep -E '^rc=' "$f" 2>/dev/null | head -1 | cut -d= -f2)"
+    local ts; ts="$(grep -E '^ts_iso=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)"
+    local detail; detail="$(grep -E '^detail=' "$f" 2>/dev/null | head -1 | cut -d= -f2-)"
+    if [ "$rc" = "4" ]; then
+      add_problem "[P0] 上一次告警投递失败（外部适配器全部失败，时间 ${ts:-?}）→ 告警正在丢失。详情: ${detail:-?}"
+    fi
   fi
 }
 
@@ -327,11 +379,24 @@ do_status() {
   if [ -f "$BASELINE_FILE" ]; then jq . "$BASELINE_FILE"; else echo "(不存在)"; fi
   echo "=== 部署台账 ($DEPLOY_LEDGER) ==="
   if [ -f "$DEPLOY_LEDGER" ]; then cat "$DEPLOY_LEDGER"; else echo "(不存在)"; fi
-  echo "=== 告警通道 ==="
+  echo "=== 告警通道（适配器）==="
   alert_channel_status
+  echo "=== 上次投递结果 ==="
+  cat "$ALERT_STATE_DIR/last_delivery" 2>/dev/null || echo "(尚无投递记录)"
   echo "=== 就绪探针 ==="
   echo "ready=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 8 "$READY_URL" 2>/dev/null || echo 000)"
   echo "health=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$HEALTH_URL" 2>/dev/null || echo 000)"
+  echo "=== 同 tag 镜像映射 ==="
+  local json svc tag cid run_id
+  json="$(compose_services_json)"
+  for svc in $WATCH_SERVICES; do
+    tag="$(svc_image_tag "$json" "$svc")"
+    [ -n "$tag" ] || continue
+    cid="$(cd "$COMPOSE_DIR" && docker compose ps -q "$svc" 2>/dev/null | head -1)"
+    [ -n "$cid" ] || continue
+    run_id="$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null | cut -c1-19)"
+    printf '  %-20s %-26s %s\n' "$svc" "$tag" "${run_id:-<无>}"
+  done
 }
 
 # ---------------------------------------------------------------- 主流程 ----
@@ -344,10 +409,18 @@ case "$MODE" in
     do_status
     exit $?
     ;;
+  --selftest)
+    # 告警通道自检：逐个适配器实发一遍。
+    # 这一条存在的意义是「通道可用性必须能被断言」——
+    # 不能只靠「配置看起来对」就认为告警会到人手里。
+    alert_channel_selftest
+    exit $?
+    ;;
 esac
 
 check_drift
 check_image_consistency
+check_tag_image_split
 check_last_deploy
 check_ready
 check_alert_channel
@@ -385,8 +458,16 @@ fi
 
 send_alert "$(hostname) 构建/部署巡检发现 ${N} 项异常" "$BODY"
 send_rc=$?
-if [ "$send_rc" -eq 0 ]; then
-  printf '%s' "$HASH" > "$LAST_HASH_FILE"
-  printf '%s' "$now"  > "$LAST_TS_FILE"
-fi
+# 只有「外部送达」（返回 0）才算送达，才写节流标记。
+# 返回 3（无外部适配器）/ 4（全失败）都不写 —— 否则下一轮会认为「已经告警过」而跳过，
+# 那正是本任务要消灭的静默失效：机制看起来在跑，实际没人被通知过。
+case "$send_rc" in
+  0)
+    printf '%s' "$HASH" > "$LAST_HASH_FILE"
+    printf '%s' "$now"  > "$LAST_TS_FILE"
+    ;;
+  3) echo "（本次仅本地留档，未外部送达；不写节流标记，下轮仍会尝试）" ;;
+  4) echo "（外部适配器全部失败；不写节流标记，下轮仍会尝试）" >&2 ;;
+  *) echo "send_alert 返回异常码 $send_rc" >&2 ;;
+esac
 exit 1
