@@ -181,13 +181,13 @@ describe('空状态与加载态（Design §2.5 五态）', () => {
 
   it('翻月按钮在无数据时被禁用（不给出空白未来月份）', () => {
     const w = mountCal({ buckets: [] })
-    expect(w.findAll('.dp-nav')[0].attributes('disabled')).toBeDefined()
-    expect(w.findAll('.dp-nav')[1].attributes('disabled')).toBeDefined()
+    expect(w.findAll('.nav-step')[0].attributes('disabled')).toBeDefined()
+    expect(w.findAll('.nav-step')[1].attributes('disabled')).toBeDefined()
   })
 
   it('有数据时可翻到上一月，且不得翻到当前月之后', async () => {
     const w = mountCal({ buckets: [{ bucket: daysAgo(200), count: 3 }, { bucket: daysAgo(2), count: 1 }] })
-    const navs = w.findAll('.dp-nav')
+    const navs = w.findAll('.nav-step')
     expect(navs[0].attributes('disabled')).toBeUndefined() // 可往前
     expect(navs[1].attributes('disabled')).toBeDefined() // 不可超过当前月
   })

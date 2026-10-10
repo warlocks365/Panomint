@@ -7,7 +7,7 @@
   />
 
   <button
-    ref="panel.calendarBtnRef"
+    ref="btnEl"
     class="tool-btn"
     title="跳转到指定日期"
     :aria-disabled="!hasAnyMedia"
@@ -33,7 +33,7 @@
         :buckets="dayBuckets"
         :unknown-count="unknownCount"
         :anchor-key="panel.anchorDayKey.value"
-        @close="panel.closeCalendar"
+        @close="onClose"
         @seek="panel.onDaySeek"
       />
     </div>
@@ -63,17 +63,23 @@ const props = defineProps({
   unknownCount: { type: Number, default: 0 }
 })
 
-// —— 浮层定位（Job000145 缺陷修复）——
+// —— 浮层定位 ——
 // 原实现是 `position: absolute` 且**没有 top/left**，完全依赖静态位置；其包含块
 // 一路向上全是 static，最终落到视口，再叠加祖先 `.content { overflow: auto }`
 // 与工具条 `flex-wrap: wrap`，面板会被 TOP 栏压住或被裁掉一角。
 // 现改为 Teleport 到 body + fixed，并按**触发按钮的实时视口坐标**定位，
 // 空间不足时上下翻转、越界时贴边夹紧（算法见 popoverPosition.js，含单测）。
+//
+// ⚠️ 触发按钮必须用**本组件内的本地 ref**，不能写 ref="panel.calendarBtnRef"：
+// Vue 3.5 的点号字符串 ref 只在 setupState 直接声明的变量上生效，而 panel 是 prop，
+// 其内嵌 ref 不会被绑定 → 取到 undefined → 定位计算直接 return，
+// 面板便停在初值 (0,0)，表现为「跑到页面左上角」。
+const btnEl = ref(null)
 const popoverRef = ref(null)
 const pos = ref({ top: 0, left: 0, placement: 'bottom' })
 
 function updatePos() {
-  const btn = props.panel.calendarBtnRef?.value
+  const btn = btnEl.value
   const el = popoverRef.value
   if (!btn || !el) return
   const r = btn.getBoundingClientRect()
@@ -85,6 +91,19 @@ function updatePos() {
   })
 }
 
+/** 关闭：焦点回到触发按钮（WCAG 焦点管理）。焦点在此归还——按钮 ref 是本组件的。 */
+function onClose() {
+  props.panel.closeCalendar()
+  nextTick(() => btnEl.value?.focus())
+}
+
+/** 面板外的任意点击都关闭（不点按钮本身，否则会开→关→开）。 */
+function onDocPointerDown(e) {
+  if (!props.panel.calendarOpen.value) return
+  if (popoverRef.value?.contains(e.target) || btnEl.value?.contains(e.target)) return
+  props.panel.closeCalendar()
+}
+
 // 打开后要等一帧才能量到面板自身高度；开着的这段时间里窗口尺寸/滚动变化都要重算
 watch(
   () => props.panel.calendarOpen.value,
@@ -94,9 +113,11 @@ watch(
       updatePos()
       window.addEventListener('resize', updatePos)
       window.addEventListener('scroll', updatePos, true)
+      document.addEventListener('pointerdown', onDocPointerDown, true)
     } else {
       window.removeEventListener('resize', updatePos)
       window.removeEventListener('scroll', updatePos, true)
+      document.removeEventListener('pointerdown', onDocPointerDown, true)
     }
   }
 )
@@ -104,6 +125,8 @@ watch(
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updatePos)
   window.removeEventListener('scroll', updatePos, true)
+  // 面板开着时卸载组件，watch 的 else 分支不会跑到，这里必须兜住，否则监听泄漏
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
 })
 </script>
 

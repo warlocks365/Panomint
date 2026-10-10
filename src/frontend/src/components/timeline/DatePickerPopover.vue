@@ -1,23 +1,15 @@
 <template>
-  <div class="dp" role="dialog" aria-modal="false" aria-label="跳转到指定日期" @keydown.esc.stop="emit('close')">
+  <div class="dp" role="dialog" aria-modal="false" aria-label="跳转到指定日期" @keydown.esc.stop="onEsc">
     <div class="dp-head">
-      <button type="button" class="dp-nav" :disabled="!m.canPrev.value" title="上一月" @click="m.shiftMonth(-1)">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
-          <path d="M14.5 5.5 8 12l6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-      <span class="dp-title">{{ m.cursorYear.value }} 年 {{ m.cursorMonth.value }} 月</span>
-      <button type="button" class="dp-nav" :disabled="!m.canNext.value" title="下一月" @click="m.shiftMonth(1)">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
-          <path d="M9.5 5.5 16 12l-6.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
+      <span class="dp-title">跳转到日期</span>
       <button type="button" class="dp-close" title="关闭" @click="emit('close')">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
           <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
         </svg>
       </button>
     </div>
+
+    <CalendarNavBar ref="navRef" :m="m" />
 
     <CalendarGrid :matrix="m" :loading="loading" :anchor-key="anchorKey" />
 
@@ -57,8 +49,9 @@
 // 月矩阵状态在 useCalendarMatrix.js —— 三者任一都撑不过 300 行组织红线。
 //
 // unknown 桶（taken_at IS NULL）不进 counts，故不渲染任何标记、也不可跳转（AC-11）。
-import { toRef, watch } from 'vue'
+import { ref, toRef, watch } from 'vue'
 import CalendarGrid from './CalendarGrid.vue'
+import CalendarNavBar from './CalendarNavBar.vue'
 import { useCalendarMatrix } from './useCalendarMatrix'
 
 const props = defineProps({
@@ -73,6 +66,17 @@ const props = defineProps({
 const emit = defineEmits(['close', 'seek'])
 
 const m = useCalendarMatrix(toRef(props, 'buckets'))
+const navRef = ref(null)
+
+/**
+ * Esc 两级：先收起年/月选择面板，再关掉整个浮层。
+ * 否则用户在看年份列表时按Esc 会直接连浮层一起关掉——
+ * 相当于跳过了「我只是想取消选择年份」这一步。
+ */
+function onEsc() {
+  if (navRef.value?.collapse?.()) return
+  emit('close')
+}
 
 /** 跳转意图只发 { dimension, key } 对象载荷；**不改媒体查询参数**（AC-12）。 */
 function go() {
@@ -116,7 +120,6 @@ watch(
   font-size: var(--font-size-md);
 }
 
-.dp-nav,
 .dp-close {
   display: inline-flex;
   align-items: center;
@@ -136,18 +139,11 @@ watch(
   height: 28px;
 }
 
-.dp-nav:hover:not(:disabled),
 .dp-close:hover {
   background-color: var(--color-surface-hover);
   color: var(--color-text-primary);
 }
 
-.dp-nav:disabled {
-  color: var(--color-text-disabled);
-  cursor: not-allowed;
-}
-
-.dp-nav:focus-visible,
 .dp-close:focus-visible,
 .dp-act:focus-visible {
   outline: none;
@@ -208,9 +204,4 @@ watch(
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dp-nav {
-    transition: none;
-  }
-}
 </style>

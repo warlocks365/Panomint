@@ -1,5 +1,13 @@
 import { computed, ref } from 'vue'
 import { buildMonthMatrix, headerKeyOf } from './timelineDimensions'
+import {
+  monthIndexOf,
+  yearMonthOf,
+  shiftMonthSafe,
+  yearOptions,
+  yearHasAnyPhoto,
+  daysInMonth
+} from './calendarNav'
 
 // 日历月矩阵的**纯状态层**（Job000145）。从 DatePickerPopover 拆出——连同四态样式，
 // 该组件会超 300 行组织红线（frontend_org_guard O1）。
@@ -32,23 +40,31 @@ export function useCalendarMatrix(buckets) {
     return map
   })
 
-  // 允许翻页的范围：最早有照片的月份 → 当前月。不允许翻到未来的空月份。
-  const minMonth = computed(() => {
+  // 允许导航的范围：最早有照片的月份 → 当前月。不允许翻到未来的空月份。
+  //
+  // ⚠️ 全部走 monthIndexOf（y*12+(m-1)）这一套编码。
+  // 旧实现用的是 `y*12+m`（m 为 1-based，一月 = y*12+1），而 calendarNav 的
+  // monthIndexOf 用 y*12+(m-1)。两套并存会让 canPrev / maxIndex 的比较**整体错位一个月**，
+  // 且错位不报错、只表现为「最早/最新月份多翻或少翻一次」，极难察觉。故在此统一。
+  const minIndex = computed(() => {
     let min = null
     for (const k of counts.value.keys()) {
       const y = Number(k.slice(0, 4))
       const m = Number(k.slice(5, 7))
       if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) continue
-      if (min === null || y * 12 + m < min) min = y * 12 + m
+      const idx = monthIndexOf(y, m)
+      if (min === null || idx < min) min = idx
     }
     return min
   })
 
-  const cursorIndex = computed(() => cursorYear.value * 12 + cursorMonth.value)
+  const cursorIndex = computed(() => monthIndexOf(cursorYear.value, cursorMonth.value))
 
-  const canPrev = computed(() => minMonth.value !== null && cursorIndex.value > minMonth.value)
+  const maxIndex = computed(() => monthIndexOf(now.getFullYear(), now.getMonth() + 1))
 
-  const canNext = computed(() => cursorIndex.value < now.getFullYear() * 12 + now.getMonth() + 1)
+  const canPrev = computed(() => minIndex.value !== null && cursorIndex.value > minIndex.value)
+
+  const canNext = computed(() => cursorIndex.value < maxIndex.value)
 
   const cells = computed(() =>
     buildMonthMatrix(cursorYear.value, cursorMonth.value).map((c) => {
@@ -77,11 +93,79 @@ export function useCalendarMatrix(buckets) {
   }
 
   function shiftMonth(delta) {
-    const idx = cursorIndex.value + delta
-    cursorYear.value = Math.floor(idx / 12)
-    cursorMonth.value = (idx % 12) + 1
+    // 走 shiftMonthSafe：旧实现 `Math.floor(idx/12)` + `(idx%12)+1` 在跨年回退时
+    // 会算出 month=0/负数（JS 的 % 对负数返回负值），而年月切换必然要跨年。
+    const r = shiftMonthSafe(cursorYear.value, cursorMonth.value, delta)
+    cursorYear.value = r.year
+    cursorMonth.value = r.month
     pickedKey.value = ''
   }
+
+  // —— 年 / 月三级切换（Job000145 缺陷修复）——
+  // 可导航范围：最早有照片的月份 → 当前月。年份同理，避免跳到没有照片的年份。
+  const minYear = computed(() =>
+    minIndex.value === null ? now.getFullYear() : yearMonthOf(minIndex.value).year)
+  const maxYear = computed(() => now.getFullYear())
+
+  /** 该年是否有照片（年选择器据此标注可跳/ 无照片）。 */
+  const photoYears = computed(() => {
+    const s = new Set()
+    for (const k of counts.value.keys()) {
+      const y = Number(k.slice(0, 4))
+      if (Number.isFinite(y)) s.add(y)
+    }
+    return s
+  })
+
+  /** 年下拉的候选：按十年对齐，首尾各留一档空档年，避免跳板突兀。 */
+  const yearChoices = computed(() =>
+    yearOptions(minIndex.value === null ? now.getFullYear() : minYear.value, maxYear.value))
+
+  /** 年下拉里该年是否有照片；无照片的年份仍可选（会看到「该月无照片」），只是不可定位。 */
+  function yearHasPhoto(y) {
+    return photoYears.value.has(y)
+  }
+
+  /** 切到指定年（夹到可导航范围）；返回是否真的改变了年份。 */
+  function setYear(y) {
+    const yy = Math.min(Math.max(Math.round(y), minYear.value), maxYear.value)
+    if (yy === cursorYear.value) return false
+    cursorYear.value = yy
+    // 跳到更早的年时，月份可能超出该年可导航范围 → 一并夹到当前月
+    if (monthIndexOf(cursorYear.value, cursorMonth.value) > maxIndex.value) {
+      cursorMonth.value = now.getMonth() + 1
+    }
+    if (cursorMonth.value > 12) cursorMonth.value = 12
+    pickedKey.value = ''
+    return true
+  }
+
+  /** 切到指定月（夹到该年允许范围）；返回是否真的改变了月份。 */
+  function setMonth(m) {
+    if (!Number.isFinite(m) || m < 1 || m > 12) return false
+    let yy = cursorYear.value
+    let mm = Math.round(m)
+    // 超出 [minIndex, maxIndex] 就把年份一起带着走，避免落到没有照片的区间
+    let idx = monthIndexOf(yy, mm)
+    if (idx > maxIndex.value) { yy = now.getFullYear(); mm = now.getMonth() + 1 }
+    if (minIndex.value !== null && idx < minIndex.value) {
+      const r = yearMonthOf(minIndex.value)
+      yy = r.year; mm = r.month
+    }
+    if (yy === cursorYear.value && mm === cursorMonth.value) return false
+    cursorYear.value = yy
+    cursorMonth.value = mm
+    pickedKey.value = ''
+    return true
+  }
+
+  /** 年下拉里该年每个月的天数（供月选择器标注 2 月 28/29 天）。 */
+  function monthLength(y, m) {
+    return daysInMonth(y, m)
+  }
+
+  /** 供年选择器判断某年是否存在（避免把整页做成死数据）。 */
+  const hasAnyYear = computed(() => photoYears.value.size > 0)
 
   /** 只接受当前视图内且可选的键，防止外部传入未来/补位格造成无效跳转。 */
   function select(key) {
@@ -104,6 +188,17 @@ export function useCalendarMatrix(buckets) {
     shiftMonth,
     jumpToday,
     select,
+    // 年 / 月切换（Job000145）
+    minIndex,
+    minYear,
+    maxYear,
+    maxIndex,
+    yearChoices,
+    hasAnyYear,
+    yearHasPhoto,
+    setYear,
+    setMonth,
+    monthLength,
     clearPicked: () => {
       pickedKey.value = ''
     }

@@ -1,4 +1,4 @@
-import { nextTick, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useTimelineDimension } from './useTimelineDimension'
 
 // 时间轴「三档维度 + 日期锚点跳转」的宿主装配（Job000145）。
@@ -45,7 +45,10 @@ export function useTimelineDimensionPanel({ gridRef, hasAnyMedia }) {
 
   const anchorDayKey = ref('')
   const calendarOpen = ref(false)
-  const calendarBtnRef = ref(null)
+  // 注：此处曾有一个 calendarBtnRef 供「关闭后焦点回到按钮」使用，但模板里写的是
+  // ref="panel.calendarBtnRef" —— Vue 3.5 的点号字符串 ref 只对 setupState 里直接声明的
+  // 变量生效，panel 是 prop，故该 ref **从未被绑定**，?.focus() 一直是空转。
+  // 现改为由 TimelineDimensionControls 用本组件内本地 ref 归还焦点，这里不再持有。
 
   function onDimensionChange(next) {
     dim.requestDimension(next)
@@ -58,10 +61,9 @@ export function useTimelineDimensionPanel({ gridRef, hasAnyMedia }) {
     calendarOpen.value = !calendarOpen.value
   }
 
-  /** Esc / 关闭按钮：焦点须回到触发按钮（WCAG 焦点管理）。 */
+  /** Esc / 关闭按钮：只改开关，焦点由宿主组件归还（它才持有按钮 ref）。 */
   function closeCalendar() {
     calendarOpen.value = false
-    nextTick(() => calendarBtnRef.value?.focus())
   }
 
   // AC-12：跳转只定位不筛选——/media 查询参数与切换前逐字段相同
@@ -75,7 +77,7 @@ export function useTimelineDimensionPanel({ gridRef, hasAnyMedia }) {
     dim,
     anchorDayKey,
     calendarOpen,
-    calendarBtnRef,
+
     onDimensionChange,
     toggleCalendar,
     closeCalendar,
