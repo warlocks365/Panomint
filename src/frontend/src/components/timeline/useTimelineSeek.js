@@ -103,6 +103,30 @@ export function useTimelineSeek({
   let pendingScrollEl = null
 
   /**
+   * 两段式滚动到目标分组。
+   *
+   * 为什么必须两段：时间轴用 DynamicScroller 虚拟滚动，未渲染的项按
+   * `min-item-size` 估算高度。于是 `offsets`（按行高/标题高精确累加）算出的目标
+   * 可能**超出当前 scrollHeight**——实测目标偏移 4420，而当时
+   * scrollHeight 仅 4057（可滚动上限 3309），首滚被浏览器 clamp 到 2577，
+   * 表现为「滚动了但停在半路」。
+   *
+   * 第一滚把虚拟列表带到目标附近，渲染后 scrollHeight 随之增长；
+   * 再等一帧用**同一个 idx** 重算目标并校正，即可落到精确位置。
+   * 不用重新查索引——数据已加载完，idx 稳定，重查反而可能因渲染时序拿到不同的 flat。
+   */
+  function scrollToTarget(el, idx) {
+    const go = () => el.scrollTo({ top: offsets.value[idx], behavior: 'smooth' })
+    go()
+    const retry = () => requestAnimationFrame(() => {
+      const target = offsets.value[idx]
+      // 已经到位就不动，避免无谓动画打断用户
+      if (Math.abs(el.scrollTop - target) > 2) el.scrollTo({ top: target, behavior: 'smooth' })
+    })
+    requestAnimationFrame(() => requestAnimationFrame(retry))
+  }
+
+  /**
    * 锚点跳转。载荷必须是 { dimension, key } 对象——靠字符串长度推断档位会让
    * 「档位不匹配」静默走错分支（ADR-001 记录的踩坑），对象载荷让它显式失败。
    */
@@ -157,7 +181,7 @@ export function useTimelineSeek({
         reportDegraded('anchor-not-found', { want, key, loaded: items.length })
         return
       }
-      scrollEl.scrollTo({ top: offsets.value[idx], behavior: 'smooth' })
+      scrollToTarget(scrollEl, idx)
     } finally {
       seeking.value = false
     }
