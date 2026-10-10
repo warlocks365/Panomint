@@ -45,6 +45,8 @@ uploads/
 # ===== OS / editor =====
 .DS_Store
 Thumbs.db
+# Windows 保留设备名残渣：根目录的 nul 无法删除（WinError 5），忽略以保持 git status 干净
+/nul
 *.log
 *.timestamp-*.mjs
 
