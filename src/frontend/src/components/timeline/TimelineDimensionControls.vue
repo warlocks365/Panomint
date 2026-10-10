@@ -21,15 +21,23 @@
     日期
   </button>
 
-  <div v-if="panel.calendarOpen.value" class="dp-wrap">
-    <DatePickerPopover
-      :buckets="dayBuckets"
-      :unknown-count="unknownCount"
-      :anchor-key="panel.anchorDayKey.value"
-      @close="panel.closeCalendar"
-      @seek="panel.onDaySeek"
-    />
-  </div>
+  <Teleport to="body">
+    <div
+      v-if="panel.calendarOpen.value"
+      ref="popoverRef"
+      class="dp-wrap"
+      :style="{ top: pos.top + 'px', left: pos.left + 'px' }"
+      :data-placement="pos.placement"
+    >
+      <DatePickerPopover
+        :buckets="dayBuckets"
+        :unknown-count="unknownCount"
+        :anchor-key="panel.anchorDayKey.value"
+        @close="panel.closeCalendar"
+        @seek="panel.onDaySeek"
+      />
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -43,14 +51,59 @@
 //
 // dayBuckets 直接来自 pager（挂载时一次取齐），故这里**不发请求**：
 // 既满足 AC-04「切档零请求」，也让日历圆点与滑块刻度读同一份 count。
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import DimensionTabs from './DimensionTabs.vue'
 import DatePickerPopover from './DatePickerPopover.vue'
+import { computePopoverPosition } from './popoverPosition'
 
-defineProps({
+const props = defineProps({
   panel: { type: Object, required: true }, // useTimelineDimensionPanel 的返回值
   hasAnyMedia: { type: Boolean, default: false },
   dayBuckets: { type: Array, default: () => [] },
   unknownCount: { type: Number, default: 0 }
+})
+
+// —— 浮层定位（Job000145 缺陷修复）——
+// 原实现是 `position: absolute` 且**没有 top/left**，完全依赖静态位置；其包含块
+// 一路向上全是 static，最终落到视口，再叠加祖先 `.content { overflow: auto }`
+// 与工具条 `flex-wrap: wrap`，面板会被 TOP 栏压住或被裁掉一角。
+// 现改为 Teleport 到 body + fixed，并按**触发按钮的实时视口坐标**定位，
+// 空间不足时上下翻转、越界时贴边夹紧（算法见 popoverPosition.js，含单测）。
+const popoverRef = ref(null)
+const pos = ref({ top: 0, left: 0, placement: 'bottom' })
+
+function updatePos() {
+  const btn = props.panel.calendarBtnRef?.value
+  const el = popoverRef.value
+  if (!btn || !el) return
+  const r = btn.getBoundingClientRect()
+  pos.value = computePopoverPosition({
+    trigger: { top: r.top, left: r.left, right: r.right, bottom: r.bottom },
+    // 面板尺寸取实测值：有无「本月无照片」提示会让高度差几十像素
+    panel: { width: el.offsetWidth, height: el.offsetHeight },
+    viewport: { width: window.innerWidth, height: window.innerHeight }
+  })
+}
+
+// 打开后要等一帧才能量到面板自身高度；开着的这段时间里窗口尺寸/滚动变化都要重算
+watch(
+  () => props.panel.calendarOpen.value,
+  async (open) => {
+    if (open) {
+      await nextTick()
+      updatePos()
+      window.addEventListener('resize', updatePos)
+      window.addEventListener('scroll', updatePos, true)
+    } else {
+      window.removeEventListener('resize', updatePos)
+      window.removeEventListener('scroll', updatePos, true)
+    }
+  }
+)
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updatePos)
+  window.removeEventListener('scroll', updatePos, true)
 })
 </script>
 
@@ -61,11 +114,17 @@ defineProps({
   cursor: not-allowed;
 }
 
-/* 日历浮层：贴工具条下沿左对齐，不用居中 modal——
-   居中会遮挡整个时间轴，与「锚点跳转」的低承诺语义不符 */
+/* 日历浮层：贴触发按钮定位（top/left 由 popoverPosition.js 按按钮实时坐标算），
+   不用居中 modal——居中会遮挡整个时间轴，与「锚点跳转」的低承诺语义不符。
+
+   position: fixed + Teleport 到 body 是修复的关键：原来的 absolute + 无 top/left
+   依赖静态位置，其包含块一路向上全是 static，最终落到视口，既会被 TOP 栏压住，
+   又会被祖先 .content{overflow:auto} 裁掉。挂到 body 后脱离一切祖先裁剪与层叠竞争。
+
+   z-index 150：高于浮层/菜单类（TrashPanel 90、ThumbContextMenu 70、UserMenu 10），
+   低于模态对话框（DialogHost 200）——浮层不应盖住模态。 */
 .dp-wrap {
-  position: absolute;
-  z-index: 20;
-  margin-top: 4px;
+  position: fixed;
+  z-index: 150;
 }
 </style>
