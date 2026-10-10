@@ -161,17 +161,35 @@ export function useCalendarMatrix(buckets) {
     minIndex.value === null ? now.getFullYear() : yearMonthOf(minIndex.value).year)
   const maxYear = computed(() => now.getFullYear())
 
-  /** 该月是否有媒体（月桶键 YYYY-MM）。 */
-  function hasPhotoIn(year, month) {
-    return (counts.value.get(`${year}-${pad2(month)}`) || 0) > 0
+  /**
+   * 该年哪些月份有媒体（1..12 的月份号数组，升序）。
+   *
+   * 注意 counts 的键是**日**格式 `2024-11-03`（日历用的是 day 档桶），
+   * 不是 `2024-11`。此前按月格式拼键去查，永远查不到 → 恒返回空/null，
+   * 于是「切年后落到该年最小有媒体月」的修复静默失效（实测：切到 2024 年仍停在无媒体的 9 月）。
+   */
+  function photoMonthsInYear(year) {
+    const out = []
+    const prefix = String(year) + '-'
+    for (const k of counts.value.keys()) {
+      if (!k.startsWith(prefix)) continue
+      const m = Number(k.slice(5, 7))
+      if (Number.isFinite(m) && m >= 1 && m <= 12 && !out.includes(m)) out.push(m)
+    }
+    return out.sort((a, b) => a - b)
   }
 
-  /** 该年**最小**的有媒体月份（1..12），没有则 null。 */
+  /** 该年是否有媒体的**最小**月份，没有则 null。 */
   function firstPhotoMonthInYear(year) {
-    for (let mm = 1; mm <= 12; mm++) {
-      if ((counts.value.get(`${year}-${pad2(mm)}`) || 0) > 0) return mm
-    }
-    return null
+    const ms = photoMonthsInYear(year)
+    return ms.length ? ms[0] : null
+  }
+
+  /** 该年该月是否有媒体（按日桶键前缀判定）。 */
+  function hasPhotoIn(year, month) {
+    const prefix = `${year}-${pad2(month)}-`
+    for (const k of counts.value.keys()) if (k.startsWith(prefix)) return true
+    return false
   }
 
   /** 该年是否有照片（年选择器据此标注可跳/ 无照片）。 */
@@ -274,6 +292,7 @@ export function useCalendarMatrix(buckets) {
     hasAnyYear,
     yearHasPhoto,
     firstPhotoMonthInYear,
+    photoMonthsInYear,
     setYear,
     setMonth,
     monthLength,
