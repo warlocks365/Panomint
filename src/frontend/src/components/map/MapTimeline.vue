@@ -32,7 +32,7 @@
         ref="trackRef"
         class="tl-track"
         @pointerdown="sel.onDown"
-        @pointermove="onTrackMove"
+        @pointermove="onTrackPointerMove"
         @pointerup="sel.onUp"
         @pointercancel="sel.onUp"
         @pointerleave="hoverIdx = -1"
@@ -118,6 +118,20 @@ function onTrackMove(e) {
   const r = trackRef.value.getBoundingClientRect()
   const i = Math.floor(((e.clientX - r.left) / r.width) * bars.length)
   hoverIdx.value = Math.min(bars.length - 1, Math.max(0, i))
+}
+
+// pointermove 同时承担两件事（需求：拖拽选范围 + 悬停看计数）：
+//   1. onTrackMove —— 悬停参考线与四类计数气泡
+//   2. sel.onMove  —— 拖拽框选状态机推进（把选区从 [按下桶] 扩成 [按下桶, 当前桶]）
+// 🔴 为什么必须合到两个函数而不是挂两个 @pointermove：同一元素上重复绑定同类型
+// 事件，后者会覆盖前者；而模板表达式又不支持分号多语句。故统一走这个合并入口。
+// 历史缺陷（2026-10-10 实测定位）：模板原先只绑了 onTrackMove，sel.onMove 从未
+// 被调用 → sel 永远停在按下时的 [i,i] → 无论怎么拖都只选中单个时刻，
+// 「选择一段时间轴范围（起止区间）」这个原需求在实机上完全不可用，
+// 而逻辑层单测全部通过（缺陷藏在线路而非逻辑，故补了源码级回归断言）。
+function onTrackPointerMove(e) {
+  onTrackMove(e)
+  sel.onMove(e)
 }
 
 // 归一化点列（x=列中心 0-100，y=100-高度%）→ Catmull-Rom 平滑贝塞尔
