@@ -13,8 +13,13 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     environment: 'node',
-    // 只收本目录下的时间轴用例，避免将来别处引入测试时被误卷入
-    include: ['src/components/timeline/__tests__/**/*.spec.js'],
+    // 按约定收集 `__tests__` 下的用例，**不再按目录白名单**。
+    // 原为 `['src/components/timeline/__tests__/**']`，当时只有时间轴有测试，
+    // 但白名单的代价是：任何写在别处的测试会被**静默忽略**（不是失败，是不收集）——
+    // 本次新增 `src/composables/__tests__/mapIconShapes.spec.js` 时就踩到了，
+    // 表现为「No test files found」，很容易误判成测试写错而非配置漏收。
+    // `**/__tests__/**/*.spec.js` 本身已足够收敛（不会卷入 node_modules/dist）。
+    include: ['src/**/__tests__/**/*.spec.js'],
     // 组件用例需 DOM（焦点/键盘/aria），故在文件内用 `// @vitest-environment jsdom` 逐个声明
     reporters: 'default',
     // 串行 + 单进程：多个 jsdom 用例并发时会在同一个临时目录上互相抢占

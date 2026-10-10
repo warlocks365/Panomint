@@ -4,6 +4,7 @@
 // 保证缩略图层的 coalesce 回退在图标异步加载完成前也有形可见（修"切换不及时/标记消失"）。
 import { ref } from 'vue'
 import { getMapIconPref, putMapIconPref } from '../api/map'
+import { MAP_ICON_SHAPE_PATHS, isMapIconShape } from './mapIconShapes'
 
 export function makeDefaultIconImageData() {
   const size = 24
@@ -28,14 +29,20 @@ export function useMapIcon(getMap) {
   // applyIcon 加载成功的图标元素——缩略图模式加载失败时回退复用（MapView.ensureThumbImage 消费）
   const clusterIconEl = ref(null)
 
-  const SHAPE_PATHS = {
-    circle: '<circle cx="12" cy="12" r="9"/>',
-    pin: '<path d="M12 2a8 8 0 0 0-8 8c0 5.4 8 12 8 12s8-6.6 8-12a8 8 0 0 0-8-8zm0 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>'
-  }
+  // 形状 path 表已上移到 mapIconShapes.js（与选择器共用单一真源）。
+  // 此前本文件另有一份 SHAPE_PATHS 且只含 circle/pin，与选择器提供的四种形状
+  // 不一致，导致点三角形/菱形/五角星时静默失效（详见 mapIconShapes.js 顶部说明）。
+  // 注：旧表里的 pin 项其实是死代码——shape==='pin' 在下方已被 PNG 分支提前拦掉。
 
   function shapeSvgDataUrl(shape, color) {
-    const path = SHAPE_PATHS[shape]
-    if (!path) return null
+    // 未知形状不再静默返回 null：回退到圆形并留下痕迹。
+    // 静默 return 会让「界面已把新形状标为选中、地图却仍是旧图标」——
+    // 用户无从判断是点了没生效还是自己看错了（这正是本次缺陷最难自查的原因）。
+    const key = isMapIconShape(shape) ? shape : 'circle'
+    if (!isMapIconShape(shape)) {
+      console.warn('[mapIcon] 未知基础形状，回退为圆形：', shape)
+    }
+    const path = MAP_ICON_SHAPE_PATHS[key]
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><g fill="${color}">${path}</g></svg>`
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
   }

@@ -17,7 +17,7 @@
           :title="s.name"
           @click="selectShape(s.key)"
         >
-          <svg width="18" height="18" viewBox="0 0 18 18" v-html="s.path" :style="{ fill: pref.color || DEFAULT_PIN_COLOR }"></svg>
+          <svg width="18" height="18" viewBox="0 0 24 24" v-html="s.path" :style="{ fill: pref.color || DEFAULT_PIN_COLOR }"></svg>
         </button>
       </div>
     </div>
@@ -68,19 +68,17 @@
 
 <script setup>
 import { ref } from 'vue'
+import { MAP_ICON_SHAPES } from '../../composables/mapIconShapes'
 
 const props = defineProps({
   pref: { type: Object, default: () => ({ shape: 'circle', color: DEFAULT_PIN_COLOR }) }
 })
 const emit = defineEmits(['update', 'close'])
 
-// 矢量形状：SVG path（填充色由 pref.color 控制）
-const shapes = [
-  { key: 'circle', name: '圆形', path: '<circle cx="9" cy="9" r="8" />' },
-  { key: 'triangle', name: '三角形', path: '<path d="M9 1l8 16H1z" />' },
-  { key: 'diamond', name: '菱形', path: '<path d="M9 1l8 8-8 8-8-8z" />' },
-  { key: 'star', name: '五角星', path: '<path d="M9 1l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4L4.5 14.8l.9-5L1.8 6.3l5-.7z" />' }
-]
+// 矢量形状：来自 mapIconShapes.js 的**单一真源**（坐标系 24×24）。
+// 此前本文件另有一份 18×18 的副本，与地图侧的 24×24 表不同源——
+// 直接把这里的 path 抄过去会让形状偏小，且四种形状大小不一。
+const shapes = MAP_ICON_SHAPES
 
 // 图钉调色板——颜色即数据（用户选地图标记色），不是样式债；p0_guard 按
 // PIN_COLOR_PALETTE 标记豁免（scripts/p0_guard.py COLOR_DATA_MARKERS）。
