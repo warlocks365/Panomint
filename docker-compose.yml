@@ -76,6 +76,14 @@ services:
       # 上下文=仓库根：镜像需打包 assets/{models,lib}（CLIP 模型 + ONNX Runtime，Job000010）
       context: .
       dockerfile: docker/api/Dockerfile
+      # 版本串必须经 build-arg 注入（docker/api/Dockerfile 用它写 LDFLAGS 打进二进制）。
+      # 缺失时 Dockerfile 默认 dev → /version 返回 dev、设置页版本卡也显示 dev，
+      # §4.5 发版一致性校验的「系统内 /version」断言会直接 FAIL。
+      # 取值优先级：外部 APP_VERSION 环境变量 > 仓库根 VERSION 文件。
+      args:
+        APP_VERSION: "${APP_VERSION:-${VERSION:-1.9.5}}"
+        APP_COMMIT: "${APP_COMMIT:-}"
+        APP_BUILD_DATE: "${APP_BUILD_DATE:-}"
     container_name: pano-api
     restart: unless-stopped
     environment:
