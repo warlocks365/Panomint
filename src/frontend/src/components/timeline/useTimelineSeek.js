@@ -124,27 +124,39 @@ export function useTimelineSeek({
   }
 
   /**
-   * 滚到目标分组：先用理论偏移把虚拟列表带到附近（让目标被渲染），
-   * 再用 DOM 实测值校正。虚拟列表可能尚未渲染目标，故最多重试若干帧。
+   * 滚到目标分组：**逐屏下滚直到目标分组头真的被渲染出来**，再用 DOM 实测值定位。
+   *
+   * 为什么不能用 offsets 理论值定位（两次实测都否证了这条路）：
+   * ① 理论累加值与真实渲染高度不一致——单测算 offsets[目标]=4420，
+   *    实测滚过去却停在 1845（差 2.4 倍），因为 rowHeight/标题高的假定与真实渲染不同；
+   * ② 即便首滚被浏览器 clamp 到上限，目标也可能**根本没被渲染**（虚拟列表只渲染可视区），
+   *    此时 DOM 实测找不到该分组头（实测 anchor-not-rendered，重试 31 帧无果）。
+   *
+   * 因此改为「以渲染结果为准」：按可视高度逐屏下滚，每滚一屏就用
+   * getBoundingClientRect 实测目标是否出现；出现即滚到它的精确位置。
+   * 到达列表底部仍未出现则报降级事件，不静默。
    */
   function scrollToTarget(el, idx) {
     const label = flat.value[idx] && flat.value[idx].label
-    el.scrollTo({ top: offsets.value[idx], behavior: 'smooth' })
+    if (!label) {
+      reportDegraded('anchor-label-missing', { idx })
+      return
+    }
     let tries = 0
-    const correct = () => {
+    const step = () => {
       const real = locateInDom(el, label)
       if (real >= 0) {
         if (Math.abs(el.scrollTop - real) > 2) el.scrollTo({ top: real, behavior: 'smooth' })
-        return true
+        return
       }
-      // 目标尚未渲染：继续等下一帧（虚拟列表滚动后才渲染新项）
-      if (++tries > 30) {
-        reportDegraded('anchor-not-rendered', { label, tries })
-        return true
+      if (++tries > 80) {
+        reportDegraded('anchor-not-rendered', { label, tries, top: Math.round(el.scrollTop) })
+        return
       }
-      requestAnimationFrame(correct)
+      el.scrollTo({ top: el.scrollTop + el.clientHeight * 0.75, behavior: 'auto' })
+      requestAnimationFrame(step)
     }
-    requestAnimationFrame(() => requestAnimationFrame(correct))
+    step()
   }
 
   /**
