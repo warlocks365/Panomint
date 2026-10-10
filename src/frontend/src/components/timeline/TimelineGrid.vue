@@ -16,7 +16,10 @@
           key-field="__key"
         >
           <template #default="{ item, index, active }">
-            <DynamicScrollerItem :item="item" :active="active" :index="index" :size-dependencies="[cols]">
+            <!-- 🔴 勿加回 :size-dependencies —— vue-virtual-scroller 3.x 已弃用该 prop（仅触发
+                 console.warn，无实际功能）；动态尺寸测量由库内 ResizeObserver 负责，列数变化
+                 会被自动重新测量。此处保留注释以防回退。 -->
+            <DynamicScrollerItem :item="item" :active="active" :index="index">
               <div v-if="item.header" class="tl-header" :class="item.level">{{ item.label }}</div>
               <div
                 v-else

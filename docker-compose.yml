@@ -81,7 +81,7 @@ services:
       # §4.5 发版一致性校验的「系统内 /version」断言会直接 FAIL。
       # 取值优先级：外部 APP_VERSION 环境变量 > 仓库根 VERSION 文件。
       args:
-        APP_VERSION: "${APP_VERSION:-${VERSION:-1.9.5}}"
+        APP_VERSION: "${APP_VERSION:-${VERSION:-1.9.6}}"
         APP_COMMIT: "${APP_COMMIT:-}"
         APP_BUILD_DATE: "${APP_BUILD_DATE:-}"
     container_name: pano-api
@@ -103,6 +103,16 @@ services:
       # 改为仅本机开发可用）**不改变现有部署的行为**；新环境请按需覆盖，
       # 或显式设为空（= 不放行任何跨域源）。
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8765,https://192.168.1.117:8443}
+      # AgentPano（AI 助手）LLM 上游的**私网 host 白名单**，逗号分隔，可含端口。
+      # 为什么需要：SSRF 防线默认拒绝一切私网/环回地址（防止「管理员可配 URL」
+      # 变成面向内网的请求原语），但本项目有真实的**本地大模型部署**需求
+      # （例如 llama.cpp / Ollama 跑在内网某台机器上），一刀切会让该场景不可用。
+      # 语义：留空 = 维持原样（拒绝全部私网，FailClosed）；列出的主机才放行，
+      # 且**精确匹配**——写 192.168.1.42 只放行该地址，不放行整个 /24 网段。
+      # ⚠️ 云厂商元数据地址（169.254.169.254 / 100.100.100.200 / 192.0.0.192）
+      #    即使写进这里也**永不生效**（代码层硬性排除）：拿到即等于拿到云账号权限。
+      # 例：AGENT_LLM_ALLOWED_HOSTS=192.168.1.42:8888,ollama.lan:11434
+      AGENT_LLM_ALLOWED_HOSTS: ${AGENT_LLM_ALLOWED_HOSTS:-}
       # Job000010 语义搜索的设备选择：cpu|cuda|auto（auto=优先 CUDA，不可用回落 CPU）
       # GPU 部署时把 EMBED_DEVICE 设为 cuda，并把 EMBED_LIB 指向 CUDA 版 onnxruntime 库
       EMBED_DEVICE: ${EMBED_DEVICE:-auto}

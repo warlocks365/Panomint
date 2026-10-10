@@ -6,6 +6,18 @@
 //  1.1.0 真实内容为 Job000113/114 扫描导入与复制修复，以 git tag v1.0.0..v1.1.0 区间为准）。
 export const VERSION_HISTORY = [
   {
+    version: '1.9.6',
+    date: '2026-10-10',
+    items: [
+      '修复：地图页时间轴原需求要求「拖拽选择一段时间范围」，实际仅支持单点选择——现已补上拖拽范围选择接线',
+      '修复：AI 悬浮球展开后无法退出（面板关闭、Esc、点击球体均无效），现新增收起按钮与 Esc 兜底',
+      '修复：web 镜像升级后残留旧版 chunk 文件（COPY 不会删除源端已不存在的文件），已在镜像构建时先清理',
+      '修复：时间轴偶发 ReferenceError（压缩后显示为「Cannot access $ before initialization」），根因为 const 声明前被 watch 同步读取',
+      '清理：移除 vue-virtual-scroller 已弃用的 sizeDependencies 属性，控制台不再输出该条警告（动态尺寸本就走 ResizeObserver，删除无功能影响）',
+      '规划：AgentPano（AI 助手）能力扩展方案已评审通过并并入二期规划，本期不含功能变更'
+    ]
+  },
+  {
     version: '1.9.5',
     date: '2026-10-10',
     items: [

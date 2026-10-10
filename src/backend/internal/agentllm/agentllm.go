@@ -139,13 +139,15 @@ func (h *Handler) PutConfig(c *gin.Context) {
 		httperr.Envelope(c, http.StatusBadRequest, "BAD_REQUEST", "启用时 base_url 与 model 必填")
 		return
 	}
-	// SSRF 防线（netguard.go H-1）：非空 base_url 必须是 http/https 且不指向
-	// 本机/内网。放在**保存前**而不是只在出站前 —— 让配置错误在写入时就
-	// 被明确拒绝（400 + 可操作文案），而不是等到探活/代理时才发现连不上。
+	// SSRF 防线（netguard.go H-1）：非空 base_url 必须是 http/https；
+	// 指向私网/环回时，需主机已加入环境变量 AGENT_LLM_ALLOWED_HOSTS 白名单
+	//（本地大模型部署需求，2026-10-11）。放在**保存前**而不是只在出站前 ——
+	// 让配置错误在写入时就明确拒绝（400 + 可操作文案），而不是等到
+	// 探活/代理时才发现连不上。
 	if b.BaseURL != "" {
 		if _, err := validateUpstreamURL(b.BaseURL); err != nil {
 			httperr.Envelope(c, http.StatusBadRequest, "BAD_URL",
-				"base_url 非法：仅允许 http/https，且不得指向本机或内网地址（"+err.Error()+"）")
+				"base_url 非法："+err.Error())
 			return
 		}
 	}
@@ -214,7 +216,7 @@ func (h *Handler) TestConfig(c *gin.Context) {
 	// 修复之前写入的（存量数据），且 DNS 解析结果随时会变（重绑定）。
 	if _, err := validateUpstreamURL(baseURL); err != nil {
 		httperr.Envelope(c, http.StatusBadRequest, "BAD_URL",
-			"base_url 非法：仅允许 http/https，且不得指向本机或内网地址（"+err.Error()+"）")
+			"base_url 非法："+err.Error())
 		return
 	}
 

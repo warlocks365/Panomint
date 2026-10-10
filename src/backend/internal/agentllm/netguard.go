@@ -18,12 +18,21 @@
 //     （第 2 层只看字面量 IP），只有拨号那一刻才知道真实目的地址。
 //     即「DNS 重绑定 / rebinding」的标准防御位置。
 //
-// 已知取舍：**不做**「域名白名单」或「管理员显式确认内网例外」。理由是
-// 本系统的 LLM 上游通常是公网 API 或用户自建的 https 服务；真需要内网上游
-// （如企业内网推理网关）时，正确做法是让管理员自己在网络层解决
-// （把该主机名解析到非内网 IP，或走反向代理），而不是在应用层开一个可被
-// 复用的内网请求洞。若将来确有内网上游需求，应改为「按 host 精确白名单」
-// 而非「放开私网段」。
+// 已知取舍与演进（2026-10-11 用户裁决）：
+//
+//	最初此处**一刀切拒绝所有私网**，理由是「管理员可配 URL」等价于「面向内网的请求原语」。
+//	但本项目有**真实且必要的本地大模型部署需求**（上游 llama.cpp 在 192.168.1.42:8888），
+//	一刀切使该场景完全不可用。已改为**按 host 精确白名单**：
+//
+//	环境变量 AGENT_LLM_ALLOWED_HOSTS = "192.168.1.42,llama.internal"（逗号分隔，可含端口）
+//	  · 默认空 = **行为与原来完全一致**（仍拒绝全部私网），FailClosed 优先；
+//	  · 列出的 host 才允许指向私网/环回；未列出的一律拒绝；
+//	  · 精确匹配而非「放开私网段」——admin 仍拿不到任意内网请求能力，
+//	    除非运维在环境变量里显式加入某个 host。
+//
+//	⚠️ 云元数据地址（169.254.169.254 / 100.100.100.200 / 192.0.0.192）
+//	   **永远不可加入白名单**——拿到即等于拿到云账号权限，与本地模型需求无关。
+//	   loadAllowedHosts 已硬性排除，见 metadataHosts。
 package agentllm
 
 import (
@@ -32,18 +41,111 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 // upstreamTimeout 上游请求超时。与 Handler.client() 的 120s 保持一致。
 const upstreamTimeout = 120 * time.Second
 
+// allowedHostsEnv 私网 host 白名单环境变量名。
+const allowedHostsEnv = "AGENT_LLM_ALLOWED_HOSTS"
+
+// metadataHosts 云厂商元数据地址：**任何情况下都不得**加入白名单。
+//
+// 为什么单独硬编码：白名单是运维可控的输入，而元数据服务返回的是实例角色的
+// 临时凭证（AWS IAM / GCP 服务账号 / 阿里云 RAM）。一旦放行，攻陷 admin 就等于
+// 拿到云账号权限，比访问内网其它服务严重一个量级。这与「本地模型在私网」是两件事，
+// 不应被同一个开关顺带打开。
+var metadataHosts = map[string]struct{}{
+	"169.254.169.254": {}, // AWS / GCP / Azure / OpenStack 通用
+	"100.100.100.200": {}, // 阿里云
+	"192.0.0.192":      {}, // Oracle Cloud
+}
+
+var (
+	allowedHostsMu sync.RWMutex
+	allowedHosts   = loadAllowedHosts()
+)
+
+// loadAllowedHosts 从环境变量读取白名单。
+//
+// 解析规则：逗号/分号/空格分隔；每项可写 host 或 host:port；host 大小写不敏感；
+// 项内带 :port 时要求实际端口也一致才算命中（避免「只为某端口开洞」被误当成
+// 「整个 host 都开」）；空项忽略；元数据地址静默丢弃。
+func loadAllowedHosts() map[string]string {
+	raw := os.Getenv(allowedHostsEnv)
+	out := make(map[string]string)
+	for _, item := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n'
+	}) {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		host, port := item, ""
+		if h, p, err := net.SplitHostPort(item); err == nil {
+			host, port = h, p
+		}
+		host = strings.ToLower(strings.Trim(host, "[]"))
+		if host == "" {
+			continue
+		}
+		if _, bad := metadataHosts[host]; bad {
+			continue // 元数据地址：永不放入白名单
+		}
+		out[host] = port
+	}
+	return out
+}
+
+// allowedHostSnapshot 返回当前白名单副本（诊断与测试用）。
+func allowedHostSnapshot() map[string]string {
+	allowedHostsMu.RLock()
+	defer allowedHostsMu.RUnlock()
+	out := make(map[string]string, len(allowedHosts))
+	for k, v := range allowedHosts {
+		out[k] = v
+	}
+	return out
+}
+
+// hostAllowed 判定某 host（可含端口）是否被显式白名单放行。
+//
+// 只认精确匹配：白名单写 192.168.1.42 就只放行这个地址，不放行 192.168.1.0/24。
+func hostAllowed(hostport string) bool {
+	h, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		h, port = hostport, ""
+	}
+	h = strings.ToLower(strings.Trim(h, "[]"))
+	if h == "" {
+		return false
+	}
+	// 元数据地址永不放行：即使误配进环境变量也不认。
+	if _, bad := metadataHosts[h]; bad {
+		return false
+	}
+	allowedHostsMu.RLock()
+	want, ok := allowedHosts[h]
+	allowedHostsMu.RUnlock()
+	if !ok {
+		return false
+	}
+	// 白名单未指定端口 = 该 host 任意端口；指定了则必须一致。
+	return want == "" || want == port
+}
+
 // validateUpstreamURL 校验上游 base_url：仅 http/https + 主机名合法。
 //
 // 只做**字面量**层面的判定（协议 + 直接写出的 IP）。域名不在此层判定 ——
 // 那需要解析，且解析结果随时可变（重绑定），判定必须放在拨号那一刻（见 guardedTransport）。
 // 这里提前挡掉协议滥用与「直接写内网 IP」这两类最粗的滥用，让错误在配置时立刻可见。
+//
+// 私网例外（2026-10-11）：host 命中 AGENT_LLM_ALLOWED_HOSTS 白名单时放行，
+// 以支持本地大模型部署；未命中仍按原逻辑拒绝。详见 loadAllowedHosts。
 func validateUpstreamURL(raw string) (*url.URL, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -68,7 +170,10 @@ func validateUpstreamURL(raw string) (*url.URL, error) {
 	// 字面量 IP：直接判定（127.0.0.1 / 169.254.169.254 / [::1] / 10.x / 192.168.x …）。
 	// 域名不在此拦截，交由 dialer 在解析后判定。
 	if ip := net.ParseIP(host); ip != nil && isBlockedIP(ip) {
-		return nil, fmt.Errorf("禁止指向本机或内网地址")
+		if hostAllowed(u.Host) {
+			return u, nil
+		}
+		return nil, fmt.Errorf("禁止指向本机或内网地址（如需访问本地模型，请将主机加入环境变量 %s）", allowedHostsEnv)
 	}
 	return u, nil
 }
@@ -118,6 +223,12 @@ func isBlockedIP(ip net.IP) bool {
 //	字面量校验完全看不出变化，只有「真正拨号的那一刻」才知道真实目的地。
 //
 // 判定放在解析后、拨号前，中间不留窗口：拿到 ips 后立即判，立即返回错误。
+//
+// 私网例外（2026-10-11）：host 命中 AGENT_LLM_ALLOWED_HOSTS 白名单时跳过拦截，
+// 以支持本地大模型部署。白名单按 addr（含端口）判定，且对
+// 「字面量 IP」与「域名解析到私网」两条路径同等生效 —— 后者是关键：
+// 白名单里写主机名、它解析到 192.168.x.x 时，字面量层已放行，此处若不认白名单
+// 就会把刚放行的合法上游重新拦掉。元数据地址在任何分支都不放行。
 func guardedTransport() *http.Transport {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	return &http.Transport{
@@ -126,9 +237,13 @@ func guardedTransport() *http.Transport {
 			if err != nil {
 				return nil, err
 			}
+			// 白名单按原始 addr（含端口）判定一次，结果整条拨号复用 ——
+			// 必须在这里算，不能等到判定内网时才算，否则「host 在白名单但域名
+			// 解析到私网」这条路径会漏判（此时 host 字面量不是 IP，上面已放过）。
+			allowed := hostAllowed(addr)
 			// 若是字面量 IP，无需解析，直接判定。
 			if ip := net.ParseIP(host); ip != nil {
-				if isBlockedIP(ip) {
+				if isBlockedIP(ip) && !allowed {
 					return nil, fmt.Errorf("目标 %s 属于本机/内网地址，已拒绝", ip)
 				}
 			} else {
@@ -140,7 +255,7 @@ func guardedTransport() *http.Transport {
 					return nil, fmt.Errorf("目标 %s 未解析到任何地址", host)
 				}
 				for _, ip := range ips {
-					if isBlockedIP(ip) {
+					if isBlockedIP(ip) && !allowed {
 						// 任何一个记录落在内网就整体拒绝：多记录主机只要有一条
 						// 指向内网，攻击者就能用它当跳板。
 						return nil, fmt.Errorf("目标 %s 解析到本机/内网地址 %s，已拒绝", host, ip)
