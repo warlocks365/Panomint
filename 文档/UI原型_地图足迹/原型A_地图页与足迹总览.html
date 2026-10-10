@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 原型 · 地图足迹 — 地图页与总览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#e9e4de; --surface:#f4f1ed; --surface2:#efebe5; --deep:#e3ded7;
+    --border:#ddd8d0; --text:#41403c; --text2:#7d7a73; --text3:#a5a29a;
+    --primary:#4a5a6a; --primary-hover:#3d4b58; --primary-soft:rgba(143,163,173,.16);
+    --danger:#b0685c; --success:#6e8a72; --oat:#c4a57a;
+    --fp:#a8794a; --fp-deep:#8c5f35; --fp-light:#c89b5e;
+    --map-land:#e9e4dd; --map-city:#e0dad2; --map-water:#d7dde0; --map-road:#d8d2ca; --map-label:#a8a49c;
+    --stat-photo:#8fa3ad; --stat-video:#b3a58c; --stat-pano-photo:#9aa79b; --stat-pano-video:#a89a9c;
+    --shadow-card:0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift:0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#ded9d2; font-family:var(--font); color:var(--text); font-weight:300; letter-spacing:.01em; padding:28px 0 48px; }
+  .canvas { width:1440px; margin:0 auto; }
+  .frame { background:var(--bg); border-radius:18px; overflow:hidden; box-shadow:var(--shadow-card); margin-bottom:40px; }
+  .view-tag { font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text3); padding:14px 36px 0; }
+  .page { padding:26px 36px 40px; }
+  .ph { display:flex; align-items:baseline; gap:12px; margin-bottom:22px; }
+  .ph .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--text3); }
+  .ph h1 { font-size:16px; font-weight:500; letter-spacing:.1em; }
+  .ph .sub { font-size:12px; color:var(--text2); }
+  .ph .spacer { flex:1; }
+  .note { font-size:11.5px; color:var(--text2); line-height:1.9; background:var(--surface); border:1px solid var(--border); border-left:2px solid var(--oat); border-radius:var(--r-sm); padding:10px 14px; margin-top:16px; }
+  .note b { font-weight:500; color:var(--text); }
+  .note code { font-family:var(--mono); font-size:11px; background:rgba(74,90,106,.08); border-radius:3px; padding:1px 4px; }
+  .note + .note { margin-top:8px; }
+
+  /* ================= 地图外壳 ================= */
+  .map-shell { border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; background:var(--map-land); }
+  .map-vp { position:relative; }
+  .map-vp svg.map { display:block; width:100%; height:auto; }
+  .map-bg { filter:saturate(.42) brightness(1.04); }
+
+  .mt-bar { position:absolute; left:14px; top:14px; display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.95); border:1px solid rgba(15,23,42,.08); border-radius:8px; padding:6px 12px; box-shadow:0 4px 14px rgba(15,23,42,.08); }
+  .mt-title { font-size:13px; font-weight:600; color:var(--text); }
+  .mt-stat { font-size:12px; color:var(--text2); font-variant-numeric:tabular-nums; }
+  .mt-btn { border:1px solid rgba(15,23,42,.14); background:#fff; border-radius:6px; padding:3px 10px; font-size:12px; color:var(--text2); cursor:pointer; font-family:var(--font); display:inline-flex; align-items:center; gap:5px; transition:all .3s cubic-bezier(.32,.72,0,1); }
+  .mt-btn:hover { border-color:rgba(15,23,42,.28); color:var(--text); }
+  .mt-btn.first { margin-left:auto; }
+  .mt-btn.on { border-color:var(--fp); background:rgba(168,121,74,.10); color:var(--fp-deep); }
+  .mt-btn.on:hover { border-color:var(--fp-deep); }
+  .mt-btn .ic { display:inline-flex; flex:none; }
+
+  .mz { position:absolute; right:14px; bottom:58px; display:flex; flex-direction:column; border:1px solid rgba(15,23,42,.10); border-radius:8px; overflow:hidden; background:rgba(255,255,255,.94); box-shadow:0 2px 10px rgba(15,23,42,.08); }
+  .mz button { width:30px; height:30px; border:0; background:transparent; font-size:16px; color:var(--text2); cursor:pointer; font-family:var(--font); line-height:1; }
+  .mz button + button { border-top:1px solid rgba(15,23,42,.08); }
+  .mz button:hover { background:rgba(15,23,42,.04); }
+  .scalebar { position:absolute; left:14px; bottom:14px; display:flex; align-items:center; gap:7px; font-size:10.5px; color:var(--text3); font-family:var(--mono); background:rgba(255,255,255,.82); border-radius:5px; padding:3px 8px; }
+  .scalebar .bar { width:52px; height:6px; border:1px solid var(--text3); border-top:0; }
+
+  .lgd { position:absolute; left:14px; bottom:48px; background:rgba(255,255,255,.92); border:1px solid rgba(15,23,42,.08); border-radius:8px; padding:8px 12px; font-size:11px; color:var(--text2); line-height:2; }
+  .lgd .k { display:flex; align-items:center; gap:8px; }
+  .lgd .sw { width:26px; height:0; border-top:2px solid var(--fp); }
+  .lgd .sw.thick { border-top-width:3px; border-color:var(--fp-deep); }
+  .lgd .dot { width:7px; height:7px; border-radius:50%; background:#f7f4ef; border:1.5px solid var(--fp); margin-left:9px; }
+
+  /* 时间轴 */
+  .tl { background:var(--surface); border-top:1px solid var(--border); padding:9px 14px 11px; }
+  .tl-head { display:flex; align-items:center; gap:10px; font-size:12px; color:var(--text2); }
+  .tl-title { font-weight:600; color:var(--text); }
+  .tl-range { font-variant-numeric:tabular-nums; }
+  .tl-zoom { margin-left:auto; display:flex; align-items:center; gap:6px; }
+  .tl-zb { width:22px; height:22px; border:1px solid rgba(15,23,42,.14); background:var(--surface); border-radius:6px; font-size:14px; line-height:1; color:var(--text2); cursor:pointer; }
+  .tl-zl { min-width:20px; text-align:center; font-weight:600; color:var(--text); }
+  .tl-clear { border:1px solid rgba(15,23,42,.14); background:var(--surface); border-radius:6px; padding:2px 8px; font-size:12px; color:var(--text2); cursor:pointer; }
+  .tl-track { position:relative; display:flex; align-items:flex-end; gap:1px; height:46px; margin-top:7px; background:linear-gradient(to top, rgba(143,163,173,.08), transparent); border-radius:4px; }
+  .tl-bar { flex:1 1 0; min-width:2px; background:rgba(74,90,106,.16); border-radius:2px 2px 0 0; }
+  .tl-bar.sel { background:rgba(74,90,106,.36); }
+  .tl-axis { display:flex; justify-content:space-between; margin-top:4px; font-size:11px; color:var(--text3); font-family:var(--mono); }
+  .tl-stats { display:flex; align-items:center; gap:18px; margin-top:7px; font-size:11.5px; color:var(--text2); }
+  .tl-stats .s { display:inline-flex; align-items:center; gap:6px; }
+  .tl-stats .d { width:8px; height:8px; border-radius:2.5px; }
+  .tl-stats .chips { margin-left:auto; display:flex; gap:6px; }
+  .tl-stats .chip { border:1px solid var(--border); background:rgba(244,241,237,.8); border-radius:999px; padding:1px 9px; font-size:11px; color:var(--text2); }
+
+  /* 三联缩放对比 */
+  .tri { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .tri .cell { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; display:flex; flex-direction:column; }
+  .tri .cap { display:flex; align-items:center; gap:8px; padding:9px 12px; font-size:12px; border-bottom:1px solid var(--border); }
+  .tri .cap .z { font-family:var(--mono); font-size:11px; color:var(--text3); }
+  .tri .cap .n { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--fp-deep); }
+  .tri .vp { position:relative; flex:1; }
+  .tri .vp svg { display:block; width:100%; height:auto; }
+  .tri .desc { padding:9px 12px 11px; font-size:11px; color:var(--text2); line-height:1.75; border-top:1px solid var(--border); }
+
+  /* 动效分帧 */
+  .frames { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+  .fcell { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; }
+  .fcell .cap { font-family:var(--mono); font-size:10.5px; color:var(--text3); padding:7px 11px; border-bottom:1px solid var(--border); letter-spacing:.06em; }
+  .fcell .vp { position:relative; background:var(--map-land); }
+  .fcell .vp svg { display:block; width:100%; height:auto; }
+  .fcell .t { position:absolute; right:9px; top:9px; font-family:var(--mono); font-size:10px; color:var(--text3); background:rgba(255,255,255,.8); border-radius:4px; padding:1px 6px; }
+
+  .legend-row { display:flex; align-items:center; gap:22px; flex-wrap:wrap; font-size:11.5px; color:var(--text2); margin-top:14px; }
+  .legend-row .k { display:inline-flex; align-items:center; gap:7px; }
+  .legend-row .sw { width:24px; height:0; border-top:2px solid var(--fp); }
+  .legend-row .sw.thick { border-top-width:3px; border-color:var(--fp-deep); }
+
+  /* 弧线基础样式：生长动画由 JS（Web Animations API）在进入视口时播放，
+     reduced-motion 判定也在 JS 侧 —— 因此这里不写 keyframes */
+  .fp-line, .fp-glow { fill:none; stroke-linecap:round; stroke-linejoin:round; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ==================== VIEW.30 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.30 · 地图页默认态（足迹关闭）· 顶栏新增「足迹」按钮</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">MAP</span>
+        <h1>地图</h1>
+        <span class="sub">长三角示例 · 8 个地点 · 136 项媒体</span>
+        <span class="spacer"></span>
+        <span class="sub">足迹 · 关</span>
+      </div>
+      <div class="map-shell" id="shell30"></div>
+      <div class="note">
+        <b>改动点：</b>顶栏按钮组新增「足迹」按钮（位于「图标」左侧，沿用同款白底浮层样式 <code>.mt-icon-btn</code>）。关闭态为中性描边；点击后转为<b>琥珀激活态</b>并开始加载足迹。现有簇圆点、筛选栏、时间轴行为<b>均不改动</b>，足迹是叠加层。
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW.31 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.31 · 足迹开启 · 按当前缩放与时间范围自动生成的弧形足迹线</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">MAP · FOOTPRINT ON</span>
+        <h1>地图</h1>
+        <span class="sub">时间范围 2024-04-01 ~ 2024-05-31 · 8 个地点 · 10 条足迹线</span>
+        <span class="spacer"></span>
+        <span class="sub" style="color:var(--fp-deep)">足迹 · 开</span>
+      </div>
+      <div class="map-shell" id="shell31"></div>
+      <div class="note">
+        <b>方向规则（需求 F-6）：</b>向<b>东</b>行进（画面从左往右）画<b>下弧</b>；向<b>西</b>行进（从右往左）画<b>上弧</b>。同一对地点的去程与回程因此形成<b>上下镜像的梭形</b>——图中「南京—镇江」「镇江—扬州」「上海—杭州」三组往返均可看到成对的上下弧。
+      </div>
+      <div class="note">
+        <b>去除重叠线（需求 F-7）：</b>同一有向路径重复多次只保留一条弧线，<b>线宽与深度随往返回数递增</b>（浅赭 1.6px → 深赭 2.7px），悬停可看具体次数。反向路径不合并（它们本就是一上一下的梭形，不构成重叠）。
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW.32 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.32 · 缩放分级 · 同一区域三种缩放级别（需求 F-2）</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">ZOOM LEVELS</span>
+        <h1>按当前地图缩放比例自动生成</h1>
+        <span class="sub">缩放 → 聚合网格 → 停留点粒度 → 线的数量与跨度</span>
+      </div>
+      <div class="tri">
+        <div class="cell">
+          <div class="cap"><span>概览</span><span class="z">zoom 6 · 网格 2.813°</span><span class="n">3 点 / 2 线</span></div>
+          <div class="vp" id="vp32a"></div>
+          <div class="desc">跨市行程被压成三段：苏南城市群 → 上海 → 杭州。适合看「大跨度迁移」。</div>
+        </div>
+        <div class="cell">
+          <div class="cap"><span>城市</span><span class="z">zoom 10 · 网格 0.176°</span><span class="n">8 点 / 10 线</span></div>
+          <div class="vp" id="vp32b"></div>
+          <div class="desc">每个城市各成一站，往返关系全部显现（三组梭形）。日常浏览的默认粒度。</div>
+        </div>
+        <div class="cell">
+          <div class="cap"><span>街区</span><span class="z">zoom 13 · 网格 0.022°</span><span class="n">13 点 / 12 线</span></div>
+          <div class="vp" id="vp32c"></div>
+          <div class="desc">同一城市内部细分（上海拆为浦西 / 浦东 / 徐汇），足迹变成市内通勤网。</div>
+        </div>
+      </div>
+      <div class="note">
+        <b>实现要点：</b>网格吸附复用后端既有 <code>geo.GridSize(zoom)</code>（<code>180 / 2^zoom</code>，下限 0.0005°），与簇聚合<b>完全同源</b>——因此足迹的疏密与地图上圆点的疏密天然一致。缩放变化经 250ms 防抖后重算，过期响应由代次守卫丢弃。
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ==========================================================================
+   地图足迹原型 · 真实算法演示
+   投影：等距柱状（按中心纬度米制校正）
+   弧线：米制空间求法线 + 方向规则 D + 自适应曲率 + 二次贝塞尔采样 26 点
+   去重：地点身份归一 → 有向对聚合（规则 E1）
+   ========================================================================== */
+
+/* ---------- 演示数据：长三角真实经纬度 ---------- */
+const PLACES = {
+  nanjing:  { name:'南京', lng:118.80, lat:32.06 },
+  zhenjiang:{ name:'镇江', lng:119.45, lat:32.20 },
+  yangzhou: { name:'扬州', lng:119.42, lat:32.39 },
+  changzhou:{ name:'常州', lng:119.97, lat:31.81 },
+  wuxi:     { name:'无锡', lng:120.31, lat:31.49 },
+  suzhou:   { name:'苏州', lng:120.58, lat:31.30 },
+  shanghai: { name:'上海', lng:121.47, lat:31.23 },
+  hangzhou: { name:'杭州', lng:120.15, lat:30.28 }
+};
+
+/* 停留点序列（时间序；同一地点可多次出现——往返必须保留，且是去重的输入） */
+const STOPS_MAIN = [
+  { k:'nanjing',  first:'2024-04-02', last:'2024-04-04', n:14 },
+  { k:'zhenjiang',first:'2024-04-05', last:'2024-04-05', n:5  },
+  { k:'nanjing',  first:'2024-04-06', last:'2024-04-06', n:3  },
+  { k:'zhenjiang',first:'2024-04-07', last:'2024-04-07', n:2  },
+  { k:'yangzhou', first:'2024-04-08', last:'2024-04-08', n:7  },
+  { k:'zhenjiang',first:'2024-04-09', last:'2024-04-09', n:4  },
+  { k:'nanjing',  first:'2024-04-10', last:'2024-04-10', n:6  },
+  { k:'changzhou',first:'2024-04-12', last:'2024-04-12', n:9  },
+  { k:'wuxi',     first:'2024-04-13', last:'2024-04-13', n:11 },
+  { k:'suzhou',   first:'2024-04-14', last:'2024-04-15', n:16 },
+  { k:'shanghai', first:'2024-04-16', last:'2024-04-20', n:23 },
+  { k:'hangzhou', first:'2024-04-22', last:'2024-04-23', n:18 },
+  { k:'shanghai', first:'2024-04-24', last:'2024-04-24', n:5  },
+  { k:'hangzhou', first:'2024-05-01', last:'2024-05-02', n:9  },
+  { k:'shanghai', first:'2024-05-03', last:'2024-05-03', n:4  }
+];
+/* 该序列产生的有向段：南京↔镇江 各 2 次、镇江↔扬州 各 1 次、上海↔杭州 各 2 次，
+   其余各 1 次 → 共 10 条唯一有向段，其中 4 条为多次往返（触发去重与加粗） */
+
+/* zoom 6 档：粗网格下苏南各市并为一簇 */
+const STOPS_Z6 = [
+  { name:'苏南城市群', lng:119.70, lat:31.95, n:76 },
+  { name:'上海',       lng:121.47, lat:31.23, n:27 },
+  { name:'杭州',       lng:120.15, lat:30.28, n:18 }
+];
+/* zoom 13 档：市内细分 */
+const STOPS_Z13 = [
+  { name:'南京·玄武', lng:118.80, lat:32.06, n:9 },
+  { name:'镇江·京口', lng:119.45, lat:32.20, n:5 },
+  { name:'扬州·广陵', lng:119.42, lat:32.39, n:7 },
+  { name:'镇江·润州', lng:119.38, lat:32.17, n:2 },
+  { name:'常州·天宁', lng:119.97, lat:31.81, n:9 },
+  { name:'无锡·梁溪', lng:120.31, lat:31.49, n:11 },
+  { name:'苏州·姑苏', lng:120.58, lat:31.30, n:12 },
+  { name:'苏州·园区', lng:120.72, lat:31.32, n:4 },
+  { name:'上海·浦西', lng:121.44, lat:31.23, n:12 },
+  { name:'上海·浦东', lng:121.55, lat:31.22, n:8 },
+  { name:'上海·徐汇', lng:121.43, lat:31.19, n:5 },
+  { name:'杭州·西湖', lng:120.15, lat:30.28, n:12 },
+  { name:'杭州·滨江', lng:120.21, lat:30.19, n:6 }
+];
+
+const CENTER = { lng: 120.05, lat: 31.30 };
+
+/* ---------- 投影 ---------- */
+function makeProj(w, h, pxDegLng, center) {
+  const c = Math.cos(center.lat * Math.PI / 180);
+  const kx = pxDegLng, ky = pxDegLng * c;
+  return { kx, ky, x: lng => w / 2 + (lng - center.lng) * kx, y: lat => h / 2 - (lat - center.lat) * ky };
+}
+
+/* ---------- 弧线几何（方案 §5.1 / §5.2 / §5.4） ---------- */
+function geoArc(lng1, lat1, lng2, lat2, proj, samples) {
+  samples = samples || 26;
+  const c = Math.cos((lat1 + lat2) / 2 * Math.PI / 180);
+  const x1 = lng1 * c, y1 = lat1, x2 = lng2 * c, y2 = lat2;
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  let nx = -dy / len, ny = dx / len;
+
+  const wantSouth = dx >= 0;                       /* 规则 D：向东 → 向南凸 */
+  if (wantSouth ? ny > 0 : ny < 0) { nx = -nx; ny = -ny; }
+
+  const screenLen = Math.hypot((lng2 - lng1) * proj.kx, (lat2 - lat1) * proj.ky);
+  const k = Math.min(0.34, Math.max(0.14, 0.22 * (180 / Math.max(screenLen, 1))));
+
+  const cx = mx + nx * k * len, cy = my + ny * k * len;
+
+  const out = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples, u = 1 - t;
+    out.push([(u * u * x1 + 2 * u * t * cx + t * t * x2) / c, u * u * y1 + 2 * u * t * cy + t * t * y2]);
+  }
+  return out.map(pt => [proj.x(pt[0]), proj.y(pt[1])]);
+}
+function pathOf(pts) {
+  if (!pts || !pts.length) return '';
+  let d = 'M ' + pts[0][0].toFixed(1) + ',' + pts[0][1].toFixed(1);
+  for (let i = 1; i < pts.length; i++) d += ' L ' + pts[i][0].toFixed(1) + ',' + pts[i][1].toFixed(1);
+  return d;
+}
+function plen(pts) {
+  let s = 0;
+  for (let i = 1; i < pts.length; i++) s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  return s;
+}
+
+/* ---------- 段生成 + 去重（规则 E1） ---------- */
+function buildSegments(stops) {
+  const pt = s => s.k ? PLACES[s.k] : s;
+  const idOf = p => p.lng.toFixed(4) + '|' + p.lat.toFixed(4);
+  const seg = new Map();
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = pt(stops[i]), b = pt(stops[i + 1]);
+    if (Math.hypot(a.lng - b.lng, a.lat - b.lat) < 1e-9) continue;
+    const key = idOf(a) + '>' + idOf(b);
+    if (seg.has(key)) seg.get(key).trips++;
+    else seg.set(key, { a, b, trips: 1 });
+  }
+  return [...seg.values()];
+}
+
+/* ---------- 底图（Morandi 抽象长三角） ---------- */
+function baseMapSVG(proj, w, h, vs) {
+  vs = vs || 1;
+  const P = (lng, lat) => [proj.x(lng).toFixed(1), proj.y(lat).toFixed(1)];
+  const poly = pts => 'M ' + pts.map(p => p.join(',')).join(' L ') + ' Z';
+  const line = pts => 'M ' + pts.map(p => p.join(',')).join(' L ');
+
+  const yangtzeS = [P(118.35,32.14),P(118.75,32.20),P(119.20,32.26),P(119.55,32.24),P(119.95,32.08),P(120.35,31.96),P(120.75,31.88),P(121.15,31.72),P(121.50,31.55),P(121.90,31.42),P(122.30,31.30)];
+  const yangtzeN = yangtzeS.map((p, i) => [p[0], p[1] - 5 - i * 0.35]).reverse();
+  const taihu = [P(120.02,31.52),P(120.30,31.58),P(120.55,31.48),P(120.62,31.26),P(120.45,31.04),P(120.18,30.98),P(120.00,31.14),P(119.96,31.34)];
+  const bay = [P(120.85,30.62),P(121.25,30.55),P(121.75,30.42),P(122.30,30.30),P(122.30,29.90),P(121.60,30.05),P(121.10,30.20),P(120.80,30.40)];
+
+  const urban = [
+    [P(118.62,32.20),P(118.98,32.24),P(119.05,31.94),P(118.68,31.90)],
+    [P(119.30,32.32),P(119.60,32.36),P(119.64,32.10),P(119.28,32.06)],
+    [P(119.78,31.92),P(120.16,31.96),P(120.20,31.68),P(119.80,31.64)],
+    [P(120.14,31.60),P(120.50,31.62),P(120.52,31.36),P(120.16,31.34)],
+    [P(120.42,31.42),P(120.76,31.44),P(120.78,31.18),P(120.44,31.16)],
+    [P(121.24,31.42),P(121.72,31.40),P(121.74,31.02),P(121.26,31.04)],
+    [P(119.96,30.42),P(120.36,30.40),P(120.34,30.10),P(119.94,30.12)]
+  ];
+
+  const roads = [];
+  for (let i = 0; i < 9; i++) { const lng = 118.6 + i * 0.42; roads.push(line([P(lng,32.55), P(lng + 0.10,30.15)])); }
+  for (let j = 0; j < 7; j++) { const lat = 30.2 + j * 0.38; roads.push(line([P(118.55,lat), P(122.25, lat - 0.05)])); }
+
+  const labels = Object.values(PLACES).map(p => {
+    const x = proj.x(p.lng), y = proj.y(p.lat);
+    return `<text x="${x.toFixed(1)}" y="${(y + 21 * vs).toFixed(1)}" text-anchor="middle" font-size="${(10.5 * vs).toFixed(1)}" fill="#9a968e" font-weight="400" paint-order="stroke" stroke="#e9e4dd" stroke-width="${(3.2 * vs).toFixed(1)}" stroke-linejoin="round">${p.name}</text>`;
+  }).join('');
+
+  return `<g class="map-bg">
+    <rect width="${w}" height="${h}" fill="#e9e4dd"/>
+    <g opacity=".55">${urban.map(u => `<path d="${poly(u)}" fill="#e0dad2"/>`).join('')}</g>
+    <g stroke="#d8d2ca" stroke-width=".8" fill="none" opacity=".5">${roads.join('')}</g>
+    <path d="${poly(bay)}" fill="#d7dde0" opacity=".95"/>
+    <path d="${poly(taihu)}" fill="#d7dde0"/>
+    <path d="${line([...yangtzeS, ...yangtzeN])} Z" fill="#d7dde0"/>
+    <g>${labels}</g>
+  </g>`;
+}
+
+/* ---------- 足迹渲染 ---------- */
+function footprintSVG(stops, proj, opt) {
+  opt = opt || {};
+  const vs = opt.vs || 1;
+  const segs = buildSegments(stops);
+  const lvlOf = t => t <= 1 ? 1 : t <= 3 ? 2 : t <= 9 ? 3 : 4;
+  const W = { 1:2.2, 2:2.8, 3:3.4, 4:4.0 };
+  const OP = { 1:.80, 2:.88, 3:.93, 4:.97 };
+  const animate = opt.animate !== false;
+
+  let lines = '', order = 0;
+  segs.forEach(s => {
+    const pts = geoArc(s.a.lng, s.a.lat, s.b.lng, s.b.lat, proj);
+    if (!pts) return;
+    const d = pathOf(pts), L = Math.round(plen(pts)), lvl = lvlOf(s.trips);
+    const col = lvl >= 3 ? '#7d5430' : '#9c6f42';
+    const delay = order * 70; order++;
+    /* 默认可见（不做 dasharray 隐藏）——生长动画由 playGrow 用 WAAPI 在进入视口时播放；
+       这样即使动画未触发或失败，弧线依然完整显示（稳健优先） */
+    const meta = animate ? ` data-len="${L}" data-delay="${delay}"` : '';
+    lines += `<path class="fp-glow" d="${d}" stroke="${col}" stroke-width="${(W[lvl] * vs * 2).toFixed(1)}" opacity=".14"${meta}/>`;
+    lines += `<path class="fp-line" d="${d}" stroke="${col}" stroke-width="${(W[lvl] * vs).toFixed(1)}" opacity="${OP[lvl]}"${meta}/>`;
+  });
+
+  const seen = new Set(); let ends = '';
+  stops.forEach(s => {
+    const p = s.k ? PLACES[s.k] : s;
+    const id = p.lng.toFixed(4) + '|' + p.lat.toFixed(4);
+    if (seen.has(id)) return; seen.add(id);
+    ends += `<circle cx="${proj.x(p.lng).toFixed(1)}" cy="${proj.y(p.lat).toFixed(1)}" r="${(4.5 * vs).toFixed(1)}" fill="#fbf8f4" stroke="#96683a" stroke-width="${(1.8 * vs).toFixed(1)}"/>`;
+  });
+  return `<g class="fp-layer">${lines}${ends}</g>`;
+}
+
+/* ---------- 地图装配 ---------- */
+function mapSVG(cfg) {
+  const { w, h, pxdeg, center, stops, animate, clusters, vscale } = cfg;
+  const vs = vscale || 1;
+  const proj = makeProj(w, h, pxdeg, center);
+  let cl = '';
+  if (clusters) {
+    const hues = ['#8fa3ad','#b3a58c','#9aa79b','#a89a9c','#95a3ac','#b0a894','#a3a0a8','#9fab9f'];
+    const counts = [14,5,7,9,11,16,23,18];
+    cl = Object.entries(PLACES).map(([k, p], i) => {
+      const x = proj.x(p.lng).toFixed(1), y = proj.y(p.lat).toFixed(1);
+      return `<g><circle cx="${x}" cy="${y}" r="13" fill="${hues[i % 8]}" opacity=".92"/>
+        <circle cx="${x}" cy="${y}" r="13" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.5"/>
+        <text x="${x}" y="${(+y + 3.5).toFixed(1)}" text-anchor="middle" font-size="10" fill="#fbfaf8" font-family="monospace">${counts[i % 8]}</text></g>`;
+    }).join('');
+  }
+  return `<svg class="map" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
+    ${baseMapSVG(proj, w, h, vs)}
+    <g class="clusters">${cl}</g>
+    ${stops && stops.length ? footprintSVG(stops, proj, { animate, vs }) : ''}
+  </svg>`;
+}
+
+/* ---------- 顶栏 / 时间轴 / 控件 ---------- */
+function topbar(stat, on) {
+  return `<div class="mt-bar">
+    <span class="mt-title">地图</span><span class="mt-stat">${stat}</span>
+    <button class="mt-btn first${on ? ' on' : ''}" data-testid="map-footprint-toggle">
+      <span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2.4 13.6c2.6-4.6 4.6-6.9 5.9-6.9 1.3 0 1.7 3.2 3 3.2 1 0 2-1.1 2.9-3.3"/>
+        <circle cx="2.6" cy="12.9" r="1.05"/><circle cx="13.6" cy="5.3" r="1.05"/></svg></span>足迹</button>
+    <button class="mt-btn"><span class="ic"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="2.2" y="2.2" width="4.6" height="4.6" rx="1.2"/><rect x="9.2" y="2.2" width="4.6" height="4.6" rx="1.2"/>
+        <rect x="2.2" y="9.2" width="4.6" height="4.6" rx="1.2"/><rect x="9.2" y="9.2" width="4.6" height="4.6" rx="1.2"/></svg></span>图标</button>
+  </div>`;
+}
+function controls() {
+  return `<div class="mz"><button>＋</button><button>−</button></div>
+    <div class="scalebar"><span class="bar"></span><span>40 km</span></div>`;
+}
+function legend() {
+  return `<div class="lgd">
+    <div class="k"><span class="sw"></span>足迹线 · 单次</div>
+    <div class="k"><span class="sw thick"></span>足迹线 · 多次往返</div>
+    <div class="k"><span class="dot"></span>停留点</div>
+  </div>`;
+}
+function timeline(cfg) {
+  const bars = [3,4,6,9,14,11,7,5,8,12,15,10];
+  const mx = Math.max(...bars);
+  const track = bars.map((v, i) => {
+    const sel = i >= cfg.selFrom && i <= cfg.selTo ? ' sel' : '';
+    return `<div class="tl-bar${sel}" style="height:${Math.max(8, Math.round(v / mx * 100))}%"></div>`;
+  }).join('');
+  const sum = bars.reduce((a, b, i) => (i >= cfg.selFrom && i <= cfg.selTo ? a + b : a), 0) || 112;
+  const ph = Math.round(sum * .62), vd = Math.round(sum * .22), pp = Math.round(sum * .11);
+  return `<div class="tl">
+    <div class="tl-head"><span class="tl-title">时间轴</span><span class="tl-range">${cfg.rangeLabel}</span>
+      <span class="tl-zoom"><button class="tl-zb">−</button><span class="tl-zl">${cfg.zoomLabel}</span><button class="tl-zb">＋</button></span>
+      <button class="tl-clear">清除</button></div>
+    <div class="tl-track">${track}</div>
+    <div class="tl-axis"><span>2024-01</span><span>2024-12</span></div>
+    <div class="tl-stats">
+      <span class="s"><i class="d" style="background:var(--stat-photo)"></i>照片 ${ph}</span>
+      <span class="s"><i class="d" style="background:var(--stat-video)"></i>视频 ${vd}</span>
+      <span class="s"><i class="d" style="background:var(--stat-pano-photo)"></i>全景照 ${pp}</span>
+      <span class="s"><i class="d" style="background:var(--stat-pano-video)"></i>全景视 ${Math.max(0, sum - ph - vd - pp)}</span>
+      <span class="chips"><span class="chip">南京 14</span><span class="chip">上海 23</span><span class="chip">杭州 18</span></span>
+    </div></div>`;
+}
+
+/* ==================== 装配 ==================== */
+const W = 1320, H = 500, PXDEG = 225;
+
+/* VIEW.30 —— 关闭态（有簇、无足迹） */
+document.getElementById('shell30').innerHTML =
+  `<div class="map-vp">${mapSVG({ w:W, h:H, pxdeg:PXDEG, center:CENTER, stops:null, clusters:true })}
+     ${topbar('8 个地点 · 136 项', false)}${controls()}</div>`
+  + timeline({ rangeLabel:'全部时间', zoomLabel:'月', selFrom:-1, selTo:-1 });
+
+/* VIEW.31 —— 开启态（足迹 + 无簇，聚焦轨迹） */
+document.getElementById('shell31').innerHTML =
+  `<div class="map-vp">${mapSVG({ w:W, h:H, pxdeg:PXDEG, center:CENTER, stops:STOPS_MAIN, animate:true, clusters:false })}
+     ${topbar('8 个地点 · 10 条足迹线 · 136 项', true)}${controls()}${legend()}</div>`
+  + timeline({ rangeLabel:'2024-04-01 ~ 2024-05-31', zoomLabel:'月', selFrom:3, selTo:4 });
+
+/* VIEW.32 —— 三联缩放（viewBox 与容器同宽 → 1:1 显示，无需视觉补偿） */
+const z6  = STOPS_Z6.map(s => ({ k:null, ...s }));
+const z13 = STOPS_Z13.map(s => ({ k:null, ...s }));
+const VS = 1;
+document.getElementById('vp32a').innerHTML = mapSVG({ w:424, h:262, pxdeg:92, center:CENTER, stops:z6, animate:false, clusters:false, vscale:VS });
+document.getElementById('vp32b').innerHTML = mapSVG({ w:424, h:262, pxdeg:92, center:CENTER, stops:STOPS_MAIN, animate:false, clusters:false, vscale:VS });
+document.getElementById('vp32c').innerHTML = mapSVG({ w:424, h:262, pxdeg:92, center:CENTER, stops:z13, animate:false, clusters:false, vscale:VS });
+
+/* 进入视口后播放「生长」入场动画（Web Animations API；reduced-motion 下跳过） */
+function playGrow(container) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  container.querySelectorAll('.fp-line, .fp-glow').forEach(p => {
+    const L = Number(p.dataset.len || 0);
+    if (!L) return;
+    const delay = Number(p.dataset.delay || 0);
+    p.animate(
+      [{ strokeDashoffset: L }, { strokeDashoffset: 0 }],
+      { duration: 950, delay, easing: 'cubic-bezier(.32,.72,0,1)', fill: 'both' }
+    );
+  });
+}
+(() => {
+  const [shell31, shell32] = [document.getElementById('shell31'), document.querySelector('.tri')];
+  const io = new IntersectionObserver(es => {
+    es.forEach(e => {
+      if (!e.isIntersecting) return;
+      playGrow(e.target);
+      io.unobserve(e.target);
+    });
+  }, { threshold: .3 });
+  if (shell31) io.observe(shell31);
+})();
+</script>
+</body>
+</html>

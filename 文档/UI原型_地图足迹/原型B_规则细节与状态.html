@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 原型 · 地图足迹 — 规则细节与状态</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#e9e4de; --surface:#f4f1ed; --surface2:#efebe5; --deep:#e3ded7;
+    --border:#ddd8d0; --text:#41403c; --text2:#7d7a73; --text3:#a5a29a;
+    --primary:#4a5a6a; --oat:#c4a57a; --danger:#b0685c; --success:#6e8a72;
+    --fp:#a8794a; --fp-deep:#8c5f35;
+    --stat-photo:#8fa3ad; --stat-video:#b3a58c; --stat-pano-photo:#9aa79b; --stat-pano-video:#a89a9c;
+    --shadow-card:0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift:0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#ded9d2; font-family:var(--font); color:var(--text); font-weight:300; letter-spacing:.01em; padding:28px 0 48px; }
+  .canvas { width:1440px; margin:0 auto; }
+  .frame { background:var(--bg); border-radius:18px; overflow:hidden; box-shadow:var(--shadow-card); margin-bottom:40px; }
+  .view-tag { font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text3); padding:14px 36px 0; }
+  .page { padding:26px 36px 40px; }
+  .ph { display:flex; align-items:baseline; gap:12px; margin-bottom:22px; }
+  .ph .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--text3); }
+  .ph h1 { font-size:16px; font-weight:500; letter-spacing:.1em; }
+  .ph .sub { font-size:12px; color:var(--text2); }
+  .ph .spacer { flex:1; }
+  .note { font-size:11.5px; color:var(--text2); line-height:1.9; background:var(--surface); border:1px solid var(--border); border-left:2px solid var(--oat); border-radius:var(--r-sm); padding:10px 14px; margin-top:16px; }
+  .note b { font-weight:500; color:var(--text); }
+  .note code { font-family:var(--mono); font-size:11px; background:rgba(74,90,106,.08); border-radius:3px; padding:1px 4px; }
+  .note + .note { margin-top:8px; }
+
+  .map-bg { filter:saturate(.42) brightness(1.04); }
+  .fp-line, .fp-glow { fill:none; stroke-linecap:round; stroke-linejoin:round; }
+  svg.map { display:block; width:100%; height:auto; }
+
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .grid4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+  .cell { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; display:flex; flex-direction:column; }
+  .cell .cap { display:flex; align-items:center; gap:8px; padding:9px 12px; font-size:12px; border-bottom:1px solid var(--border); }
+  .cell .cap .z { font-family:var(--mono); font-size:11px; color:var(--text3); }
+  .cell .cap .n { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--fp-deep); }
+  .cell .vp { position:relative; flex:1; background:#e9e4dd; }
+  .cell .desc { padding:9px 12px 11px; font-size:11px; color:var(--text2); line-height:1.75; border-top:1px solid var(--border); }
+  .cell .desc b { font-weight:500; color:var(--text); }
+
+  /* 悬停卡片 */
+  .fpc { position:absolute; min-width:186px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); box-shadow:var(--shadow-lift); padding:9px 12px; font-size:11.5px; line-height:1.75; }
+  .fpc .r1 { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text); font-weight:400; }
+  .fpc .r1 .arw { color:var(--fp); font-family:var(--mono); }
+  .fpc .r2 { color:var(--text2); margin-top:3px; font-variant-numeric:tabular-nums; }
+  .fpc .r3 { color:var(--text3); margin-top:2px; }
+  .fpc .tag { font-family:var(--mono); font-size:9.5px; letter-spacing:.05em; color:var(--fp-deep); border:1px solid rgba(168,121,74,.5); border-radius:4px; padding:0 4px; line-height:1.5; }
+  .fpc .thumb { width:44px; height:30px; border-radius:5px; background:linear-gradient(140deg,#7d95a8,#5d7288); flex:none; }
+  .fpc .withThumb { display:flex; gap:10px; align-items:flex-start; }
+  .fpc .anchor-dot { position:absolute; width:7px; height:7px; border-radius:50%; background:#96683a; }
+
+  .toast { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); background:rgba(65,64,60,.88); color:#f2f0ec; font-size:12.5px; border-radius:8px; padding:9px 16px; letter-spacing:.02em; white-space:nowrap; }
+  .badge-trunc { position:absolute; right:12px; top:12px; background:rgba(255,255,255,.94); border:1px solid rgba(15,23,42,.10); border-radius:6px; padding:3px 9px; font-size:11px; color:var(--text2); }
+  .badge-trunc b { color:var(--fp-deep); font-weight:500; }
+
+  /* 手机框 */
+  .phone { width:375px; border-radius:26px; border:1px solid var(--border); background:var(--bg); overflow:hidden; box-shadow:var(--shadow-lift); }
+  .phone .pbar { display:flex; align-items:center; gap:8px; padding:9px 12px; background:rgba(255,255,255,.95); border-bottom:1px solid var(--border); }
+  .phone .pbar .t { font-size:12.5px; font-weight:600; }
+  .phone .pbar .s { font-size:11px; color:var(--text2); }
+  .phone .pbar .sp { flex:1; }
+  .phone .pbtn { border:1px solid rgba(15,23,42,.14); background:#fff; border-radius:6px; padding:3px 8px; font-size:11.5px; color:var(--text2); display:inline-flex; align-items:center; gap:4px; }
+  .phone .pbtn.on { border-color:var(--fp); background:rgba(168,121,74,.10); color:var(--fp-deep); }
+  .phone .ptl { background:var(--surface); border-top:1px solid var(--border); padding:5px 10px; display:flex; align-items:center; gap:8px; font-size:11.5px; color:var(--text2); }
+  .phone .ptl .t { font-weight:600; color:var(--text); }
+  .phone .ptl .sp { flex:1; }
+  .phone .ptl .tg { border:1px solid rgba(15,23,42,.14); background:var(--surface); border-radius:6px; padding:2px 8px; font-size:11.5px; }
+
+  .stack { display:flex; gap:26px; align-items:flex-start; }
+  .stack .side { flex:1; }
+
+  .kbd { font-family:var(--mono); font-size:11px; background:rgba(74,90,106,.10); border-radius:4px; padding:1px 5px; color:var(--text); }
+  .formula { font-family:var(--mono); font-size:11.5px; color:var(--text); background:var(--surface2); border:1px solid var(--border); border-radius:var(--r-sm); padding:9px 12px; line-height:1.95; margin-top:10px; }
+  .formula em { font-style:normal; color:var(--fp-deep); }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ==================== VIEW.33 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.33 · 去除重叠线（需求 F-7）· 同向重复合并 与 近似重合合并</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">DEDUPE</span>
+        <h1>自动去除重叠线</h1>
+        <span class="sub">规则 E1（同向重复合并）+ 规则 E2（近似重合合并）</span>
+      </div>
+      <div class="grid3">
+        <div class="cell">
+          <div class="cap"><span>原始段</span><span class="z">未去重</span><span class="n">5 条弧</span></div>
+          <div class="vp" id="vp33a"></div>
+          <div class="desc">「南京 → 镇江」走了 <b>3 次</b>、回程 <b>2 次</b>——逐段绘制会得到 5 条弧，其中 3 条下弧<b>完全重合</b>、2 条上弧完全重合。</div>
+        </div>
+        <div class="cell">
+          <div class="cap"><span>规则 E1 后</span><span class="z">同向合并</span><span class="n">2 条弧</span></div>
+          <div class="vp" id="vp33b"></div>
+          <div class="desc">同一有向路径（起点→终点都相同）只保留一条，<b>次数累加</b>为 trips：去程 3 次、回程 2 次 → 线宽与深度随之递增。</div>
+        </div>
+        <div class="cell">
+          <div class="cap"><span>规则 E2</span><span class="z">近似重合</span><span class="n">再合并</span></div>
+          <div class="vp" id="vp33c"></div>
+          <div class="desc">上午与下午两次到访同地被切成两个停留点（相距 &lt; 8px）——它们各自到镇江的弧线几乎叠在一起，按屏幕距离判据合并。</div>
+        </div>
+      </div>
+      <div class="note">
+        <b>为什么反向段不合并：</b>方向规则下「南京→镇江」画下弧、「镇江→南京」画上弧，二者<b>本来就是上下分离的一对</b>（构成梭形），不构成重叠，因此保留两条——这正是「一去一回」关系的视觉表达。
+      </div>
+      <div class="formula">
+        去重键（E1）= <em>有向对</em>（起点身份, 终点身份）；<b>trips</b> = 该有向对出现次数<br>
+        合并键（E2）= 两条弧的 <em>起点屏幕距离 &lt; 8px</em> 且 <em>终点屏幕距离 &lt; 8px</em>（阈值随缩放自适应）<br>
+        身份归一 = 停留点坐标四舍五入到网格精度（同一网格 → 同一地点身份）
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW.34 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.34 · 入场动效分帧（需求 F-5）· 弧线沿路径「生长」</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">MOTION · GROW-IN</span>
+        <h1>动效分帧</h1>
+        <span class="sub">单条 0.95s · 按时间顺序错峰 70ms · 缓动 cubic-bezier(.32,.72,0,1)</span>
+      </div>
+      <div class="grid4">
+        <div class="cell"><div class="cap"><span class="z">t = 0.10 s</span><span class="n">10%</span></div><div class="vp" id="vp34a"></div></div>
+        <div class="cell"><div class="cap"><span class="z">t = 0.35 s</span><span class="n">35%</span></div><div class="vp" id="vp34b"></div></div>
+        <div class="cell"><div class="cap"><span class="z">t = 0.70 s</span><span class="n">70%</span></div><div class="vp" id="vp34c"></div></div>
+        <div class="cell"><div class="cap"><span class="z">t = 1.05 s</span><span class="n">100%</span></div><div class="vp" id="vp34d"></div></div>
+      </div>
+      <div class="note">
+        <b>实现选型（三层动效）：</b>① <b>入场生长</b>——用路径虚线偏移推进（<code>stroke-dasharray / stroke-dashoffset</code>），在真实产品中走 MapLibre 的 <code>line-progress</code>（source 需开 <code>lineMetrics</code>），本原型用等价方式在 SVG 上演示；② <b>常驻微动效</b>——沿弧缓慢流动的柔和光带（虚线相位），段数超限自动降级为静态；③ <b>交互反馈</b>——悬停加粗提亮 + 卡片、其余弧降至 35% 不透明度形成聚焦。<br>
+        <code>prefers-reduced-motion</code> 下三层全部关闭，弧线直接静态呈现。
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW.35 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.35 · 悬停反馈 · 弧线卡片与停留点卡片</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">HOVER</span>
+        <h1>悬停反馈</h1>
+        <span class="sub">悬停弧线看往返次数与时间窗；悬停端点看停留点摘要</span>
+      </div>
+      <div id="vp35"></div>
+      <div class="note">
+        <b>命中层：</b>弧线本身只有 2–4 px 宽，难以精确命中，因此额外叠加一条 14 px 的透明「命中层」（<code>footprint-hit</code>）承接指针事件。<b>与既有悬停互斥：</b>悬停足迹时清掉簇卡片，反之亦然，避免两张卡片同时出现。
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW.36 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.36 · 状态与边界 · 空态 / 单点 / 抽样截断</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">STATES</span>
+        <h1>状态与边界</h1>
+        <span class="sub">三种非正常状态的表现与文案</span>
+      </div>
+      <div class="grid3">
+        <div class="cell">
+          <div class="cap"><span>空态</span><span class="z">stop_count = 0</span></div>
+          <div class="vp" id="vp36a"></div>
+          <div class="desc">提示条居中淡入，<b>2.5 秒自动消失</b>，开关保持开启（不清空用户意图）。</div>
+        </div>
+        <div class="cell">
+          <div class="cap"><span>单点</span><span class="z">stop_count = 1</span></div>
+          <div class="vp" id="vp36b"></div>
+          <div class="desc">只有一个地点时无法连线，只显示停留点标记，并说明成因（比「无数据」更准确）。</div>
+        </div>
+        <div class="cell">
+          <div class="cap"><span>抽样截断</span><span class="z">truncated = true</span></div>
+          <div class="vp" id="vp36c"></div>
+          <div class="desc">数据超上限时按时间<b>等距抽样</b>（而非取前 N 条），右上角常驻提示，避免「只看到最早几年」的错觉。</div>
+        </div>
+      </div>
+      <div class="note">
+        <b>抽样为何必须等距：</b>若简单取前 N 条，用户看到的是「只有最早那段历史」的假象，比数据不全更有害。等距抽样保证时间分布均匀，并如实标注已抽样。
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== VIEW.37 ==================== -->
+  <div class="frame">
+    <div class="view-tag">VIEW.37 · 移动端窄屏（375 px）</div>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">MOBILE</span>
+        <h1>移动端</h1>
+        <span class="sub">顶栏图标化 · 时间轴可折叠 · 弧线密度自适应</span>
+      </div>
+      <div class="stack">
+        <div class="phone" id="phone37"></div>
+        <div class="side">
+          <div class="note">
+            <b>窄屏适配三条：</b><br>
+            ① 顶栏按钮文案隐藏、只留图标（沿用既有移动端规则）；计数文字隐藏以让位。<br>
+            ② 时间轴默认折叠为一行（≤40 px），把高度让给地图；足迹仍按当前选定范围生成。<br>
+            ③ 窄屏下地图可视范围变小，停留点自动减少（同一缩放级别下经纬度跨度更窄），弧线密度自然下降——无需额外的移动端专用规则。
+          </div>
+          <div class="note">
+            <b>触摸与命中：</b>14 px 的透明命中层同时服务触摸；卡片宽度自适应屏宽（最大 260 px），靠边自动翻转避免溢出。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ==========================================================================
+   规则细节原型 · 与原型 A 同一套算法（投影 / 弧线 / 去重）
+   ========================================================================== */
+const PLACES = {
+  nanjing:  { name:'南京', lng:118.80, lat:32.06 },
+  zhenjiang:{ name:'镇江', lng:119.45, lat:32.20 },
+  yangzhou: { name:'扬州', lng:119.42, lat:32.39 },
+  changzhou:{ name:'常州', lng:119.97, lat:31.81 },
+  wuxi:     { name:'无锡', lng:120.31, lat:31.49 },
+  suzhou:   { name:'苏州', lng:120.58, lat:31.30 },
+  shanghai: { name:'上海', lng:121.47, lat:31.23 },
+  hangzhou: { name:'杭州', lng:120.15, lat:30.28 }
+};
+const CENTER = { lng: 120.05, lat: 31.30 };
+
+function makeProj(w, h, pxDegLng, center) {
+  const c = Math.cos(center.lat * Math.PI / 180);
+  return { kx: pxDegLng, ky: pxDegLng * c, x: lng => w / 2 + (lng - center.lng) * pxDegLng, y: lat => h / 2 - (lat - center.lat) * pxDegLng * c };
+}
+function geoArc(lng1, lat1, lng2, lat2, proj, samples, extra) {
+  samples = samples || 26;
+  const c = Math.cos((lat1 + lat2) / 2 * Math.PI / 180);
+  const x1 = lng1 * c, y1 = lat1, x2 = lng2 * c, y2 = lat2;
+  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  let nx = -dy / len, ny = dx / len;
+  const wantSouth = dx >= 0;
+  if (wantSouth ? ny > 0 : ny < 0) { nx = -nx; ny = -ny; }
+  const screenLen = Math.hypot((lng2 - lng1) * proj.kx, (lat2 - lat1) * proj.ky);
+  const k = Math.min(0.34, Math.max(0.14, 0.22 * (180 / Math.max(screenLen, 1))));
+  const bulge = k * len + (extra || 0);      /* extra：仅演示用的横向错开量（度） */
+  const cx = mx + nx * bulge, cy = my + ny * bulge;
+  const out = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples, u = 1 - t;
+    out.push([(u * u * x1 + 2 * u * t * cx + t * t * x2) / c, u * u * y1 + 2 * u * t * cy + t * t * y2]);
+  }
+  return out.map(p => [proj.x(p[0]), proj.y(p[1])]);
+}
+function pathOf(pts) { let d = 'M ' + pts[0][0].toFixed(1) + ',' + pts[0][1].toFixed(1); for (let i = 1; i < pts.length; i++) d += ' L ' + pts[i][0].toFixed(1) + ',' + pts[i][1].toFixed(1); return d; }
+function plen(pts) { let s = 0; for (let i = 1; i < pts.length; i++) s += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return s; }
+
+/* 段生成：mode = 'raw' 逐段（未去重）| 'e1' 有向对合并 | 'e2' 额外做近似重合合并 */
+function buildSegments(stops, mode) {
+  const P = s => s.k ? PLACES[s.k] : s;
+  const idOf = p => p.lng.toFixed(4) + '|' + p.lat.toFixed(4);
+  const raw = [];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = P(stops[i]), b = P(stops[i + 1]);
+    if (Math.hypot(a.lng - b.lng, a.lat - b.lat) < 1e-9) continue;
+    raw.push({ a, b });
+  }
+  if (mode === 'raw') return raw.map(r => ({ ...r, trips: 1 }));
+
+  const map = new Map();
+  raw.forEach(r => {
+    const key = idOf(r.a) + '>' + idOf(r.b);
+    if (map.has(key)) map.get(key).trips++;
+    else map.set(key, { a: r.a, b: r.b, trips: 1 });
+  });
+  let out = [...map.values()];
+  if (mode === 'e2') {
+    /* 近似重合：起点与终点屏幕距离都 < 8px 的两条同向弧合并 */
+    const merged = [];
+    out.forEach(s => {
+      const hit = merged.find(m =>
+        Math.hypot(projRef.x(m.a.lng) - projRef.x(s.a.lng), projRef.y(m.a.lat) - projRef.y(s.a.lat)) < 8 &&
+        Math.hypot(projRef.x(m.b.lng) - projRef.x(s.b.lng), projRef.y(m.b.lat) - projRef.y(s.b.lat)) < 8);
+      if (hit) hit.trips += s.trips; else merged.push({ ...s });
+    });
+    out = merged;
+  }
+  return out;
+}
+let projRef = null;   /* E2 判据需要投影（屏幕像素），由渲染入口注入 */
+
+function baseMapSVG(proj, w, h, vs) {
+  vs = vs || 1;
+  const P = (lng, lat) => [proj.x(lng).toFixed(1), proj.y(lat).toFixed(1)];
+  const poly = pts => 'M ' + pts.map(p => p.join(',')).join(' L ') + ' Z';
+  const line = pts => 'M ' + pts.map(p => p.join(',')).join(' L ');
+  const yangtzeS = [P(118.35,32.14),P(118.75,32.20),P(119.20,32.26),P(119.55,32.24),P(119.95,32.08),P(120.35,31.96),P(120.75,31.88),P(121.15,31.72),P(121.50,31.55),P(121.90,31.42),P(122.30,31.30)];
+  const yangtzeN = yangtzeS.map((p, i) => [p[0], p[1] - 5 - i * 0.35]).reverse();
+  const taihu = [P(120.02,31.52),P(120.30,31.58),P(120.55,31.48),P(120.62,31.26),P(120.45,31.04),P(120.18,30.98),P(120.00,31.14),P(119.96,31.34)];
+  const urban = [
+    [P(118.62,32.20),P(118.98,32.24),P(119.05,31.94),P(118.68,31.90)],
+    [P(119.30,32.32),P(119.60,32.36),P(119.64,32.10),P(119.28,32.06)],
+    [P(119.78,31.92),P(120.16,31.96),P(120.20,31.68),P(119.80,31.64)],
+    [P(120.14,31.60),P(120.50,31.62),P(120.52,31.36),P(120.16,31.34)],
+    [P(120.42,31.42),P(120.76,31.44),P(120.78,31.18),P(120.44,31.16)],
+    [P(121.24,31.42),P(121.72,31.40),P(121.74,31.02),P(121.26,31.04)],
+    [P(119.96,30.42),P(120.36,30.40),P(120.34,30.10),P(119.94,30.12)]
+  ];
+  const roads = [];
+  for (let i = 0; i < 9; i++) { const lng = 118.6 + i * 0.42; roads.push(line([P(lng,32.55), P(lng + 0.10,30.15)])); }
+  for (let j = 0; j < 7; j++) { const lat = 30.2 + j * 0.38; roads.push(line([P(118.55,lat), P(122.25, lat - 0.05)])); }
+  const labels = Object.values(PLACES).map(p => {
+    const x = proj.x(p.lng), y = proj.y(p.lat);
+    return `<text x="${x.toFixed(1)}" y="${(y + 20 * vs).toFixed(1)}" text-anchor="middle" font-size="${(10 * vs).toFixed(1)}" fill="#9a968e" font-weight="400" paint-order="stroke" stroke="#e9e4dd" stroke-width="${(3 * vs).toFixed(1)}" stroke-linejoin="round">${p.name}</text>`;
+  }).join('');
+  return `<g class="map-bg"><rect width="${w}" height="${h}" fill="#e9e4dd"/>
+    <g opacity=".55">${urban.map(u => `<path d="${poly(u)}" fill="#e0dad2"/>`).join('')}</g>
+    <g stroke="#d8d2ca" stroke-width=".8" fill="none" opacity=".5">${roads.join('')}</g>
+    <path d="${poly(taihu)}" fill="#d7dde0"/>
+    <path d="${line([...yangtzeS, ...yangtzeN])} Z" fill="#d7dde0"/>
+    <g>${labels}</g></g>`;
+}
+
+function footprintSVG(segs, proj, opt) {
+  opt = opt || {};
+  const vs = opt.vs || 1;
+  const W = { 1:2.2, 2:2.8, 3:3.4, 4:4.0 }, OP = { 1:.80, 2:.88, 3:.93, 4:.97 };
+  const lvlOf = t => t <= 1 ? 1 : t <= 3 ? 2 : t <= 9 ? 3 : 4;
+  let lines = '';
+  segs.forEach((s, i) => {
+    /* spread（仅供演示）：把完全重合的多条弧横向错开，让「5 条 vs 2 条」肉眼可辨 */
+    let extra = 0;
+    if (opt.spread && segs.length > 1) {
+      extra = (i - (segs.length - 1) / 2) * (opt.spread / (segs.length - 1)) / proj.kx;
+    }
+    const pts = geoArc(s.a.lng, s.a.lat, s.b.lng, s.b.lat, proj, 26, extra);
+    if (!pts) return;
+    const d = pathOf(pts), L = Math.round(plen(pts)), lvl = lvlOf(s.trips);
+    const col = lvl >= 3 ? '#7d5430' : '#9c6f42';
+    const prog = opt.progress;
+    const style = (prog != null && prog < 1) ? ` style="stroke-dasharray:${L};stroke-dashoffset:${(L * (1 - prog)).toFixed(1)}"` : '';
+    lines += `<path class="fp-glow" d="${d}" stroke="${col}" stroke-width="${(W[lvl] * vs * 2).toFixed(1)}" opacity="${prog != null ? .14 : .14}"${style}/>`;
+    lines += `<path class="fp-line" d="${d}" stroke="${col}" stroke-width="${(W[lvl] * vs).toFixed(1)}" opacity="${OP[lvl]}"${style}/>`;
+  });
+  let ends = '';
+  if (opt.ends !== false) {
+    const seen = new Set();
+    (opt.endStops || []).forEach(s => {
+      const p = s.k ? PLACES[s.k] : s, id = p.lng.toFixed(4) + '|' + p.lat.toFixed(4);
+      if (seen.has(id)) return; seen.add(id);
+      ends += `<circle cx="${proj.x(p.lng).toFixed(1)}" cy="${proj.y(p.lat).toFixed(1)}" r="${(4.5 * vs).toFixed(1)}" fill="#fbf8f4" stroke="#96683a" stroke-width="${(1.8 * vs).toFixed(1)}"/>`;
+    });
+  }
+  return `<g class="fp-layer">${lines}${ends}</g>`;
+}
+function mapSVG(cfg) {
+  const { w, h, pxdeg, center, stops, segs, mode, vscale, endStops, progress, hidedots, spread } = cfg;
+  const vs = vscale || 1;
+  const proj = makeProj(w, h, pxdeg, center);
+  projRef = proj;
+  const ss = segs || (stops ? buildSegments(stops, mode || 'e1') : []);
+  return `<svg class="map" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
+    ${baseMapSVG(proj, w, h, vs)}
+    ${ss.length ? footprintSVG(ss, proj, { vs, progress, spread, endStops: endStops || stops || [], ends: !hidedots }) : ''}
+  </svg>`;
+}
+
+/* 底部左侧小圆点标注（E2 演示用：两个几乎重合的南京停留点） */
+const NJ1 = { name:'南京·玄武', lng:118.80, lat:32.06 };
+const NJ2 = { name:'南京·鼓楼', lng:118.79, lat:32.07 };   /* 距 NJ1 约 1.1 km ≈ 屏幕 3px */
+const ZJ  = { name:'镇江',     lng:119.45, lat:32.20 };
+
+/* ---- VIEW.33 三联（放大到南京—镇江两点，便于看清重叠） ---- */
+const w33 = 424, h33 = 244, pd33 = 300, vs33 = 1;
+const C33 = { lng: 119.12, lat: 32.13 };
+/* a：原始 5 条弧（南京→镇江 ×3、镇江→南京 ×2），逐段绘制 → 完全重合（此处横向错开 12px 仅为便于观看） */
+const rawStops = [
+  { k:'nanjing' }, { k:'zhenjiang' }, { k:'nanjing' }, { k:'zhenjiang' }, { k:'nanjing' }, { k:'zhenjiang' }
+];
+document.getElementById('vp33a').innerHTML =
+  mapSVG({ w:w33, h:h33, pxdeg:pd33, center:C33, stops: rawStops, mode:'raw', vscale:vs33, spread:14 })
+  + `<div class="badge-trunc" style="right:auto;left:12px">下弧 <b>×3</b> · 上弧 <b>×2</b> 完全重合（已错开显示）</div>`;
+document.getElementById('vp33b').innerHTML =
+  mapSVG({ w:w33, h:h33, pxdeg:pd33, center:C33, stops: rawStops, mode:'e1', vscale:vs33 })
+  + `<div class="badge-trunc" style="right:auto;left:12px">合并为 <b>2 条</b>：去程 3 次 / 回程 2 次</div>`;
+/* c：两个几乎重合的南京停留点各连一次镇江 —— 起点相距约 3.9px，E2 应合并 */
+const e2Stops = [ { k:'nanjing' }, { k:'zhenjiang' }, { k:null, lng:NJ2.lng, lat:NJ2.lat }, { k:'zhenjiang' } ];
+document.getElementById('vp33c').innerHTML =
+  mapSVG({ w:w33, h:h33, pxdeg:pd33, center:C33, stops: e2Stops, mode:'e1', vscale:vs33, spread:8 })
+  + `<div class="badge-trunc" style="right:auto;left:12px">起点相距 <b>3.9 px</b> → 应合并（已错开显示）</div>`;
+
+/* ---- VIEW.34 四帧（长三角主行程；进度 0.10 / 0.35 / 0.70 / 1.0） ---- */
+const STOPS_MAIN = [
+  { k:'nanjing' }, { k:'zhenjiang' }, { k:'yangzhou' }, { k:'zhenjiang' }, { k:'nanjing' },
+  { k:'changzhou' }, { k:'wuxi' }, { k:'suzhou' }, { k:'shanghai' }, { k:'hangzhou' }, { k:'shanghai' }
+];
+const w34 = 306, h34 = 196, pd34 = 62, vs34 = 1;
+[['vp34a', .10], ['vp34b', .35], ['vp34c', .70], ['vp34d', 1]].forEach(([id, p]) => {
+  document.getElementById(id).innerHTML = mapSVG({ w:w34, h:h34, pxdeg:pd34, center:CENTER, stops:STOPS_MAIN, mode:'e1', vscale:vs34, progress:p });
+});
+
+/* ---- VIEW.35 悬停 ---- */
+(() => {
+  const w = 1320, h = 460;
+  const proj = makeProj(w, h, 225, CENTER);
+  projRef = proj;
+  const segs = buildSegments(STOPS_MAIN, 'e1');
+  const svgHTML = mapSVG({ w, h, pxdeg:225, center:CENTER, stops:STOPS_MAIN, mode:'e1', endStops:STOPS_MAIN });
+  const mk = (o, stat) => `<span class="k">${o}</span>`;
+  document.getElementById('vp35').innerHTML = `
+  <div style="position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#e9e4dd">
+    ${svgHTML}
+    <div class="fpc" style="left:52%;top:70%">
+      <div class="r1">上海 <span class="arw">→</span> 杭州 <span class="tag">2 次往返</span></div>
+      <div class="r2">2024-04-22 ~ 2024-05-02</div>
+      <div class="r3">去程 1 次 · 回程 1 次 · 共 45 项媒体</div>
+    </div>
+    <div class="fpc" style="left:42%;top:19%">
+      <div class="withThumb">
+        <div class="thumb"></div>
+        <div>
+          <div class="r1">镇江</div>
+          <div class="r2">04-05 ~ 04-09 · 11 项</div>
+          <div class="r3">停留 5 天 · 2 次到访</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+})();
+
+/* ---- VIEW.36 三态 ---- */
+const w36 = 424, h36 = 224, pd36 = 92, vs36 = 1;
+/* a 空态 */
+document.getElementById('vp36a').innerHTML =
+  mapSVG({ w:w36, h:h36, pxdeg:pd36, center:CENTER, segs:[], hidedots:true })
+  + `<div class="toast">当前范围没有带位置的照片</div>`;
+/* b 单点 */
+document.getElementById('vp36b').innerHTML =
+  mapSVG({ w:w36, h:h36, pxdeg:pd36, center:CENTER, segs:[], endStops:[{ k:'shanghai' }] })
+  + `<div class="toast">当前范围只有一个地点，无法连线 · 上海</div>`;
+/* c 截断（正常足迹 + 右上角角标） */
+document.getElementById('vp36c').innerHTML =
+  mapSVG({ w:w36, h:h36, pxdeg:pd36, center:CENTER, stops:STOPS_MAIN, mode:'e1', vscale:vs36 })
+  + `<div class="badge-trunc">已按时间<b>等距抽样</b> · 5000 / 18422</div>`;
+
+/* ---- VIEW.37 移动端 ---- */
+(() => {
+  const w = 375, h = 340;
+  const proj = makeProj(w, h, 100, CENTER);
+  projRef = proj;
+  const svgHTML = mapSVG({ w, h, pxdeg:100, center:CENTER, stops:STOPS_MAIN, mode:'e1', vscale:1, endStops:STOPS_MAIN });
+  document.getElementById('phone37').innerHTML = `
+    <div class="pbar">
+      <span class="t">地图</span>
+      <span class="sp"></span>
+      <span class="pbtn on"><span style="display:inline-flex"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2.4 13.6c2.6-4.6 4.6-6.9 5.9-6.9 1.3 0 1.7 3.2 3 3.2 1 0 2-1.1 2.9-3.3"/><circle cx="2.6" cy="12.9" r="1.05"/><circle cx="13.6" cy="5.3" r="1.05"/></svg></span></span>
+      <span class="pbtn"><span style="display:inline-flex"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="2.2" y="2.2" width="4.6" height="4.6" rx="1.2"/><rect x="9.2" y="2.2" width="4.6" height="4.6" rx="1.2"/>
+        <rect x="2.2" y="9.2" width="4.6" height="4.6" rx="1.2"/><rect x="9.2" y="9.2" width="4.6" height="4.6" rx="1.2"/></svg></span></span>
+      <span class="pbtn">筛选</span>
+    </div>
+    <div style="position:relative">${svgHTML}</div>
+    <div class="ptl"><span class="t">时间轴</span><span>04-01 ~ 05-31</span><span class="sp"></span><span class="tg">展开</span></div>`;
+})();
+</script>
+</body>
+</html>
