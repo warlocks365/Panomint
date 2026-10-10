@@ -10,6 +10,15 @@
 
 FROM nginx:1.27-alpine
 
+# 只保留本次构建产物，不带上一版残留 chunk。
+# 为什么要显式清：COPY dist 是整目录覆盖式拷贝，Docker 不删除「目标端已存在但源端没有」
+# 的文件 —— 上一版构建遗留的 index-*.js / *.css 会留在镜像里（实测容器内 3 个 index-*，
+# 实际只有 1 个被 index.html 引用）。后果有二：
+#   1. §4.5「web 容器 dist 指纹 = 本机构建」断言用 `grep -m1 index-*.js` 取文件，
+#      文件顺序不保证 → 可能取到旧 chunk 而误判 FAIL；
+#   2. 死文件占空间、且旧 chunk 里可能残留旧代码路径（信息泄露面）。
+# 顺序放在 COPY **之前**：先清空目标目录，再拷入本次产物。
+RUN rm -rf /usr/share/nginx/html/* /usr/share/nginx/html/.[!.]* 2>/dev/null || true
 COPY dist /usr/share/nginx/html
 
 COPY <<'EOF' /etc/nginx/conf.d/default.conf

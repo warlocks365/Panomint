@@ -25,6 +25,20 @@
         </div>
       </div>
     </div>
+
+    <!-- 收起态复位按钮（浮于面板右下角之上）。
+         背景：官方 Panel 自带的「关闭」只隐藏它自己的 DOM，不改本组件的 expanded，
+         于是球被 v-if="!expanded" 摘掉后没有任何路径能装回来 —— 实测展开后永久无法退出
+         （三条路径全试：点面板关闭 / Esc / 点球原位，均无法回到悬浮球态）。
+         这里显式回收实例并复位 expanded，让「退出」有确定出口。 -->
+    <button
+      v-if="expanded"
+      class="agent-collapse"
+      type="button"
+      data-testid="agent-collapse"
+      title="收起 AI 助手"
+      @click="collapse"
+    >收起</button>
   </div>
 </template>
 
@@ -62,10 +76,6 @@ async function probe() {
   hidden.value = true
 }
 
-onMounted(() => {
-  probe()
-})
-
 // 登录成功/登出回登录页时重试探一次（登录页不再发 /admin/* 请求）
 let lastPath = ''
 function onRouteChange() {
@@ -73,10 +83,6 @@ function onRouteChange() {
   lastPath = route.path
   probe()
 }
-
-onUnmounted(dispose)
-
-watch(() => route.path, onRouteChange)
 
 function markDisabled() {
   // LLM 上游未启用：球保留但点击提示配置（引导到设置页）。
@@ -134,6 +140,35 @@ function dispose() {
   }
   pending.value = null
 }
+
+// 收起：回收 agent 实例 + 复位 expanded，使悬浮球重新出现。
+// 必须 dispose —— 否则 page-agent 的定时器/观察器继续跑在已隐藏的 DOM 上（泄漏）。
+// 同时挂一个 Esc 兜底：面板内输入框聚焦时按 Esc 也能退出。
+function collapse() {
+  if (agent) {
+    try { agent.dispose() } catch { /* 已销毁 */ }
+    agent = null
+  }
+  pending.value = null
+  expanded.value = false
+}
+
+function onKeydown(e) {
+  if (e.key === 'Escape' && expanded.value) collapse()
+}
+
+onMounted(() => {
+  probe()
+  window.addEventListener('keydown', onKeydown)
+})
+
+// 路径变化重试探 + Esc 兜底一起注册；卸载时成对注销（漏注销 = 事件监听泄漏）
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+  dispose()
+})
+
+watch(() => route.path, onRouteChange)
 </script>
 
 <style scoped>
@@ -142,6 +177,12 @@ function dispose() {
   background-color: var(--color-primary, #2563eb); color: #fff; font-size: 15px; font-weight: 600;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); }
 .agent-ball:hover { filter: brightness(1.06); }
+/* 收起按钮：放右下角，压在官方 Panel 之上（Panel 由 page-agent 挂到 body，
+   z-index 2000 量级，这里给 2300 保证可点）。 */
+.agent-collapse { display: block; margin-top: 8px; margin-left: auto; height: 30px; padding: 0 12px;
+  border: 1px solid var(--color-border, #e5e7eb); border-radius: 15px; background: var(--color-surface, #fff);
+  color: var(--color-text, #111); font-size: 12px; cursor: pointer; position: relative; z-index: 2300; }
+.agent-collapse:hover { border-color: var(--color-primary, #2563eb); color: var(--color-primary, #2563eb); }
 .confirm-mask { position: fixed; inset: 0; z-index: 2200; background: rgba(0, 0, 0, 0.4);
   display: flex; align-items: center; justify-content: center; }
 .confirm-card { background: var(--color-surface, #fff); border-radius: 12px; padding: 20px;
