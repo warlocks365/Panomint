@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 原型 · 视频字幕 — 设置页与管理页</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#e9e4de; --surface:#f4f1ed; --surface2:#efebe5; --deep:#e3ded7;
+    --border:#ddd8d0; --text:#41403c; --text2:#7d7a73; --text3:#a5a29a;
+    --primary:#4a5a6a; --primary-hover:#3d4b58; --primary-soft:rgba(143,163,173,.16);
+    --danger:#b0685c; --success:#6e8a72; --oat:#c4a57a;
+    --shadow-card:0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift:0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#ded9d2; font-family:var(--font); color:var(--text); font-weight:300; letter-spacing:.01em; padding:28px 0 48px; }
+  .canvas { width:1440px; margin:0 auto; }
+  .frame { background:var(--bg); border-radius:18px; overflow:hidden; box-shadow:var(--shadow-card); margin-bottom:40px; }
+  .view-tag { font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text3); padding:14px 36px 0; }
+  .page { padding:26px 36px 40px; }
+  .ph { display:flex; align-items:baseline; gap:12px; margin-bottom:22px; }
+  .ph .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--text3); }
+  .ph h1 { font-size:16px; font-weight:500; letter-spacing:.1em; }
+  .ph .sub { font-size:12px; color:var(--text2); }
+  .ph .spacer { flex:1; }
+  .ic { display:inline-flex; flex:none; }
+  .mono { font-family:var(--mono); }
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 15px; border-radius:var(--r-md); font-size:13px; font-family:var(--font); cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--text); transition:all .45s cubic-bezier(.32,.72,0,1); }
+  .btn:hover { background:var(--surface2); }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .btn.primary:hover { background:var(--primary-hover); }
+  .mini-btn { display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:12px; font-family:var(--font); cursor:pointer; }
+  .mini-btn:hover { background:var(--surface2); }
+  .mini-btn.prime { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .icon-btn { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid transparent; background:transparent; color:var(--text2); cursor:pointer; }
+
+  /* 设置卡片 */
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:20px; box-shadow:var(--shadow-card); margin-bottom:16px; }
+  .card-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .card-title { font-size:14px; font-weight:500; letter-spacing:.06em; display:inline-flex; align-items:center; gap:8px; }
+  .card-title .ic { color:var(--oat); }
+  .card-head .spacer { flex:1; }
+  .state { font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; padding:3px 9px; border-radius:999px; border:1px solid var(--border); color:var(--text2); }
+  .state--on { color:#5d7660; border-color:rgba(110,138,114,.45); background:rgba(110,138,114,.10); }
+  .card-desc { font-size:12.5px; color:var(--text2); line-height:1.8; margin-bottom:14px; }
+  .srow { display:flex; align-items:flex-start; gap:12px; padding:13px 0; border-top:1px solid var(--border); }
+  .srow:first-of-type { border-top:0; padding-top:2px; }
+  .srow .s-label { width:150px; flex:none; font-size:12.5px; color:var(--text2); padding-top:2px; }
+  .srow .s-body { flex:1; min-width:0; }
+  .srow .s-note { font-size:11.5px; color:var(--text3); margin-top:6px; line-height:1.7; }
+  .srow.sub { padding-left:26px; background:rgba(74,90,106,.028); border-radius:var(--r-md); margin:2px 0; padding-right:12px; }
+  .ck { display:flex; align-items:flex-start; gap:9px; font-size:13px; cursor:pointer; }
+  .ck input { accent-color:var(--primary); width:15px; height:15px; margin-top:2px; flex:none; }
+  .ck .ck-t { display:flex; flex-direction:column; gap:3px; }
+  .ck .ck-d { font-size:11.5px; color:var(--text3); line-height:1.65; }
+  .ckrow { display:flex; gap:20px; flex-wrap:wrap; }
+  .rk { display:inline-flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; }
+  .rk input { accent-color:var(--primary); width:14px; height:14px; }
+  .inp { height:34px; padding:0 11px; border:1px solid var(--border); border-radius:9px; background:#fbf9f6; font-family:var(--font); font-size:12.5px; color:var(--text); outline:none; }
+  .inp.mono { font-family:var(--mono); font-size:12px; }
+  .inp.w80 { width:80px; text-align:center; }
+  .inp.w220 { width:220px; }
+  .inrow { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .inrow .tilde { color:var(--text3); font-family:var(--mono); font-size:12px; }
+  .inrow .unit { font-size:11.5px; color:var(--text3); }
+  select.inp { cursor:pointer; }
+  .statusbar { display:flex; align-items:center; gap:16px; padding:11px 14px; background:#faf8f5; border:1px solid var(--border); border-radius:var(--r-md); font-size:12px; color:var(--text2); flex-wrap:wrap; }
+  .statusbar .sb { display:inline-flex; align-items:center; gap:6px; }
+  .statusbar .sb .n { font-family:var(--mono); color:var(--text); }
+  .statusbar .spacer { flex:1; }
+  .dotmark { width:6px; height:6px; border-radius:50%; background:var(--success); }
+  .actions-row { display:flex; align-items:center; gap:10px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+  .actions-row .spacer { flex:1; }
+  .hint-inline { font-size:11.5px; color:var(--text3); }
+  .modelbox { display:flex; align-items:center; gap:11px; padding:11px 13px; border:1px solid var(--border); border-radius:var(--r-md); background:#faf8f5; }
+  .modelbox .mb-ic { color:var(--primary); }
+  .modelbox .mb-t { font-size:12.5px; flex:1; }
+  .modelbox .mb-d { font-family:var(--mono); font-size:10.5px; color:var(--text3); margin-top:3px; }
+  .chip-sel { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:var(--surface); font-size:12.5px; cursor:pointer; }
+  .chip-sel.on { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .chip-sel .x { color:rgba(238,241,244,.7); }
+
+  /* 管理页 */
+  .tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:18px; }
+  .tab { appearance:none; border:0; background:transparent; font-family:var(--font); font-size:13.5px; color:var(--text2); padding:10px 16px 12px; cursor:pointer; position:relative; }
+  .tab.on { color:var(--text); font-weight:500; }
+  .tab.on::after { content:""; position:absolute; left:12px; right:12px; bottom:-1px; height:2px; background:var(--primary); border-radius:2px; }
+  .tab .n { font-family:var(--mono); font-size:10px; color:var(--text3); margin-left:5px; }
+  .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .toolbar .spacer { flex:1; }
+  .searchbox { display:flex; align-items:center; gap:8px; width:240px; height:34px; padding:0 12px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text3); font-size:12.5px; }
+  table.list { width:100%; border-collapse:collapse; background:var(--surface); border-radius:var(--r-lg); overflow:hidden; box-shadow:var(--shadow-card); }
+  table.list th { text-align:left; font-size:11.5px; font-weight:400; color:var(--text3); padding:12px 14px; border-bottom:1px solid var(--border); background:#faf8f5; letter-spacing:.04em; }
+  table.list td { padding:11px 14px; border-bottom:1px solid var(--border); font-size:12.5px; vertical-align:middle; }
+  table.list tr:last-child td { border-bottom:0; }
+  table.list tr:hover td { background:var(--surface2); }
+  .vr { display:flex; align-items:center; gap:10px; }
+  .vthumb { width:52px; height:33px; border-radius:5px; flex:none; }
+  .th1 { background:linear-gradient(140deg,#7d95a8,#5d7288); }
+  .th2 { background:linear-gradient(140deg,#c4a57a,#a98862); }
+  .th3 { background:linear-gradient(140deg,#9a8aa0,#7a6c85); }
+  .th4 { background:linear-gradient(140deg,#6e8a72,#56705b); }
+  .vname { font-size:12.5px; }
+  .vsub { font-family:var(--mono); font-size:10.5px; color:var(--text3); margin-top:3px; }
+  .st { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; padding:3px 9px; border-radius:999px; border:1px solid var(--border); color:var(--text2); white-space:nowrap; }
+  .st.done { color:#5d7660; border-color:rgba(110,138,114,.45); background:rgba(110,138,114,.10); }
+  .st.run  { color:var(--primary); border-color:rgba(74,90,106,.35); background:rgba(143,163,173,.14); }
+  .st.fail { color:var(--danger); border-color:rgba(176,104,92,.42); background:rgba(176,104,92,.08); }
+  .st.skip { color:var(--text3); border-style:dashed; }
+  .mini-pbar { width:74px; height:4px; border-radius:2px; background:var(--deep); overflow:hidden; display:inline-block; vertical-align:middle; margin-right:7px; }
+  .mini-pbar > i { display:block; height:100%; background:var(--primary); }
+  .langflags { display:flex; gap:4px; }
+  .lf { font-family:var(--mono); font-size:9.5px; letter-spacing:.06em; border:1px solid var(--border); border-radius:4px; padding:1px 5px; color:var(--text2); background:var(--surface); }
+  .lf.mt { color:var(--oat); border-color:var(--oat); }
+  .crow { display:flex; gap:3px; }
+  .crow .btnx { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:7px; border:1px solid transparent; background:transparent; color:var(--text2); cursor:pointer; }
+  .crow .btnx:hover { background:var(--surface); border-color:var(--border); color:var(--text); }
+  .pager { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:12px; color:var(--text2); }
+  .pager .spacer { flex:1; }
+  .pg { width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border-radius:7px; border:1px solid var(--border); background:var(--surface); font-family:var(--mono); font-size:11.5px; cursor:pointer; }
+  .pg.on { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .anno { display:flex; align-items:flex-start; gap:9px; margin:16px 0 0; padding:12px 15px; background:rgba(74,90,106,.055); border:1px solid var(--border); border-radius:var(--r-md); }
+  .anno .ic { color:var(--primary); margin-top:1px; }
+  .anno p { font-size:12.5px; color:var(--text2); line-height:1.78; }
+  .anno p b { font-weight:500; color:var(--text); }
+  .anno .mono { font-family:var(--mono); font-size:11px; }
+  .lay2 { display:flex; gap:18px; align-items:flex-start; }
+  .lay2 .main { flex:1; min-width:0; }
+  .side { width:322px; flex:none; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ================================================================= -->
+  <!-- VIEW.25 设置页 · 视频字幕卡片 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.25 · /settings — 新增卡片「视频字幕（语音识别）」（总开关 · 引擎 · 语言 · 触发 · 配额）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">SET</span><h1>设置</h1>
+        <span class="sub">卡片插在「视频热点回忆」之后（两者共用闲时段配置）</span>
+      </div>
+
+      <div class="lay2">
+        <div class="main">
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">
+                <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4M13 14h4M7 10.5h10"/></svg>
+                视频字幕（语音识别）
+              </h2>
+              <div class="spacer"></div>
+              <span class="state state--on">已启用</span>
+            </div>
+            <p class="card-desc">
+              对相册视频做<b style="font-weight:500">本机语音识别</b>，生成外挂字幕文件（SRT / VTT，可导出、可替换、可编辑）；
+              可选生成多语言翻译轨；字幕内容可参与全局搜索。
+              <b style="font-weight:500">音频不出本机</b>，识别过程不消耗外部额度。
+            </p>
+
+            <div class="srow">
+              <div class="s-label">总开关</div>
+              <div class="s-body">
+                <label class="ck">
+                  <input type="checkbox" checked />
+                  <span class="ck-t">
+                    <span>启用视频字幕</span>
+                    <span class="ck-d">关闭后：详情页字幕块、搜索结果中的字幕条目、分享中的字幕勾选全部隐藏；
+                    已生成的字幕文件仍保留在存储中（不追溯删除）。</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div class="srow">
+              <div class="s-label">识别引擎</div>
+              <div class="s-body">
+                <div class="modelbox">
+                  <svg class="ic mb-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8.5"/><path d="M8 12h8M12 8v8"/></svg>
+                  <div style="flex:1">
+                    <div class="mb-t">whisper.cpp · <span class="mono">ggml-small.bin</span>（已就绪）</div>
+                    <div class="mb-d">466 MB · 存放于 /models/whisper · 校验通过（sha256）</div>
+                  </div>
+                  <button class="mini-btn">更换模型</button>
+                </div>
+                <div class="inrow" style="margin-top:10px">
+                  <span style="font-size:12.5px;color:var(--text2)">推理设备</span>
+                  <label class="rk"><input type="radio" name="dev" checked /> CPU</label>
+                  <label class="rk"><input type="radio" name="dev" /> CUDA</label>
+                  <label class="rk"><input type="radio" name="dev" /> 自动</label>
+                  <span class="unit">（与「人脸识别」的设备配置同构，GPU 不可用时自动回落）</span>
+                </div>
+                <div class="s-note">
+                  模型文件不进镜像，首次启用时下载（支持镜像源）或手动放置到模型目录。
+                  CPU 部署建议 <span class="mono">small</span>；有 GPU 时建议 <span class="mono">large-v3-turbo-q5_0</span>（质量与速度更平衡）。
+                </div>
+              </div>
+            </div>
+
+            <div class="srow sub">
+              <div class="s-label">识别语言</div>
+              <div class="s-body">
+                <div class="inrow">
+                  <span style="font-size:12.5px;color:var(--text2)">源语言</span>
+                  <select class="inp w220">
+                    <option>自动检测（推荐）</option>
+                    <option>中文（简体）</option>
+                    <option>English</option>
+                  </select>
+                </div>
+                <div class="s-note">自动检测覆盖 whisper 支持的 99 种语言；检测结果写入字幕轨记录，用于展示与搜索过滤。</div>
+              </div>
+            </div>
+
+            <div class="srow sub">
+              <div class="s-label">翻译轨（多语言）</div>
+              <div class="s-body">
+                <div class="ckrow" style="margin-bottom:8px">
+                  <label class="rk"><input type="checkbox" checked /> English</label>
+                  <label class="rk"><input type="checkbox" /> 日本語</label>
+                  <label class="rk"><input type="checkbox" /> Русский</label>
+                  <label class="rk"><input type="checkbox" /> Français</label>
+                  <span class="hint-inline">＋ 更多语言</span>
+                </div>
+                <div class="s-note">
+                  <b style="font-weight:500;color:var(--text)">默认只生成原文轨</b>；勾选的语言才会额外生成翻译轨。
+                  翻译经「Agent 语义接口 · LLM 上游」进行，按 token 计费 —— 每多一种语言，费用约等于全片文字量的 2 倍
+                  （输入 + 输出）。单日翻译句数上限见下。
+                </div>
+              </div>
+            </div>
+
+            <div class="srow">
+              <div class="s-label">触发方式</div>
+              <div class="s-body">
+                <div class="ckrow">
+                  <label class="rk"><input type="checkbox" checked /> 手动</label>
+                  <label class="rk"><input type="checkbox" checked /> 闲时段定时扫描</label>
+                  <label class="rk"><input type="checkbox" /> 新视频自动
+                    <span style="font-size:11px;color:var(--text3)">（单次最多 5 个）</span>
+                  </label>
+                </div>
+                <div class="s-note">
+                  闲时段与「视频热点回忆」<b style="font-weight:500;color:var(--text)">共用同一时段配置</b>（当前 02:00–06:00），
+                  两个功能不会各配一套互相抢资源。「新视频自动」默认关闭 —— 批量导入会形成任务风暴。
+                </div>
+              </div>
+            </div>
+
+            <div class="srow sub">
+              <div class="s-label">配额</div>
+              <div class="s-body">
+                <div class="inrow">
+                  <span style="font-size:12.5px;color:var(--text2)">单日视频数</span>
+                  <input class="inp mono w80" value="10" />
+                  <span class="unit">个</span>
+                  <span style="width:12px"></span>
+                  <span style="font-size:12.5px;color:var(--text2)">单视频时长上限</span>
+                  <input class="inp mono w80" value="60" />
+                  <span class="unit">分钟（超出需手动确认）</span>
+                </div>
+                <div class="inrow" style="margin-top:9px">
+                  <span style="font-size:12.5px;color:var(--text2)">单日翻译句数</span>
+                  <input class="inp mono w80" value="3000" />
+                  <span class="unit">句</span>
+                </div>
+                <div class="s-note">全局并发固定为 1（与转码 / 索引 / 人脸错峰）；识别任务优先在闲时段执行。</div>
+              </div>
+            </div>
+
+            <div class="srow sub">
+              <div class="s-label">搜索</div>
+              <div class="s-body">
+                <label class="ck">
+                  <input type="checkbox" checked />
+                  <span class="ck-t">
+                    <span>搜索包含字幕内容</span>
+                    <span class="ck-d">开启后，全局搜索会匹配字幕文本，命中项可一键跳到视频对应时间点。
+                    关闭后字幕不参与搜索（字幕本身仍可正常查看与导出）。</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div class="srow">
+              <div class="s-label">运行状态</div>
+              <div class="s-body">
+                <div class="statusbar">
+                  <span class="sb"><span class="dotmark"></span>今日已用 <span class="n">3 / 10</span></span>
+                  <span class="sb">队列 <span class="n">1</span></span>
+                  <span class="sb">识别中 <span class="n">1</span></span>
+                  <span class="sb">RTF 中位数 <span class="n">0.81×</span></span>
+                  <span class="sb">模型 <span class="n">small</span></span>
+                  <div class="spacer"></div>
+                  <button class="mini-btn">查看任务</button>
+                </div>
+                <div class="s-note">
+                  <span class="mono">RTF = 视频时长 ÷ 识别耗时</span>，大于 1 表示比实时快。
+                  该数值随硬件差异很大，仅作趋势参考。
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:0">
+            <div class="card-head">
+              <h2 class="card-title">
+                <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4M13 14h4"/></svg>
+                视频字幕（语音识别）
+              </h2>
+              <div class="spacer"></div>
+              <span class="state">未启用</span>
+            </div>
+            <label class="ck" style="margin-top:6px">
+              <input type="checkbox" />
+              <span class="ck-t">
+                <span>启用视频字幕</span>
+                <span class="ck-d">关闭态下，引擎 / 语言 / 触发 / 配额 / 搜索等子项整体置灰，不参与任何后台任务。</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="side">
+          <div class="card" style="margin-bottom:0">
+            <div class="card-title" style="font-size:13px; margin-bottom:10px">设计说明</div>
+            <div style="font-size:12.5px; color:var(--text2); line-height:1.85">
+              <div>· <b style="font-weight:500;color:var(--text)">默认只出原文轨</b>：识别是本机免费的，翻译是要花 token 的 ——
+              两者成本模型完全不同，所以默认值也不同</div>
+              <div>· 推理设备与「人脸识别 / 向量编码」同构（CPU / CUDA / 自动），GPU 不是前置条件</div>
+              <div>· 模型文件 466 MB–1.6 GB，<b style="font-weight:500;color:var(--text)">不进镜像、不进 git</b>，
+              走下载或挂载卷 —— 否则仓库与镜像都要膨胀</div>
+              <div>· 闲时段与回忆功能共用配置，避免两个重任务功能互相抢资源</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.26 字幕管理页 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.26 · /subtitles — 字幕管理页（全局视图 + 批量操作）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">LIST</span><h1>字幕管理</h1>
+        <span class="sub">批量导入素材后，这里是一次性发起识别的入口</span>
+        <div class="spacer"></div>
+        <button class="btn">导出所有字幕（zip）</button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab on">全部 <span class="n">86</span></button>
+        <button class="tab">未生成 <span class="n">61</span></button>
+        <button class="tab">排队中 <span class="n">1</span></button>
+        <button class="tab">识别中 <span class="n">1</span></button>
+        <button class="tab">已完成 <span class="n">21</span></button>
+        <button class="tab">失败 / 跳过 <span class="n">2</span></button>
+      </div>
+
+      <div class="toolbar">
+        <div class="searchbox">
+          <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          按文件名筛选
+        </div>
+        <div class="spacer"></div>
+        <span class="hint-inline">已选 0 项</span>
+        <button class="mini-btn">批量生成字幕</button>
+        <button class="mini-btn">批量删除轨</button>
+      </div>
+
+      <table class="list">
+        <thead>
+          <tr>
+            <th style="width:40px"><input type="checkbox" style="accent-color:var(--primary)" /></th>
+            <th>视频</th>
+            <th style="width:92px">时长</th>
+            <th style="width:150px">字幕轨</th>
+            <th style="width:190px">状态</th>
+            <th style="width:150px">完成时间</th>
+            <th style="width:130px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><input type="checkbox" style="accent-color:var(--primary)" /></td>
+            <td>
+              <div class="vr">
+                <span class="vthumb th1"></span>
+                <div><div class="vname">洱海日落延时.mp4</div><div class="vsub">全景视频 · 1.2 GB</div></div>
+              </div>
+            </td>
+            <td class="mono" style="font-size:12px">03:24</td>
+            <td><div class="langflags"><span class="lf">ZH</span><span class="lf mt">EN</span></div></td>
+            <td><span class="st done"><svg class="ic" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>已完成 · 2 轨</span></td>
+            <td class="mono" style="font-size:11.5px">10-08 03:12</td>
+            <td>
+              <div class="crow">
+                <button class="btnx" title="查看字幕"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h10"/></svg></button>
+                <button class="btnx" title="重新识别"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8M20 12a8 8 0 0 1-13.66 5.66L4 16"/></svg></button>
+                <button class="btnx" title="删除轨"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td><input type="checkbox" style="accent-color:var(--primary)" /></td>
+            <td>
+              <div class="vr">
+                <span class="vthumb th2"></span>
+                <div><div class="vname">古城漫步.mp4</div><div class="vsub">视频 · 842 MB</div></div>
+              </div>
+            </td>
+            <td class="mono" style="font-size:12px">12:47</td>
+            <td><div class="langflags"><span class="lf">ZH</span></div></td>
+            <td><span class="st run"><span class="mini-pbar"><i style="width:43%"></i></span>识别中 43%</span></td>
+            <td class="mono" style="font-size:11.5px">—</td>
+            <td>
+              <div class="crow">
+                <button class="btnx" title="取消"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td><input type="checkbox" style="accent-color:var(--primary)" /></td>
+            <td>
+              <div class="vr">
+                <span class="vthumb th4"></span>
+                <div><div class="vname">客栈院子里的猫.mp4</div><div class="vsub">视频 · 96 MB</div></div>
+              </div>
+            </td>
+            <td class="mono" style="font-size:12px">00:58</td>
+            <td><div class="langflags"><span class="lf" style="border-style:dashed">—</span></div></td>
+            <td><span class="st skip">已跳过 · 无音轨</span></td>
+            <td class="mono" style="font-size:11.5px">10-08 03:20</td>
+            <td>
+              <div class="crow">
+                <button class="btnx" title="仍然尝试"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8M20 12a8 8 0 0 1-13.66 5.66L4 16"/></svg></button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td><input type="checkbox" style="accent-color:var(--primary)" /></td>
+            <td>
+              <div class="vr">
+                <span class="vthumb th3"></span>
+                <div><div class="vname">2026-08-14 洱海.mp4</div><div class="vsub">视频 · 2.4 GB</div></div>
+              </div>
+            </td>
+            <td class="mono" style="font-size:12px">08:15</td>
+            <td><div class="langflags"><span class="lf" style="border-style:dashed">—</span></div></td>
+            <td><span class="st fail">失败 · 模型文件缺失</span></td>
+            <td class="mono" style="font-size:11.5px">10-09 03:41</td>
+            <td>
+              <div class="crow">
+                <button class="btnx" title="重试"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8M20 12a8 8 0 0 1-13.66 5.66L4 16"/></svg></button>
+                <button class="btnx" title="查看帮助"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td><input type="checkbox" style="accent-color:var(--primary)" /></td>
+            <td>
+              <div class="vr">
+                <span class="vthumb th1"></span>
+                <div><div class="vname">海边日出.mp4</div><div class="vsub">全景视频 · 3.1 GB</div></div>
+              </div>
+            </td>
+            <td class="mono" style="font-size:12px">21:03</td>
+            <td><div class="langflags"><span class="lf" style="border-style:dashed">—</span></div></td>
+            <td><span class="st">排队中 · 第 1 位</span></td>
+            <td class="mono" style="font-size:11.5px">—</td>
+            <td>
+              <div class="crow">
+                <button class="btnx" title="取消排队"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td><input type="checkbox" style="accent-color:var(--primary)" /></td>
+            <td>
+              <div class="vr">
+                <span class="vthumb th2"></span>
+                <div><div class="vname">生日会.mp4</div><div class="vsub">视频 · 1.8 GB</div></div>
+              </div>
+            </td>
+            <td class="mono" style="font-size:12px">34:22</td>
+            <td><div class="langflags"><span class="lf">ZH</span><span class="lf mt">EN</span><span class="lf mt">JA</span></div></td>
+            <td><span class="st done"><svg class="ic" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>已完成 · 3 轨</span></td>
+            <td class="mono" style="font-size:11.5px">10-07 04:02</td>
+            <td>
+              <div class="crow">
+                <button class="btnx" title="查看字幕"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h10"/></svg></button>
+                <button class="btnx" title="重新识别"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8M20 12a8 8 0 0 1-13.66 5.66L4 16"/></svg></button>
+                <button class="btnx" title="删除轨"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="pager">
+        <span>共 86 个视频 · 显示 1–6</span>
+        <div class="spacer"></div>
+        <button class="pg on">1</button>
+        <button class="pg">2</button>
+        <button class="pg">3</button>
+        <button class="pg">…</button>
+        <button class="pg">15</button>
+      </div>
+
+      <div class="anno">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>「已跳过」与「失败」是两种状态，不能混为一谈</b>：跳过（无音轨 / 纯音乐 / 超长）不需要重试，
+        失败才需要。「已跳过」行仍提供「仍然尝试」入口，给边界情况留后路。
+        另外注意排序默认按<b>状态优先</b>（进行中 &gt; 失败 &gt; 排队 &gt; 未生成 &gt; 完成），
+        让用户一进来就看到"需要我处理的事"。</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

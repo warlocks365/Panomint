@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 原型 · 视频字幕 — 详情页、播放器与编辑</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#e9e4de; --surface:#f4f1ed; --surface2:#efebe5; --deep:#e3ded7;
+    --border:#ddd8d0; --text:#41403c; --text2:#7d7a73; --text3:#a5a29a;
+    --primary:#4a5a6a; --primary-hover:#3d4b58; --primary-soft:rgba(143,163,173,.16);
+    --danger:#b0685c; --success:#6e8a72; --oat:#c4a57a;
+    --player:#14181d; --player-text:#f2f5f8; --player-dim:#9aa7b4;
+    --shadow-card:0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift:0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#ded9d2; font-family:var(--font); color:var(--text); font-weight:300; letter-spacing:.01em; padding:28px 0 48px; }
+  .canvas { width:1440px; margin:0 auto; }
+  .frame { background:var(--bg); border-radius:18px; overflow:hidden; box-shadow:var(--shadow-card); margin-bottom:40px; }
+  .view-tag { font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text3); padding:14px 36px 0; }
+  .page { padding:26px 36px 40px; }
+  .ph { display:flex; align-items:baseline; gap:12px; margin-bottom:22px; }
+  .ph .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--text3); }
+  .ph h1 { font-size:16px; font-weight:500; letter-spacing:.1em; }
+  .ph .sub { font-size:12px; color:var(--text2); }
+  .ph .spacer { flex:1; }
+  .ic { display:inline-flex; flex:none; }
+  .mono { font-family:var(--mono); }
+
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 15px; border-radius:var(--r-md); font-size:13px; font-family:var(--font); cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--text); transition:all .45s cubic-bezier(.32,.72,0,1); }
+  .btn:hover { background:var(--surface2); }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .btn.primary:hover { background:var(--primary-hover); }
+  .btn.danger { color:var(--danger); border-color:rgba(176,104,92,.42); background:transparent; }
+  .mini-btn { display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:12px; font-family:var(--font); cursor:pointer; transition:all .35s; }
+  .mini-btn:hover { background:var(--surface2); }
+  .mini-btn.prime { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .icon-btn { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid transparent; background:transparent; color:var(--text2); cursor:pointer; }
+  .icon-btn:hover { background:var(--surface2); color:var(--text); }
+
+  /* 舞台布局 */
+  .stage { display:flex; gap:20px; align-items:stretch; }
+  .player { flex:1; background:var(--player); border-radius:var(--r-lg); position:relative; overflow:hidden; height:560px; }
+  .pano-scene { position:absolute; inset:0; background:radial-gradient(120% 90% at 62% 30%, #2c3a44 0%, #1d262e 42%, #14181d 100%); }
+  .pano-scene::before { content:""; position:absolute; left:-6%; right:-6%; bottom:84px; height:210px;
+    background:linear-gradient(178deg, rgba(154,167,180,.20) 0%, rgba(74,90,106,.28) 46%, rgba(20,24,29,0) 100%);
+    clip-path:polygon(0 62%, 9% 40%, 17% 55%, 27% 22%, 38% 48%, 50% 30%, 62% 52%, 74% 26%, 86% 50%, 100% 34%, 100% 100%, 0 100%); }
+  .p-chip { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 11px; border-radius:999px;
+    background:rgba(230,235,240,.10); border:1px solid rgba(230,235,240,.14); color:var(--player-text); font-size:12px; }
+  .player-topbar { position:absolute; top:0; left:0; right:0; padding:14px 16px; display:flex; align-items:center; gap:10px; background:linear-gradient(180deg, rgba(20,24,29,.72), rgba(20,24,29,0)); }
+  .player-topbar .spacer { flex:1; }
+  .p-btn { width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%;
+    background:rgba(230,235,240,.10); border:1px solid rgba(230,235,240,.14); color:var(--player-text); cursor:pointer; }
+
+  /* 字幕显示（播放器覆盖层） */
+  .sub-layer { position:absolute; left:0; right:0; bottom:88px; display:flex; justify-content:center; pointer-events:none; padding:0 40px; }
+  .sub-line { max-width:1000px; text-align:center; }
+  .sub-text { display:inline-block; background:rgba(20,24,29,.66); color:var(--player-text); font-size:21px; line-height:1.5; font-weight:400;
+    padding:4px 14px; border-radius:6px; letter-spacing:.02em; }
+  .sub-text .hl { color:#f0e0c8; }
+  .sub-note { margin-top:9px; font-family:var(--mono); font-size:10.5px; color:rgba(242,245,248,.62); }
+
+  .controls { position:absolute; left:0; right:0; bottom:0; padding:12px 16px 14px; background:linear-gradient(0deg, rgba(20,24,29,.86), rgba(20,24,29,0)); }
+  .track { position:relative; height:4px; border-radius:2px; background:rgba(230,235,240,.18); margin:16px 0 10px; }
+  .track .played { position:absolute; left:0; top:0; bottom:0; width:34%; border-radius:2px; background:rgba(230,235,240,.86); }
+  .track .head { position:absolute; left:34%; top:50%; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%; background:#fff; }
+  .sub-marks { position:absolute; left:0; right:0; top:-6px; height:4px; }
+  .sub-mark { position:absolute; height:4px; border-radius:2px; background:rgba(196,165,122,.82); }
+  .ctl-row { display:flex; align-items:center; gap:13px; color:var(--player-text); font-family:var(--mono); font-size:12px; }
+  .ctl-row .spacer { flex:1; }
+  .ctl-row .dim { color:var(--player-dim); }
+  .cc-btn { display:inline-flex; align-items:center; gap:5px; height:26px; padding:0 9px; border-radius:6px; border:1px solid rgba(230,235,240,.28); background:rgba(230,235,240,.10); color:var(--player-text); font-size:11px; font-family:var(--font); cursor:pointer; }
+  .cc-btn.on { background:rgba(230,235,240,.92); color:#14181d; border-color:transparent; }
+
+  /* 信息面板 */
+  .panel { width:486px; flex:none; background:var(--surface); border-radius:var(--r-lg); padding:20px 22px 18px; box-shadow:var(--shadow-card); display:flex; flex-direction:column; }
+  .p-head { display:flex; align-items:flex-start; gap:10px; margin-bottom:16px; }
+  .p-head h2 { font-size:15.5px; font-weight:500; letter-spacing:.02em; line-height:1.35; }
+  .p-head .p-meta { margin-top:4px; font-family:var(--mono); font-size:11px; color:var(--text2); }
+  .p-head .spacer { flex:1; }
+  .facts { border:1px solid var(--border); border-radius:var(--r-md); background:#faf8f5; padding:11px 14px; margin-bottom:16px; }
+  .frow { display:flex; gap:12px; font-size:12.5px; line-height:2; }
+  .frow .k { width:62px; flex:none; color:var(--text3); }
+  .frow .v { color:var(--text); }
+  .blk { padding-top:14px; margin-top:2px; border-top:1px solid var(--border); }
+  .blk-head { display:flex; align-items:center; gap:9px; margin-bottom:11px; }
+  .blk-head h3 { font-size:13px; font-weight:500; letter-spacing:.06em; display:inline-flex; align-items:center; gap:6px; }
+  .blk-head h3 .ic { color:var(--oat); }
+  .blk-head .cnt { font-family:var(--mono); font-size:10.5px; color:var(--text3); border:1px solid var(--border); border-radius:999px; padding:1px 7px; }
+  .blk-head .spacer { flex:1; }
+
+  /* 字幕块 · 轨列表 */
+  .tracks { display:flex; flex-direction:column; gap:8px; }
+  .trk { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r-md); background:#faf8f5; }
+  .trk .trk-flag { font-family:var(--mono); font-size:10px; letter-spacing:.08em; color:var(--text2); border:1px solid var(--border); border-radius:5px; padding:1px 6px; background:var(--surface); flex:none; }
+  .trk .trk-name { font-size:12.5px; flex:1; min-width:0; display:flex; align-items:center; gap:7px; }
+  .trk .trk-meta { font-family:var(--mono); font-size:10.5px; color:var(--text3); }
+  .trk .badge { font-size:9.5px; border-radius:4px; padding:0 4px; line-height:1.5; border:1px solid; }
+  .trk .badge.src  { color:var(--primary); border-color:rgba(74,90,106,.4); }
+  .trk .badge.mt   { color:var(--oat); border-color:var(--oat); }
+  .trk .badge.imp  { color:var(--success); border-color:rgba(110,138,114,.5); }
+  .trk .trk-act { display:flex; align-items:center; gap:3px; flex:none; }
+  .trk .trk-act .btnx { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:7px; border:1px solid transparent; background:transparent; color:var(--text2); cursor:pointer; }
+  .trk .trk-act .btnx:hover { background:var(--surface); border-color:var(--border); color:var(--text); }
+
+  /* 五态小卡 */
+  .states5 { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; }
+  .scard { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-card); padding:15px 16px 16px; }
+  .scard .sc-tag { font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; color:var(--text3); margin-bottom:11px; }
+  .scard h4 { font-size:12.5px; font-weight:500; margin-bottom:9px; display:flex; align-items:center; gap:7px; }
+  .scard .sc-body { font-size:11.5px; color:var(--text2); line-height:1.72; }
+  .empty-dash { display:flex; align-items:center; gap:8px; padding:11px 12px; border:1px dashed var(--border); border-radius:var(--r-md); color:var(--text3); font-size:11.5px; }
+  .pbar { height:5px; border-radius:3px; background:var(--deep); overflow:hidden; margin:10px 0 7px; }
+  .pbar > i { display:block; height:100%; background:var(--primary); border-radius:3px; }
+  .failbox { border:1px solid rgba(176,104,92,.42); background:rgba(176,104,92,.07); border-radius:var(--r-md); padding:10px 12px; font-size:11.5px; color:var(--text2); line-height:1.7; }
+  .failbox b { color:var(--danger); font-weight:500; }
+  .split-note { display:flex; align-items:flex-start; gap:9px; margin:18px 0 0; padding:12px 15px; background:rgba(74,90,106,.055); border:1px solid var(--border); border-radius:var(--r-md); }
+  .split-note .ic { color:var(--primary); margin-top:1px; }
+  .split-note p { font-size:12.5px; color:var(--text2); line-height:1.78; }
+  .split-note p b { font-weight:500; color:var(--text); }
+  .split-note .mono { font-family:var(--mono); font-size:11px; }
+
+  /* 播放器对照（普通 vs 全景） */
+  .duo { display:flex; gap:20px; }
+  .duo .col { flex:1; }
+  .duo .col-tag { font-family:var(--mono); font-size:11px; letter-spacing:.1em; color:var(--text3); margin-bottom:10px; }
+  .plain-player { position:relative; height:340px; border-radius:var(--r-lg); overflow:hidden; background:#191d22; }
+  .plain-scene { position:absolute; inset:0; background:linear-gradient(150deg,#2b333b,#1b2127 62%,#14181d); }
+  .plain-scene::after { content:""; position:absolute; left:0; right:0; bottom:0; height:120px; background:linear-gradient(0deg, rgba(0,0,0,.5), transparent); }
+  .ctl-mini { position:absolute; left:0; right:0; bottom:0; padding:10px 14px 12px; display:flex; align-items:center; gap:11px; color:var(--player-text); font-family:var(--mono); font-size:11px; }
+  .ctl-mini .spacer { flex:1; }
+  .ctl-mini .bar { flex:1; height:4px; border-radius:2px; background:rgba(230,235,240,.2); position:relative; }
+  .ctl-mini .bar > i { position:absolute; left:0; top:0; bottom:0; width:42%; background:rgba(230,235,240,.86); border-radius:2px; display:block; }
+
+  /* 编辑浮层 */
+  .overlay-stage { position:relative; height:660px; border-radius:var(--r-lg); overflow:hidden; background:radial-gradient(120% 90% at 58% 26%, #2c3a44 0%, #1d262e 44%, #14181d 100%); }
+  .overlay-scrim { position:absolute; inset:0; background:rgba(20,24,29,.34); }
+  .floating { position:absolute; background:var(--surface); border-radius:16px; box-shadow:0 2px 6px rgba(20,24,29,.22), 0 28px 70px rgba(20,24,29,.42); }
+  .fl-head { display:flex; align-items:center; gap:10px; padding:14px 18px 12px; border-bottom:1px solid var(--border); cursor:move; }
+  .fl-head .grip { color:var(--text3); }
+  .fl-head h3 { font-size:13.5px; font-weight:500; letter-spacing:.06em; }
+  .fl-head .spacer { flex:1; }
+  .fl-foot { display:flex; align-items:center; gap:10px; padding:12px 18px 16px; border-top:1px solid var(--border); }
+  .fl-foot .spacer { flex:1; }
+  .fl-foot .note { font-size:11px; color:var(--text3); }
+
+  .toolbar2 { display:flex; align-items:center; gap:10px; padding:11px 16px; border-bottom:1px solid var(--border); background:#faf8f5; }
+  .seg { display:inline-flex; border:1px solid var(--border); border-radius:9px; overflow:hidden; }
+  .seg .sg { appearance:none; border:0; background:var(--surface); color:var(--text2); font-family:var(--font); font-size:12px; padding:5px 12px; cursor:pointer; border-right:1px solid var(--border); }
+  .seg .sg:last-child { border-right:0; }
+  .seg .sg.on { background:var(--primary); color:#eef1f4; }
+  .toolbar2 .spacer { flex:1; }
+  .offset-wrap { display:flex; align-items:center; gap:9px; font-size:11.5px; color:var(--text2); }
+  .slider { -webkit-appearance:none; appearance:none; width:150px; height:4px; border-radius:2px; background:var(--deep); outline:none; }
+  .slider::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:var(--primary); border:2.5px solid #f4f1ed; box-shadow:0 1px 4px rgba(65,64,60,.28); cursor:pointer; }
+  .offset-val { font-family:var(--mono); font-size:11.5px; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:2px 7px; }
+
+  .cues { max-height:392px; overflow:auto; padding:6px 8px 10px; }
+  .cue { display:flex; align-items:flex-start; gap:10px; padding:8px 9px; border-radius:9px; }
+  .cue:hover { background:var(--surface2); }
+  .cue.on { background:var(--primary-soft); }
+  .cue .cue-t { font-family:var(--mono); font-size:11px; color:var(--text2); width:104px; flex:none; padding-top:2px; cursor:pointer; }
+  .cue .cue-x { flex:1; font-size:12.5px; line-height:1.65; min-width:0; }
+  .cue .cue-a { display:flex; gap:3px; flex:none; }
+  .cue .cue-a .btnx { width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--text3); cursor:pointer; }
+  .cue .cue-a .btnx:hover { background:var(--surface); border-color:var(--border); color:var(--text); }
+  .cue-input { flex:1; min-width:0; display:flex; gap:7px; align-items:center; }
+  .cue-input input { flex:1; height:30px; padding:0 10px; border:1px solid #b9c3cb; border-radius:8px; background:#fff; font-family:var(--font); font-size:12.5px; color:var(--text); outline:none; }
+  .cue-hint { font-size:11.5px; color:var(--primary); display:inline-flex; align-items:center; gap:5px; }
+
+  /* 导入对话框 */
+  .dlg { background:var(--surface); border-radius:16px; box-shadow:var(--shadow-lift); overflow:hidden; width:520px; }
+  .dlg-head { padding:15px 20px 13px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+  .dlg-head h3 { font-size:14px; font-weight:500; }
+  .dlg-head .spacer { flex:1; }
+  .dlg-body { padding:16px 20px; }
+  .dlg-foot { padding:13px 20px 16px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+  .dlg-foot .spacer { flex:1; }
+  .drop { border:1.5px dashed var(--border); border-radius:var(--r-md); padding:26px 18px; text-align:center; background:#faf8f5; }
+  .drop .drop-ic { color:var(--text3); margin-bottom:9px; }
+  .drop .drop-t { font-size:13px; margin-bottom:5px; }
+  .drop .drop-d { font-size:11.5px; color:var(--text3); }
+  .fl-row { margin-top:14px; }
+  .fl-row > label { display:block; font-size:11.5px; color:var(--text2); margin-bottom:6px; }
+  .inp { width:100%; height:34px; padding:0 11px; border:1px solid var(--border); border-radius:9px; background:#fbf9f6; font-family:var(--font); font-size:12.5px; color:var(--text); outline:none; }
+  .inp.mono { font-family:var(--mono); font-size:12px; }
+  .ckrow { display:flex; gap:18px; flex-wrap:wrap; }
+  .rk { display:inline-flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; }
+  .rk input { accent-color:var(--primary); width:14px; height:14px; }
+  .warnbox { margin-top:14px; border:1px solid rgba(196,165,122,.55); background:rgba(196,165,122,.1); border-radius:var(--r-md); padding:10px 12px; font-size:11.5px; color:var(--text2); line-height:1.7; display:flex; gap:8px; }
+  .warnbox .ic { color:var(--oat); margin-top:1px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ================================================================= -->
+  <!-- VIEW.20 详情页 · 字幕块（完成态） -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.20 · /player/:id — 视频详情页 · 字幕功能块（完成态 · 轨列表）</p>
+    <div class="page">
+      <div class="stage">
+        <!-- 播放器（带字幕覆盖层） -->
+        <div class="player">
+          <div class="pano-scene"></div>
+          <div class="player-topbar">
+            <button class="p-btn"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <span class="p-chip">8K · 原片</span>
+            <span class="p-chip">陀螺仪</span>
+            <div class="spacer"></div>
+            <span class="p-chip">中文字幕</span>
+            <button class="p-btn"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+          </div>
+
+          <!-- 字幕覆盖层（全景视频：DOM 覆盖在 WebGL 画布之上） -->
+          <div class="sub-layer">
+            <div class="sub-line">
+              <span class="sub-text">囡囡快看，<span class="hl">火烧云</span>出来了。</span>
+              <div class="sub-note">00:53 · 中文（机器生成）· 位置：底部居中 · 字号：大</div>
+            </div>
+          </div>
+
+          <div class="controls">
+            <div class="track">
+              <div class="played"></div>
+              <!-- 字幕覆盖区间（有字幕的段落） -->
+              <div class="sub-marks">
+                <span class="sub-mark" style="left:4%; width:44%"></span>
+                <span class="sub-mark" style="left:52%; width:30%"></span>
+                <span class="sub-mark" style="left:86%; width:11%"></span>
+              </div>
+              <div class="head"></div>
+            </div>
+            <div class="ctl-row">
+              <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+              <span>00:53</span><span class="dim">/ 03:24</span>
+              <div class="spacer"></div>
+              <span class="dim">视角 132° · FOV 78</span>
+              <button class="cc-btn on">
+                <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10 10.5a2.5 2.5 0 1 0 0 3M17 10.5a2.5 2.5 0 1 0 0 3"/></svg>
+                中文
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 信息面板 -->
+        <div class="panel">
+          <div class="p-head">
+            <div>
+              <h2>洱海日落延时.mp4</h2>
+              <div class="p-meta">全景视频 · 03:24 · 1.2 GB · H.265</div>
+            </div>
+            <div class="spacer"></div>
+            <button class="icon-btn"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+
+          <div class="facts">
+            <div class="frow"><span class="k">拍摄时间</span><span class="v mono">2026-08-14 18:32</span></div>
+            <div class="frow"><span class="k">拍摄地</span><span class="v">云南 · 大理 · 洱海生态廊道</span></div>
+            <div class="frow"><span class="k">尺寸</span><span class="v mono">7680 × 3840</span></div>
+          </div>
+
+          <div class="blk">
+            <div class="blk-head">
+              <h3>标签</h3><div class="spacer"></div>
+              <button class="mini-btn">编辑标签</button>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:7px">
+              <span style="display:inline-flex;align-items:center;padding:5px 11px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);font-size:12px">大理</span>
+              <span style="display:inline-flex;align-items:center;padding:5px 11px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);font-size:12px">日落</span>
+            </div>
+          </div>
+
+          <!-- 字幕块（完成态） -->
+          <div class="blk">
+            <div class="blk-head">
+              <h3>
+                <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4M13 14h4M7 10.5h10"/></svg>
+                字幕
+              </h3>
+              <span class="cnt">2 轨</span>
+              <div class="spacer"></div>
+              <button class="mini-btn">
+                <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                添加语言
+              </button>
+              <button class="mini-btn">导入</button>
+            </div>
+
+            <div class="tracks">
+              <div class="trk">
+                <span class="trk-flag">ZH</span>
+                <span class="trk-name">
+                  中文（简体）
+                  <span class="badge src">原文</span>
+                </span>
+                <span class="trk-meta">187 句 · 2 分 41 秒</span>
+                <div class="trk-act">
+                  <button class="btnx" title="编辑">
+                    <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg>
+                  </button>
+                  <button class="btnx" title="下载">
+                    <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="trk">
+                <span class="trk-flag">EN</span>
+                <span class="trk-name">
+                  English
+                  <span class="badge mt">机器翻译</span>
+                </span>
+                <span class="trk-meta">187 句 · 2 分 41 秒</span>
+                <div class="trk-act">
+                  <button class="btnx" title="编辑">
+                    <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg>
+                  </button>
+                  <button class="btnx" title="下载">
+                    <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M8 11l4 4 4-4M5 19h14"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top:11px; font-size:11.5px; color:var(--text3); line-height:1.7">
+              字幕由本机语音识别生成（whisper.cpp · small 模型），可能有识别错误，建议校对后使用。
+              英文轨由机器翻译产出，时间轴与中文轨完全对齐。
+            </div>
+          </div>
+
+          <div class="blk">
+            <div class="blk-head"><h3>回忆</h3><span class="cnt">4</span><div class="spacer"></div><button class="mini-btn prime">添加</button></div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px 7px">
+              <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);font-size:12.5px"><span class="mono" style="font-size:10.5px;color:var(--text3)">00:32</span>开场海浪</span>
+              <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);font-size:12.5px"><span class="mono" style="font-size:10.5px;color:var(--text3)">01:04–01:27</span>渔船入镜</span>
+              <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);font-size:12.5px"><span class="mono" style="font-size:10.5px;color:var(--text3)">02:16</span>火烧云极盛</span>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:9px; margin-top:auto; padding-top:16px; border-top:1px solid var(--border)">
+            <button class="btn">分享</button>
+            <button class="btn">收藏</button>
+            <button class="btn danger">删除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="split-note">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>进度条上的燕麦色区间 = 有字幕的时段</b>（本原型新增建议），空白处表示该段无语音（音乐、环境音或静默）。
+        它同时是 ASR 质量的直观体检——若"有字幕区间"与听觉明显不符，说明识别需要重跑或换模型。
+        此建议不在原需求内，供审核取舍。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.21 字幕块五态 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.21 · 字幕功能块 · 五种状态（空 / 排队 / 识别中 / 完成 / 失败）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">STATE</span><h1>五态</h1>
+        <span class="sub">状态由服务端任务驱动；失败与跳过都要有可解释的文案</span>
+      </div>
+
+      <div class="states5">
+        <div class="scard">
+          <div class="sc-tag">STATE.01 · 空态</div>
+          <h4>尚未生成</h4>
+          <div class="empty-dash">
+            <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4M13 14h4"/></svg>
+            没有字幕轨
+          </div>
+          <div class="sc-body" style="margin-top:10px">显示「生成字幕」按钮；预估耗时按 RTF 中位数给出（示例：约 4 分钟）。</div>
+          <button class="mini-btn prime" style="margin-top:11px; width:100%; justify-content:center">生成字幕</button>
+        </div>
+
+        <div class="scard">
+          <div class="sc-tag">STATE.02 · 排队中</div>
+          <h4>排队第 3 位</h4>
+          <div class="empty-dash" style="border-style:solid">
+            <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+            预计 12 分钟后开始
+          </div>
+          <div class="sc-body" style="margin-top:10px">可取消（从等待队列移除，不影响其它任务）。</div>
+          <button class="mini-btn" style="margin-top:11px; width:100%; justify-content:center">取消排队</button>
+        </div>
+
+        <div class="scard">
+          <div class="sc-tag">STATE.03 · 识别中</div>
+          <h4>正在识别</h4>
+          <div class="pbar"><i style="width:43%"></i></div>
+          <div class="sc-body"><span class="mono">43%</span> · 已用 1 分 48 秒 · 预计剩余 2 分 20 秒</div>
+          <div class="sc-body" style="margin-top:6px; color:var(--text3)">模型：small · 设备：CPU · 已识别 79 句</div>
+          <button class="mini-btn" style="margin-top:11px; width:100%; justify-content:center">取消识别</button>
+        </div>
+
+        <div class="scard">
+          <div class="sc-tag">STATE.04 · 完成</div>
+          <h4>已完成 · 2 轨</h4>
+          <div class="sc-body">中文（原文）· 187 句<br>English（机器翻译）· 187 句</div>
+          <div class="sc-body" style="margin-top:6px; color:var(--text3)">耗时 4 分 12 秒 · RTF 0.81×</div>
+          <button class="mini-btn" style="margin-top:11px; width:100%; justify-content:center">查看 / 编辑</button>
+        </div>
+
+        <div class="scard">
+          <div class="sc-tag">STATE.05 · 失败</div>
+          <h4>识别失败</h4>
+          <div class="failbox">
+            <b>模型文件缺失</b><br>
+            未找到 <span class="mono">ggml-small.bin</span>。<br>
+            请运行下载脚本或手动放置到模型目录。
+          </div>
+          <div style="display:flex; gap:7px; margin-top:11px">
+            <button class="mini-btn prime" style="flex:1; justify-content:center">重试</button>
+            <button class="mini-btn" style="flex:1; justify-content:center">查看帮助</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="split-note">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>另有一类"跳过"状态</b>（本页未画）：无音轨 / 纯音乐 / 超长 / 过短 —— 显示为灰色说明条而非错误，
+        例如「该视频没有音轨，无需生成字幕」。它与"失败"的区别很重要：跳过不需要重试，失败需要。
+        <b>错误文案必须可操作</b>（如"运行哪条命令、放到哪个目录"），而不是笼统的"服务器内部错误"。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.22 播放器字幕显示 · 普通视频 vs 全景视频 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.22 · 播放器字幕显示 · 普通视频（原生 track）与全景视频（自研覆盖层）对照</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">PLAYER</span><h1>字幕显示</h1>
+        <span class="sub">两类播放器的实现路径完全不同，这是本功能最大的技术差异点</span>
+      </div>
+
+      <div class="duo">
+        <!-- 普通视频 -->
+        <div class="col">
+          <div class="col-tag">A · 普通视频 — 浏览器原生 &lt;track&gt;</div>
+          <div class="plain-player">
+            <div class="plain-scene"></div>
+            <div class="sub-layer" style="bottom:52px">
+              <div class="sub-line">
+                <span class="sub-text" style="font-size:17px">那天的风特别大，帽子差点被吹跑。</span>
+              </div>
+            </div>
+            <div class="ctl-mini">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+              <span>01:12</span><span style="color:var(--player-dim)">/ 05:41</span>
+              <div class="bar"><i></i></div>
+              <span style="color:var(--player-dim)">2.0×</span>
+              <button class="cc-btn">CC</button>
+            </div>
+          </div>
+          <div style="font-size:11.5px; color:var(--text2); line-height:1.8; margin-top:11px">
+            直接使用 <span class="mono">&lt;track kind="subtitles"&gt;</span>，语言切换 = 切轨，由浏览器渲染。
+            工程量小（约 0.5 天）；字幕样式受浏览器控制（可有限定制）。
+            单语显示；浏览器会记住上次选择的语言。
+          </div>
+        </div>
+
+        <!-- 全景视频 -->
+        <div class="col">
+          <div class="col-tag">B · 全景视频 — 自研 DOM 覆盖层（原生 track 不生效）</div>
+          <div class="plain-player" style="background:radial-gradient(120% 90% at 62% 30%, #2c3a44 0%, #1d262e 42%, #14181d 100%)">
+            <div class="pano-scene" style="position:absolute; inset:0; background:transparent"></div>
+            <div class="sub-layer" style="bottom:52px">
+              <div class="sub-line">
+                <span class="sub-text" style="font-size:17px">那天的风特别大，帽子差点被吹跑。</span>
+              </div>
+            </div>
+            <div class="ctl-mini">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+              <span>01:12</span><span style="color:var(--player-dim)">/ 05:41</span>
+              <div class="bar"><i></i></div>
+              <span style="color:var(--player-dim)">视角 132°</span>
+              <button class="cc-btn on">中文</button>
+            </div>
+          </div>
+          <div style="font-size:11.5px; color:var(--text2); line-height:1.8; margin-top:11px">
+            视频是 WebGL 球面纹理，<span class="mono">&lt;track&gt;</span> 完全不生效。需自研：解析 VTT →
+            按 <span class="mono">currentTime</span> 渲染 DOM 覆盖层 → 提供「位置 / 字号 / 背景条」三个开关。
+            工程量 2 天，且需逐设备验证（桌面 + 手机陀螺仪 + VR）。
+          </div>
+        </div>
+      </div>
+
+      <div class="split-note">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>全景字幕的三个开关（建议新增，T-8）</b>：① <b>位置</b> —— 底部居中 / 跟随视角（抬头时字幕仍可见）/ 可拖拽；
+        ② <b>字号</b> —— 三档，VR 或远距离观看需要更大字号；③ <b>背景条</b> —— 默认开，避免雪景、天空等浅色画面上白字不可读。
+        这三项写入用户偏好（<span class="mono">ui-prefs</span>，注意整行替换语义：必须先读全量再合并写回）。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.23 字幕句列表与编辑浮层 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.23 · 字幕编辑浮层 · 句列表 + 就地编辑 + 整体偏移校正</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">EDIT</span><h1>字幕编辑</h1>
+        <span class="sub">ASR 必然有错字；不能改则功能价值折半</span>
+      </div>
+
+      <div class="overlay-stage">
+        <div class="overlay-scrim"></div>
+
+        <div class="floating" style="left:120px; top:34px; width:760px;">
+          <div class="fl-head">
+            <span class="grip"><svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg></span>
+            <h3>字幕编辑 · 洱海日落延时.mp4</h3>
+            <div class="spacer"></div>
+            <button class="icon-btn"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+
+          <div class="toolbar2">
+            <div class="seg">
+              <button class="sg on">中文</button>
+              <button class="sg">English</button>
+            </div>
+            <div class="spacer"></div>
+            <div class="offset-wrap">
+              <span>整体偏移</span>
+              <input class="slider" type="range" min="-50" max="50" value="8" />
+              <span class="offset-val">+0.8s</span>
+              <button class="mini-btn" style="padding:3px 9px; font-size:11px">撤销</button>
+            </div>
+          </div>
+
+          <div class="cues">
+            <div class="cue">
+              <span class="cue-t">00:49.2 → 00:51.8</span>
+              <span class="cue-x">你看这个角度，太阳正好落在山脊上。</span>
+              <span class="cue-a">
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+              </span>
+            </div>
+
+            <!-- 就地编辑态 -->
+            <div class="cue on">
+              <span class="cue-t">00:52.0 → 00:55.6</span>
+              <span class="cue-input">
+                <input value="囡囡快看，火烧云出来了。" />
+                <span class="cue-hint">
+                  <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>
+                  回车保存
+                </span>
+              </span>
+            </div>
+
+            <div class="cue">
+              <span class="cue-t">00:56.0 → 00:58.4</span>
+              <span class="cue-x">太漂亮了，我拍一段延时。</span>
+              <span class="cue-a">
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+              </span>
+            </div>
+
+            <div class="cue">
+              <span class="cue-t">01:02.8 → 01:05.1</span>
+              <span class="cue-x">风有点大，三脚架稳不稳？</span>
+              <span class="cue-a">
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+              </span>
+            </div>
+
+            <div class="cue">
+              <span class="cue-t">01:05.3 → 01:08.9</span>
+              <span class="cue-x">稳的，压了石头。</span>
+              <span class="cue-a">
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+              </span>
+            </div>
+
+            <div class="cue">
+              <span class="cue-t">01:12.5 → 01:15.2</span>
+              <span class="cue-x">那天的风特别大，帽子差点被吹跑。</span>
+              <span class="cue-a">
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+              </span>
+            </div>
+
+            <div class="cue">
+              <span class="cue-t">01:16.0 → 01:19.4</span>
+              <span class="cue-x">哈哈哈，你看你这个头发。</span>
+              <span class="cue-a">
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+              </span>
+            </div>
+          </div>
+
+          <div class="fl-foot">
+            <span class="note">187 句 · 已修改 3 处 · 修改将同步更新字幕文件</span>
+            <div class="spacer"></div>
+            <button class="btn">导出 SRT</button>
+            <button class="btn primary">完成</button>
+          </div>
+        </div>
+
+        <!-- 右侧说明 -->
+        <div style="position:absolute; right:44px; top:80px; width:330px; background:rgba(244,241,237,.94); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px 18px; box-shadow:var(--shadow-card);">
+          <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--text3); margin-bottom:10px;">EDIT NOTES</div>
+          <div style="font-size:12.5px; color:var(--text2); line-height:1.85">
+            <div>· 双击文本就地编辑，回车保存，Esc 取消</div>
+            <div>· 选中行后 <span class="mono">↑↓</span> 微调起始时间、<span class="mono">Shift+↑↓</span> 调结束时间（步长 0.1 秒）</div>
+            <div>· <b style="font-weight:500;color:var(--text)">整体偏移</b>修正的是 ASR 的系统性时间偏差（全片统一平移），是最常用的一键操作；改错可撤销</div>
+            <div>· 相邻两句可合并、光标处可拆分（ASR 断句不理想时）</div>
+            <div>· 编辑只改你的字幕文件，不重跑识别、不动视频</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.24 导入字幕对话框 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.24 · 导入外部字幕 · 对话框（"外挂"的本义：字幕可替换）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">IMPORT</span><h1>导入字幕</h1>
+        <span class="sub">许多用户手里已有字幕文件；导入轨优先于机器识别轨</span>
+      </div>
+
+      <div style="display:flex; gap:22px; align-items:flex-start">
+        <div class="dlg">
+          <div class="dlg-head">
+            <h3>导入字幕文件</h3>
+            <div class="spacer"></div>
+            <button class="icon-btn"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          </div>
+          <div class="dlg-body">
+            <div class="drop">
+              <div class="drop-ic">
+                <svg class="ic" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V5M8.5 8.5L12 5l3.5 3.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+              </div>
+              <div class="drop-t">拖入 .srt 或 .vtt 文件</div>
+              <div class="drop-d">或点击选择文件 · 单文件上限 2 MB / 10000 句</div>
+            </div>
+
+            <div class="fl-row">
+              <label>字幕语言</label>
+              <div class="ckrow">
+                <label class="rk"><input type="radio" name="il" checked /> 中文（简体）</label>
+                <label class="rk"><input type="radio" name="il" /> English</label>
+                <label class="rk"><input type="radio" name="il" /> 其它…</label>
+              </div>
+            </div>
+
+            <div class="fl-row">
+              <label>刻度基准 <span style="color:var(--text3)">（文件内时间戳按什么基准写入）</span></label>
+              <div class="ckrow">
+                <label class="rk"><input type="radio" name="ib" checked /> 视频时间轴（常用）</label>
+                <label class="rk"><input type="radio" name="ib" /> 音频时间轴（导入后自动偏移）</label>
+              </div>
+            </div>
+
+            <div class="warnbox">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 3l9.5 16.5h-19z"/><path d="M12 10v4M12 17h.01"/></svg>
+              <span>当前已有中文轨（机器识别 · 187 句）。导入后将<b>替换显示优先级</b>：外部字幕优先，
+              机器轨仍保留（可在轨列表中切回）。</span>
+            </div>
+          </div>
+          <div class="dlg-foot">
+            <span style="font-size:11.5px;color:var(--text3)">支持 UTF-8 / GBK 编码自动识别</span>
+            <div class="spacer"></div>
+            <button class="btn">取消</button>
+            <button class="btn primary">导入</button>
+          </div>
+        </div>
+
+        <div style="flex:1">
+          <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px 18px; box-shadow:var(--shadow-card);">
+            <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--text3); margin-bottom:10px;">VALIDATION</div>
+            <div style="font-size:12.5px; color:var(--text2); line-height:1.85">
+              <div>· 格式解析失败 → 精确到行号：<span class="mono">expected "--&gt;" at line 42</span></div>
+              <div>· 时间轴超出视频时长 → 警告但允许（用户可能有意）</div>
+              <div>· 同语言已有轨 → 覆盖确认，旧轨保留可切回</div>
+              <div>· 编码自动识别（UTF-8 / GBK / BOM）—— 中文字幕常见 GBK 导出</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
