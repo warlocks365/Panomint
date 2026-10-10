@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 原型 · 视频热点回忆 — 详情页功能块与浮层</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#e9e4de; --surface:#f4f1ed; --surface2:#efebe5; --deep:#e3ded7;
+    --border:#ddd8d0; --text:#41403c; --text2:#7d7a73; --text3:#a5a29a;
+    --primary:#4a5a6a; --primary-hover:#3d4b58; --primary-soft:rgba(143,163,173,.16);
+    --danger:#b0685c; --success:#6e8a72; --oat:#c4a57a;
+    --player:#14181d; --player-text:#f2f5f8; --player-dim:#9aa7b4;
+    --shadow-card:0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift:0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#ded9d2; font-family:var(--font); color:var(--text); font-weight:300; letter-spacing:.01em; padding:28px 0 48px; }
+  .canvas { width:1440px; margin:0 auto; }
+  .frame { background:var(--bg); border-radius:18px; overflow:hidden; box-shadow:var(--shadow-card); margin-bottom:40px; }
+  .view-tag { font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text3); padding:14px 36px 0; }
+  .page { padding:26px 36px 40px; }
+  .ph { display:flex; align-items:baseline; gap:12px; margin-bottom:22px; }
+  .ph .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--text3); }
+  .ph h1 { font-size:16px; font-weight:500; letter-spacing:.1em; }
+  .ph .sub { font-size:12px; color:var(--text2); }
+  .ph .spacer { flex:1; }
+
+  /* ============ 通用件 ============ */
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 15px; border-radius:var(--r-md); font-size:13px; font-family:var(--font); cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--text); transition:all .45s cubic-bezier(.32,.72,0,1); }
+  .btn:hover { background:var(--surface2); }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .btn.primary:hover { background:var(--primary-hover); }
+  .btn.danger { color:var(--danger); border-color:rgba(176,104,92,.42); background:transparent; }
+  .icon-btn { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; border:1px solid transparent; background:transparent; color:var(--text2); cursor:pointer; transition:all .35s; }
+  .icon-btn:hover { background:var(--surface2); color:var(--text); }
+  .mini-btn { display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:12px; font-family:var(--font); cursor:pointer; transition:all .35s; }
+  .mini-btn:hover { background:var(--surface2); }
+  .mini-btn.prime { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .mono { font-family:var(--mono); }
+  .ic { display:inline-flex; flex:none; }
+
+  /* ============ 舞台布局 ============ */
+  .stage { display:flex; gap:20px; align-items:stretch; }
+  .player { flex:1; background:var(--player); border-radius:var(--r-lg); position:relative; overflow:hidden; height:560px; }
+  .pano-scene { position:absolute; inset:0; background:
+      radial-gradient(120% 90% at 62% 30%, #2c3a44 0%, #1d262e 42%, #14181d 100%);
+    }
+  .pano-scene::before { content:""; position:absolute; left:-6%; right:-6%; bottom:84px; height:210px;
+    background:linear-gradient(178deg, rgba(154,167,180,.20) 0%, rgba(74,90,106,.28) 46%, rgba(20,24,29,0) 100%);
+    clip-path:polygon(0 62%, 9% 40%, 17% 55%, 27% 22%, 38% 48%, 50% 30%, 62% 52%, 74% 26%, 86% 50%, 100% 34%, 100% 100%, 0 100%);
+  }
+  .pano-sun { position:absolute; left:64%; top:26%; width:74px; height:74px; border-radius:50%;
+    background:radial-gradient(circle at 42% 40%, rgba(233,222,203,.92), rgba(196,165,122,.42) 58%, rgba(196,165,122,0) 72%); }
+  .player-topbar { position:absolute; top:0; left:0; right:0; padding:14px 16px; display:flex; align-items:center; gap:10px; background:linear-gradient(180deg, rgba(20,24,29,.72), rgba(20,24,29,0)); }
+  .p-chip { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 11px; border-radius:999px;
+    background:rgba(230,235,240,.10); border:1px solid rgba(230,235,240,.14); color:var(--player-text); font-size:12px; backdrop-filter:blur(6px); }
+  .player-topbar .spacer { flex:1; }
+  .p-btn { width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%;
+    background:rgba(230,235,240,.10); border:1px solid rgba(230,235,240,.14); color:var(--player-text); cursor:pointer; }
+
+  /* 控制条 + 时间轴回忆标记 */
+  .controls { position:absolute; left:0; right:0; bottom:0; padding:12px 16px 14px; background:linear-gradient(0deg, rgba(20,24,29,.86), rgba(20,24,29,0)); }
+  .track { position:relative; height:4px; border-radius:2px; background:rgba(230,235,240,.18); margin:16px 0 10px; }
+  .track .played { position:absolute; left:0; top:0; bottom:0; width:26%; border-radius:2px; background:rgba(230,235,240,.86); }
+  .track .head { position:absolute; left:26%; top:50%; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.4); }
+  /* 时间轴上的回忆标记：点 = 竖线圆头；片段 = 色块区间 */
+  .mk { position:absolute; bottom:6px; width:3px; height:11px; border-radius:2px; background:var(--oat); }
+  .mkclip { position:absolute; bottom:6px; height:5px; border-radius:3px; background:rgba(196,165,122,.72); }
+  .ctl-row { display:flex; align-items:center; gap:14px; color:var(--player-text); font-family:var(--mono); font-size:12px; }
+  .ctl-row .spacer { flex:1; }
+  .ctl-row .dim { color:var(--player-dim); }
+
+  /* ============ 信息面板 ============ */
+  .panel { width:486px; flex:none; background:var(--surface); border-radius:var(--r-lg); padding:20px 22px 18px; box-shadow:var(--shadow-card); display:flex; flex-direction:column; }
+  .p-head { display:flex; align-items:flex-start; gap:10px; margin-bottom:16px; }
+  .p-head h2 { font-size:15.5px; font-weight:500; letter-spacing:.02em; line-height:1.35; }
+  .p-head .p-meta { margin-top:4px; font-family:var(--mono); font-size:11px; color:var(--text2); letter-spacing:.02em; }
+  .p-head .spacer { flex:1; }
+  .facts { border:1px solid var(--border); border-radius:var(--r-md); background:#faf8f5; padding:11px 14px; margin-bottom:16px; }
+  .frow { display:flex; gap:12px; font-size:12.5px; line-height:2; }
+  .frow .k { width:62px; flex:none; color:var(--text3); }
+  .frow .v { color:var(--text); }
+  .frow .v .dash { color:var(--text3); }
+
+  .blk { padding-top:14px; margin-top:2px; border-top:1px solid var(--border); }
+  .blk-head { display:flex; align-items:center; gap:9px; margin-bottom:11px; }
+  .blk-head h3 { font-size:13px; font-weight:500; letter-spacing:.06em; }
+  .blk-head .cnt { font-family:var(--mono); font-size:10.5px; color:var(--text3); border:1px solid var(--border); border-radius:999px; padding:1px 7px; }
+  .blk-head .spacer { flex:1; }
+  .blk-note { font-size:11.5px; color:var(--text3); margin:-4px 0 9px; }
+
+  .tagchips { display:flex; flex-wrap:wrap; gap:7px; }
+  .tchip { display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:999px; background:var(--surface2); border:1px solid var(--border); font-size:12px; color:var(--text); }
+  .tchip .dot { width:5px; height:5px; border-radius:50%; background:var(--oat); }
+  .tchip .pend { font-size:9.5px; color:var(--oat); border:1px solid var(--oat); border-radius:4px; padding:0 3px; line-height:1.4; }
+  .starrow { display:flex; align-items:center; gap:5px; }
+
+  /* ============ 回忆块（本功能核心） ============ */
+  .blk--moment { position:relative; }
+  .blk--moment .blk-head h3 { display:inline-flex; align-items:center; gap:6px; }
+  .blk--moment .blk-head h3 .ic { color:var(--oat); }
+  .state-switch { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; margin-right:2px; }
+  .state-switch .sw { appearance:none; border:0; background:var(--surface); color:var(--text2); font-family:var(--font); font-size:11.5px; padding:4px 10px; cursor:pointer; border-right:1px solid var(--border); }
+  .state-switch .sw:last-child { border-right:0; }
+  .state-switch .sw.on { background:var(--primary); color:#eef1f4; }
+
+  .moments { display:flex; flex-wrap:wrap; gap:8px 7px; max-height:66px; overflow:hidden; }
+  .mc { display:inline-flex; align-items:center; gap:7px; height:30px; padding:0 12px; border-radius:999px;
+    background:var(--surface2); border:1px solid var(--border); font-size:12.5px; color:var(--text); cursor:pointer; transition:all .4s cubic-bezier(.32,.72,0,1); position:relative; }
+  .mc:hover { border-color:#c9c2b8; }
+  .mc .ic { color:var(--text2); }
+  .mc .tm { font-family:var(--mono); font-size:10.5px; color:var(--text3); }
+  .mc.on { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .mc.on .ic, .mc.on .tm { color:rgba(238,241,244,.78); }
+  .mc .act { display:inline-flex; align-items:center; gap:3px; margin-left:1px; padding-left:6px; border-left:1px solid var(--border); color:var(--text2); }
+  .mc.on .act { border-left-color:rgba(238,241,244,.3); color:rgba(238,241,244,.82); }
+  .mc .act .btnx { width:17px; height:17px; display:inline-flex; align-items:center; justify-content:center; border-radius:5px; cursor:pointer; }
+  .mc .act .btnx:hover { background:rgba(65,64,60,.10); }
+  .mc .act .btnx.danger:hover { background:rgba(176,104,92,.16); color:var(--danger); }
+  .more-row { display:flex; align-items:center; gap:7px; margin-top:9px; font-size:11.5px; color:var(--text2); }
+  .more-row .ln { flex:1; height:1px; background:var(--border); }
+
+  /* 悬停浮层 */
+  .hovercard { position:absolute; z-index:6; width:292px; background:#fbf9f6; border:1px solid var(--border); border-radius:var(--r-md);
+    box-shadow:var(--shadow-lift); padding:12px 14px 13px; }
+  .hovercard .hc-top { display:flex; align-items:center; gap:7px; margin-bottom:7px; }
+  .hovercard .hc-top .ic { color:var(--oat); }
+  .hovercard .hc-title { font-size:13px; font-weight:500; }
+  .hovercard .hc-meta { font-family:var(--mono); font-size:10.5px; color:var(--text3); letter-spacing:.02em; margin-bottom:8px; }
+  .hovercard .hc-desc { font-size:12px; color:var(--text2); line-height:1.72; }
+  .hovercard .hc-foot { margin-top:9px; padding-top:8px; border-top:1px dashed var(--border); font-size:11px; color:var(--text3); display:flex; align-items:center; gap:6px; }
+
+  /* 删除态确认条 */
+  .confirmbar { margin-top:11px; border:1px solid rgba(176,104,92,.42); background:rgba(176,104,92,.07); border-radius:var(--r-md); padding:11px 13px; display:flex; align-items:center; gap:10px; }
+  .confirmbar .cb-txt { font-size:12px; color:var(--text); flex:1; line-height:1.6; }
+  .confirmbar .cb-txt b { font-weight:500; }
+  .checkline { display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--text2); }
+  .checkline input { accent-color:var(--primary); width:13px; height:13px; }
+
+  .actions { display:flex; gap:9px; margin-top:auto; padding-top:16px; border-top:1px solid var(--border); }
+
+  /* ============ 三态对比 ============ */
+  .tri { display:flex; gap:18px; }
+  .tri .col { flex:1; background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow-card); padding:18px 18px 16px; }
+  .tri .col-tag { font-family:var(--mono); font-size:11px; letter-spacing:.1em; color:var(--text3); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+  .tri .col-tag .hint { font-family:var(--font); letter-spacing:0; color:var(--text2); font-size:11.5px; }
+  .tri .col h4 { font-size:13px; font-weight:500; letter-spacing:.06em; margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+  .tri .col .colsub { font-size:11.5px; color:var(--text3); margin-bottom:12px; }
+  .tri .moments { max-height:none; }
+
+  /* ============ 浮层（添加/编辑 · 列表） ============ */
+  .overlay-stage { position:relative; height:640px; border-radius:var(--r-lg); overflow:hidden; background:
+      radial-gradient(120% 90% at 58% 26%, #2c3a44 0%, #1d262e 44%, #14181d 100%); }
+  .overlay-scrim { position:absolute; inset:0; background:rgba(20,24,29,.34); }
+  .floating { position:absolute; background:var(--surface); border-radius:16px; box-shadow:0 2px 6px rgba(20,24,29,.22), 0 28px 70px rgba(20,24,29,.42); }
+  .fl-head { display:flex; align-items:center; gap:10px; padding:14px 18px 12px; border-bottom:1px solid var(--border); cursor:move; user-select:none; }
+  .fl-head .grip { color:var(--text3); }
+  .fl-head h3 { font-size:13.5px; font-weight:500; letter-spacing:.06em; }
+  .fl-head .spacer { flex:1; }
+  .fl-body { padding:16px 18px 6px; }
+  .fl-foot { display:flex; align-items:center; gap:10px; padding:12px 18px 16px; }
+  .fl-foot .spacer { flex:1; }
+  .fl-foot .note { font-size:11px; color:var(--text3); }
+
+  .seg { display:inline-flex; border:1px solid var(--border); border-radius:9px; overflow:hidden; }
+  .seg .sg { appearance:none; border:0; background:var(--surface); color:var(--text2); font-family:var(--font); font-size:12.5px; padding:7px 15px; cursor:pointer; border-right:1px solid var(--border); display:inline-flex; align-items:center; gap:6px; }
+  .seg .sg:last-child { border-right:0; }
+  .seg .sg.on { background:var(--primary); color:#eef1f4; }
+  .seg .sg.on .ic { color:rgba(238,241,244,.8); }
+
+  .field { margin-bottom:13px; }
+  .field > label { display:block; font-size:11.5px; color:var(--text2); margin-bottom:6px; letter-spacing:.03em; }
+  .field .inrow { display:flex; align-items:center; gap:8px; }
+  .inp { flex:1; height:36px; padding:0 12px; border:1px solid var(--border); border-radius:9px; background:#fbf9f6; font-family:var(--font); font-size:13px; color:var(--text); outline:none; }
+  .inp:focus { border-color:#b9c3cb; background:#fff; }
+  .inp.mono { font-family:var(--mono); font-size:12.5px; letter-spacing:.04em; }
+  .inp.wfix { width:112px; flex:none; text-align:center; }
+  .tarea { width:100%; min-height:74px; padding:10px 12px; border:1px solid var(--border); border-radius:9px; background:#fbf9f6; font-family:var(--font); font-size:12.5px; line-height:1.7; color:var(--text); outline:none; resize:none; }
+  .counter { font-family:var(--mono); font-size:10.5px; color:var(--text3); text-align:right; margin-top:4px; }
+  .counter b { font-weight:400; color:var(--text2); }
+  .tip { font-size:11.5px; color:var(--text2); margin-top:6px; display:flex; align-items:center; gap:6px; }
+  .tip.warn { color:var(--danger); }
+  .range-line { display:flex; align-items:center; gap:7px; }
+  .range-line .tilde { color:var(--text3); font-family:var(--mono); }
+  .slider { -webkit-appearance:none; appearance:none; flex:1; height:4px; border-radius:2px; background:var(--deep); outline:none; }
+  .slider::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--primary); border:2.5px solid #f4f1ed; box-shadow:0 1px 4px rgba(65,64,60,.28); cursor:pointer; }
+  .pano-extra { border:1px dashed var(--border); border-radius:var(--r-md); padding:12px 13px 6px; margin-bottom:13px; background:rgba(196,165,122,.06); }
+  .pano-extra .pe-head { display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--text2); margin-bottom:10px; }
+  .pano-extra .pe-head .ic { color:var(--oat); }
+  .pano-extra .pe-head .spacer { flex:1; }
+  .quad { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+
+  /* 列表浮层 */
+  .lf-list { padding:6px 10px 10px; max-height:388px; overflow:auto; }
+  .lf-group { font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--text3); padding:12px 8px 7px; display:flex; align-items:center; gap:8px; }
+  .lf-group .ln { flex:1; height:1px; background:var(--border); }
+  .lf-group .ic { color:var(--oat); }
+  .lf-row { display:flex; align-items:flex-start; gap:11px; padding:10px 8px; border-radius:var(--r-md); transition:background .3s; }
+  .lf-row:hover { background:var(--surface2); }
+  .lf-row .lf-time { font-family:var(--mono); font-size:11.5px; color:var(--text2); width:104px; flex:none; padding-top:2px; cursor:pointer; }
+  .lf-row .lf-main { flex:1; min-width:0; }
+  .lf-row .lf-t { display:flex; align-items:center; gap:7px; font-size:13px; }
+  .lf-row .lf-t .ic { color:var(--text3); }
+  .lf-row .lf-d { font-size:11.5px; color:var(--text2); margin-top:4px; line-height:1.66; }
+  .lf-row .lf-pano { font-family:var(--mono); font-size:10px; color:var(--text3); margin-top:4px; }
+  .lf-row .lf-act { display:flex; align-items:center; gap:4px; flex:none; }
+  .lf-row .lf-act .btnx { width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; border-radius:7px; border:1px solid transparent; background:transparent; color:var(--text2); cursor:pointer; }
+  .lf-row .lf-act .btnx:hover { background:var(--surface); border-color:var(--border); color:var(--text); }
+  .lf-row .lf-act .btnx.danger:hover { color:var(--danger); border-color:rgba(176,104,92,.42); }
+  .lf-row.ai { background:rgba(196,165,122,.09); }
+  .lf-row.ai .lf-t .ic { color:var(--oat); }
+  .ai-badge { font-size:9.5px; color:var(--oat); border:1px solid var(--oat); border-radius:4px; padding:0 4px; line-height:1.5; }
+  .accept { padding:4px 10px; border-radius:7px; border:1px solid var(--primary); background:var(--primary); color:#eef1f4; font-size:11.5px; font-family:var(--font); cursor:pointer; }
+  .ignore { padding:4px 10px; border-radius:7px; border:1px solid var(--border); background:transparent; color:var(--text2); font-size:11.5px; font-family:var(--font); cursor:pointer; }
+  .lf-filter { display:flex; align-items:center; gap:8px; padding:0 18px 12px; border-bottom:1px solid var(--border); }
+  .lf-filter .spacer { flex:1; }
+  .seg.sm .sg { padding:4px 10px; font-size:11.5px; }
+
+  .anno { display:flex; align-items:flex-start; gap:9px; margin:16px 0 0; padding:12px 15px; background:rgba(74,90,106,.055); border:1px solid var(--border); border-radius:var(--r-md); }
+  .anno .ic { color:var(--primary); margin-top:1px; }
+  .anno p { font-size:12.5px; color:var(--text2); line-height:1.75; }
+  .anno p b { font-weight:500; color:var(--text); }
+  .anno .mono { font-family:var(--mono); font-size:11px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ================================================================= -->
+  <!-- VIEW.11 详情页 · 跳转态（桌面端完整布局） -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.11 · /player/:id — 视频详情页（桌面端）· 回忆功能块 · 跳转态</p>
+    <div class="page">
+      <div class="stage">
+
+        <!-- 播放器 -->
+        <div class="player">
+          <div class="pano-scene"><div class="pano-sun"></div></div>
+          <div class="player-topbar">
+            <button class="p-btn" title="返回">
+              <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+            </button>
+            <span class="p-chip">8K · 原片</span>
+            <span class="p-chip">陀螺仪</span>
+            <div class="spacer"></div>
+            <button class="p-btn" title="全屏">
+              <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            </button>
+          </div>
+          <div class="controls">
+            <div class="track">
+              <div class="played"></div>
+              <!-- 回忆标记：点（3 个）+ 片段（1 段） -->
+              <span class="mk" style="left:15.6%"></span>
+              <span class="mk" style="left:41.2%"></span>
+              <span class="mk" style="left:88.3%"></span>
+              <span class="mkclip" style="left:31.4%; width:11.2%"></span>
+              <div class="head"></div>
+            </div>
+            <div class="ctl-row">
+              <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+              <span>00:53</span><span class="dim">/ 03:24</span>
+              <div class="spacer"></div>
+              <span class="dim">视角 132° · FOV 78</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 信息面板 -->
+        <div class="panel">
+          <div class="p-head">
+            <div>
+              <h2>洱海日落延时.mp4</h2>
+              <div class="p-meta">全景视频 · 03:24 · 1.2 GB · H.265</div>
+            </div>
+            <div class="spacer"></div>
+            <button class="icon-btn" title="关闭">
+              <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+
+          <div class="facts">
+            <div class="frow"><span class="k">拍摄时间</span><span class="v mono">2026-08-14 18:32</span></div>
+            <div class="frow"><span class="k">拍摄地</span><span class="v">云南 · 大理 · 洱海生态廊道</span></div>
+            <div class="frow"><span class="k">尺寸</span><span class="v mono">7680 × 3840</span></div>
+          </div>
+
+          <div class="blk">
+            <div class="blk-head">
+              <h3>标签</h3>
+              <div class="spacer"></div>
+              <button class="mini-btn">编辑标签</button>
+            </div>
+            <div class="tagchips">
+              <span class="tchip">大理</span>
+              <span class="tchip">日落</span>
+              <span class="tchip"><span class="dot"></span>延时摄影 <span class="pend">待</span></span>
+            </div>
+          </div>
+
+          <!-- 回忆块 · 跳转态（本功能核心） -->
+          <div class="blk blk--moment">
+            <div class="blk-head">
+              <h3>
+                <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                回忆
+              </h3>
+              <span class="cnt">4</span>
+              <div class="spacer"></div>
+              <div class="state-switch">
+                <button class="sw on">跳转</button>
+                <button class="sw">编辑</button>
+                <button class="sw">删除</button>
+              </div>
+              <button class="mini-btn prime">
+                <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                添加
+              </button>
+              <button class="mini-btn" title="全部回忆">
+                <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+              </button>
+            </div>
+
+            <div class="moments">
+              <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">00:32</span>开场海浪</span>
+              <span class="mc on"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg><span class="tm">01:04–01:27</span>渔船入镜
+                <span class="act">
+                  <span class="btnx" title="循环播放中（再次点击关闭）">
+                    <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8M20 12a8 8 0 0 1-13.66 5.66L4 16"/><path d="M20 4v4h-4M4 20v-4h4"/></svg>
+                  </span>
+                </span>
+              </span>
+              <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">02:16</span>火烧云极盛</span>
+              <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">03:01</span>收尾</span>
+            </div>
+            <div class="more-row"><span>4 个回忆 · 单击跳转，片段可循环</span><span class="ln"></span><span class="mono">+0</span></div>
+
+            <!-- 悬停浮层（示意：鼠标悬停在「渔船入镜」上） -->
+            <div class="hovercard" style="left:34px; top:96px;">
+              <div class="hc-top">
+                <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                <span class="hc-title">渔船入镜</span>
+              </div>
+              <div class="hc-meta">回忆片段 · 01:04 – 01:27 · 共 23 秒</div>
+              <div class="hc-desc">三艘渔船从左向右穿过画面，正好落在夕阳的反光带上。这一段是整支延时的转折点。</div>
+              <div class="hc-foot">
+                <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg>
+                视角 132° · FOV 78 · 点击跳转并循环
+              </div>
+            </div>
+          </div>
+
+          <div class="blk">
+            <div class="blk-head">
+              <h3>评分</h3>
+              <div class="spacer"></div>
+              <span class="mono" style="font-size:11px;color:var(--text3)">4 / 5</span>
+            </div>
+            <div class="starrow">
+              <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" style="color:var(--primary)"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.5l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z"/></svg>
+              <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" style="color:var(--primary)"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.5l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z"/></svg>
+              <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" style="color:var(--primary)"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.5l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z"/></svg>
+              <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="currentColor" style="color:var(--primary)"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.5l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z"/></svg>
+              <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5L12 17.5l-5.8 3.05 1.1-6.5-4.7-4.6 6.5-.95z"/></svg>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="btn">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M12 3v13M8 7l4-4 4 4"/></svg>
+              分享
+            </button>
+            <button class="btn">收藏</button>
+            <button class="btn danger">删除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="anno">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>时间轴上的回忆标记</b>（播放器进度条上方的燕麦色竖线 = 回忆点、色块 = 回忆片段）为本次新增建议：
+        让"哪里有回忆"在播放器上直接可见，无需打开面板。<span class="mono">点击标记 = 跳转，悬停 = 显示标题</span>。此项不在原需求内，供审核决定取舍。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.12 回忆块三态对比 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.12 · 回忆功能块 · 三态交互对比（跳转 / 编辑 / 删除）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">STATE</span><h1>三态</h1>
+        <span class="sub">默认跳转态；编辑态与删除态为临时态，Esc 或点击空白处返回</span>
+      </div>
+
+      <div class="tri">
+        <!-- 跳转态 -->
+        <div class="col">
+          <div class="col-tag">STATE.01 <span class="hint">默认</span></div>
+          <h4>
+            <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+            回忆 <span class="cnt" style="font-family:var(--mono);font-size:10.5px;color:var(--text3);border:1px solid var(--border);border-radius:999px;padding:1px 7px">4</span>
+          </h4>
+          <div class="colsub">单击 = 跳转（片段播完一次自动暂停）；⟳ 按钮 = 循环</div>
+          <div class="moments">
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">00:32</span>开场海浪</span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg><span class="tm">01:04–01:27</span>渔船入镜</span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">02:16</span>火烧云极盛</span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg><span class="tm">02:40–02:58</span>光线穿云</span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">03:01</span>收尾</span>
+          </div>
+          <div class="more-row"><span>+2 更多</span><span class="ln"></span><span class="mono">6 项</span></div>
+        </div>
+
+        <!-- 编辑态 -->
+        <div class="col">
+          <div class="col-tag">STATE.02 <span class="hint">临时</span></div>
+          <h4>
+            <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+            回忆 <span class="cnt" style="font-family:var(--mono);font-size:10.5px;color:var(--text3);border:1px solid var(--border);border-radius:999px;padding:1px 7px">4</span>
+          </h4>
+          <div class="colsub">每个胶囊尾部出现编辑图标，点击打开编辑浮层</div>
+          <div class="moments">
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">00:32</span>开场海浪
+              <span class="act"><span class="btnx"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></span></span>
+            </span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg><span class="tm">01:04–01:27</span>渔船入镜
+              <span class="act"><span class="btnx"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></span></span>
+            </span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">02:16</span>火烧云极盛
+              <span class="act"><span class="btnx"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></span></span>
+            </span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">03:01</span>收尾
+              <span class="act"><span class="btnx"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></span></span>
+            </span>
+          </div>
+          <div class="tip" style="margin-top:11px">
+            <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 8h.01M11 12h1v4h1"/><circle cx="12" cy="12" r="9"/></svg>
+            点击「编辑」切换；点击其它态或按 Esc 返回跳转态
+          </div>
+        </div>
+
+        <!-- 删除态 -->
+        <div class="col">
+          <div class="col-tag">STATE.03 <span class="hint">临时 · 含二次确认</span></div>
+          <h4>
+            <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+            回忆 <span class="cnt" style="font-family:var(--mono);font-size:10.5px;color:var(--text3);border:1px solid var(--border);border-radius:999px;padding:1px 7px">4</span>
+          </h4>
+          <div class="colsub">点击某条胶囊尾部的叉号，就地弹出确认条</div>
+          <div class="moments">
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">00:32</span>开场海浪
+              <span class="act"><span class="btnx danger"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+            </span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg><span class="tm">01:04–01:27</span>渔船入镜
+              <span class="act"><span class="btnx danger"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+            </span>
+            <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">02:16</span>火烧云极盛
+              <span class="act"><span class="btnx danger"><svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span></span>
+            </span>
+          </div>
+
+          <div class="confirmbar">
+            <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" style="color:var(--danger);margin-top:1px">
+              <path d="M12 3l9.5 16.5h-19z"/><path d="M12 10v4M12 17h.01"/>
+            </svg>
+            <div class="cb-txt">删除回忆片段 <b>「01:04–01:27 渔船入镜」</b>？此操作不可撤销。</div>
+            <button class="mini-btn">取消</button>
+            <button class="mini-btn" style="border-color:rgba(176,104,92,.42);color:var(--danger)">删除</button>
+          </div>
+          <label class="checkline" style="margin-top:9px">
+            <input type="checkbox" />
+            以后删除回忆时不再询问（可在设置中恢复）
+          </label>
+        </div>
+      </div>
+
+      <div class="anno">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>与原需求的差异（修正建议 R-4 / R-5）</b>：①「循环」拆成独立按钮，单击只做"看一遍"，
+        避免"再点一次想重看却被当成取消"的高频误操作；②二次确认的"不再询问"勾选放在确认条内（而非设置页全局开关），
+        且只作用于回忆标签删除，不会解除视频删除等危险操作的确认。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.13 添加 / 编辑浮层 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.13 · 添加 / 编辑回忆 · 可拖动浮层（全景视频形态）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">DIALOG</span><h1>添加回忆</h1>
+        <span class="sub">拖动标题栏移动 · Esc 关闭 · 打开定位到上次位置（越界自动回收）</span>
+      </div>
+
+      <div class="overlay-stage">
+        <div class="overlay-scrim"></div>
+
+        <div class="floating" style="left:96px; top:52px; width:520px;">
+          <div class="fl-head">
+            <span class="grip">
+              <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+            </span>
+            <h3>添加回忆</h3>
+            <div class="spacer"></div>
+            <button class="icon-btn">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+
+          <div class="fl-body">
+            <div class="field">
+              <label>类型</label>
+              <div class="seg">
+                <button class="sg on">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  回忆点
+                </button>
+                <button class="sg">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                  回忆片段
+                </button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>时间点</label>
+              <div class="inrow">
+                <input class="inp mono wfix" value="01:04" />
+                <button class="mini-btn">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg>
+                  取当前进度
+                </button>
+                <span class="tip" style="margin:0">
+                  <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 6v12M15 6v12"/></svg>
+                  输入后暂停并跳转
+                </span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>标题 <span style="color:var(--text3)">必填</span></label>
+              <input class="inp" value="渔船入镜" />
+              <div class="counter"><b>4</b> / 20</div>
+            </div>
+
+            <div class="field">
+              <label>描述 <span style="color:var(--text3)">选填 · 支持换行</span></label>
+              <textarea class="tarea">三艘渔船从左向右穿过画面，正好落在夕阳的反光带上。这一段是整支延时的转折点。</textarea>
+              <div class="counter"><b>41</b> / 200</div>
+            </div>
+
+            <div class="pano-extra">
+              <div class="pe-head">
+                <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/></svg>
+                全景视角（仅全景视频）
+                <div class="spacer"></div>
+                <button class="mini-btn">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg>
+                  取当前视角
+                </button>
+              </div>
+              <div class="quad">
+                <div class="field">
+                  <label>经度 <span class="mono" style="color:var(--text3)">lon</span></label>
+                  <input class="inp mono" value="132.4°" />
+                </div>
+                <div class="field">
+                  <label>纬度 <span class="mono" style="color:var(--text3)">lat</span></label>
+                  <input class="inp mono" value="-6.8°" />
+                </div>
+              </div>
+              <div class="field">
+                <label>视场角 FOV <span class="mono" style="color:var(--text3)">45 – 100</span></label>
+                <div class="range-line">
+                  <input class="slider" type="range" min="45" max="100" value="78" />
+                  <span class="mono" style="width:34px;text-align:right;font-size:12px">78</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="tip">
+              <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+              该视频时长 03:24 · 时间范围 0:00 – 3:24
+            </div>
+          </div>
+
+          <div class="fl-foot">
+            <span class="note">保存后可在详情页与列表浮层中随时编辑</span>
+            <div class="spacer"></div>
+            <button class="btn">取消</button>
+            <button class="btn primary">保存</button>
+          </div>
+        </div>
+
+        <!-- 右侧说明 -->
+        <div style="position:absolute; right:44px; top:96px; width:330px; background:rgba(244,241,237,.94); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px 18px; box-shadow:var(--shadow-card);">
+          <div style="font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--text3); margin-bottom:10px;">INTERACTION NOTES</div>
+          <div style="font-size:12.5px; color:var(--text2); line-height:1.85;">
+            <div>· 拖动仅限标题栏；弹窗位置不持久化，每次打开居中，越界自动回收</div>
+            <div>· 「取当前进度」按类型填入：点 = 当前时刻；片段 = 当前起算 23 秒（可在设置中改默认时长）</div>
+            <div>· 手动改时间后 <b style="font-weight:500">暂停并跳转</b>；非法值就地红字提示不跳转</div>
+            <div>· 类型从「点」切到「片段」时保留标题与描述，结束时间自动补 23 秒</div>
+            <div>· 移动端不做自由拖动，改为自底部升起的全宽抽屉</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.14 列表浮层 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.14 · 全部回忆 · 列表浮层（含 AI 建议分组）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">LIST</span><h1>全部回忆</h1>
+        <span class="sub">每行提供跳转 / 编辑 / 删除；AI 建议置顶分组，逐条采纳或忽略</span>
+      </div>
+
+      <div class="overlay-stage" style="height:600px">
+        <div class="overlay-scrim"></div>
+
+        <div class="floating" style="left:180px; top:34px; width:700px;">
+          <div class="fl-head">
+            <span class="grip">
+              <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>
+            </span>
+            <h3>全部回忆</h3>
+            <span class="mono" style="font-size:10.5px;color:var(--text3);margin-left:2px">洱海日落延时.mp4</span>
+            <div class="spacer"></div>
+            <button class="icon-btn">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+
+          <div class="lf-filter">
+            <div class="seg sm">
+              <button class="sg on">全部</button>
+              <button class="sg">回忆点</button>
+              <button class="sg">回忆片段</button>
+            </div>
+            <div class="spacer"></div>
+            <span class="tip" style="margin:0">
+              <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 6h16M6 12h12M8 18h8"/></svg>
+              时间可点击跳转
+            </span>
+          </div>
+
+          <div class="lf-list">
+            <div class="lf-group">
+              <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3l1.9 5.6L20 10l-5 3.6L16 20l-4-3.2L8 20l1-6.4L4 10l6.1-1.4z"/></svg>
+              AI 建议 <span style="font-family:var(--font);letter-spacing:0">· 2 条待确认</span>
+              <span class="ln"></span>
+            </div>
+
+            <div class="lf-row ai">
+              <span class="lf-time">00:18</span>
+              <div class="lf-main">
+                <div class="lf-t">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  晚霞开始染色 <span class="ai-badge">AI 建议</span>
+                  <span class="mono" style="font-size:10px;color:var(--text3)">置信度 0.83</span>
+                </div>
+                <div class="lf-d">音频能量与场景切换同时出现明显变化，可能是一段开场。</div>
+                <div class="lf-pano">视角 118.0° · -12.5° · FOV 75 · 依据：场景切换 + 音频峰值</div>
+              </div>
+              <div class="lf-act">
+                <button class="accept">采纳</button>
+                <button class="ignore">忽略</button>
+              </div>
+            </div>
+
+            <div class="lf-row ai">
+              <span class="lf-time">02:16 – 02:58</span>
+              <div class="lf-main">
+                <div class="lf-t">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                  光线穿云 <span class="ai-badge">AI 建议</span>
+                  <span class="mono" style="font-size:10px;color:var(--text3)">置信度 0.91</span>
+                </div>
+                <div class="lf-d">42 秒内画面亮度连续三次跃升，判定为高光段落。</div>
+                <div class="lf-pano">视角 96.2° · 4.0° · FOV 82 · 依据：亮度跃升 + 场景变化密集</div>
+              </div>
+              <div class="lf-act">
+                <button class="accept">采纳</button>
+                <button class="ignore">忽略</button>
+              </div>
+            </div>
+
+            <div class="lf-group">
+              手工回忆 <span style="font-family:var(--font);letter-spacing:0">· 4 条</span>
+              <span class="ln"></span>
+            </div>
+
+            <div class="lf-row">
+              <span class="lf-time">00:32</span>
+              <div class="lf-main">
+                <div class="lf-t">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  开场海浪
+                </div>
+                <div class="lf-d">镜头刚转过来的第一波浪，声音很干净。</div>
+                <div class="lf-pano">视角 12.0° · -3.2° · FOV 75</div>
+              </div>
+              <div class="lf-act">
+                <button class="btnx" title="跳转"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx" title="编辑"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+                <button class="btnx danger" title="删除"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </div>
+
+            <div class="lf-row">
+              <span class="lf-time">01:04 – 01:27</span>
+              <div class="lf-main">
+                <div class="lf-t">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                  渔船入镜
+                  <span class="mono" style="font-size:10px;color:var(--text3)">循环中</span>
+                </div>
+                <div class="lf-d">三艘渔船从左向右穿过画面，正好落在夕阳的反光带上。</div>
+                <div class="lf-pano">视角 132.4° · -6.8° · FOV 78</div>
+              </div>
+              <div class="lf-act">
+                <button class="btnx" title="跳转"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx" title="编辑"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+                <button class="btnx danger" title="删除"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </div>
+
+            <div class="lf-row">
+              <span class="lf-time">02:16</span>
+              <div class="lf-main">
+                <div class="lf-t">
+                  <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  火烧云极盛
+                </div>
+                <div class="lf-d">整片云被染成橙红，持续约 20 秒。</div>
+              </div>
+              <div class="lf-act">
+                <button class="btnx" title="跳转"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+                <button class="btnx" title="编辑"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/></svg></button>
+                <button class="btnx danger" title="删除"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="fl-foot">
+            <span class="note">共 6 条（2 条 AI 建议待确认）· 上限 50 条</span>
+            <div class="spacer"></div>
+            <button class="btn primary">
+              <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              添加回忆
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="anno">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>AI 建议是候选而非正式标签</b>：不占用 50 条上限、默认不写入用户数据，必须逐条「采纳」才转为正式回忆；
+        「忽略」的记录会保留（标记为已忽略），避免下次扫描重复推送同一个误报。置信度与判定依据一并展示，
+        让用户理解"它为什么觉得这里是回忆"——这是误报容忍度的关键设计。</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

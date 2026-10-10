@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 原型 · 视频热点回忆 — 搜索与分享</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#e9e4de; --surface:#f4f1ed; --surface2:#efebe5; --deep:#e3ded7;
+    --border:#ddd8d0; --text:#41403c; --text2:#7d7a73; --text3:#a5a29a;
+    --primary:#4a5a6a; --primary-hover:#3d4b58; --primary-soft:rgba(143,163,173,.16);
+    --danger:#b0685c; --success:#6e8a72; --oat:#c4a57a;
+    --player:#14181d; --player-text:#f2f5f8; --player-dim:#9aa7b4;
+    --shadow-card:0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift:0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#ded9d2; font-family:var(--font); color:var(--text); font-weight:300; letter-spacing:.01em; padding:28px 0 48px; }
+  .canvas { width:1440px; margin:0 auto; }
+  .frame { background:var(--bg); border-radius:18px; overflow:hidden; box-shadow:var(--shadow-card); margin-bottom:40px; }
+  .view-tag { font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text3); padding:14px 36px 0; }
+  .page { padding:26px 36px 40px; }
+  .ph { display:flex; align-items:baseline; gap:12px; margin-bottom:22px; }
+  .ph .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--text3); }
+  .ph h1 { font-size:16px; font-weight:500; letter-spacing:.1em; }
+  .ph .sub { font-size:12px; color:var(--text2); }
+  .ph .spacer { flex:1; }
+  .ic { display:inline-flex; flex:none; }
+  .mono { font-family:var(--mono); }
+
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 15px; border-radius:var(--r-md); font-size:13px; font-family:var(--font); cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--text); transition:all .45s cubic-bezier(.32,.72,0,1); }
+  .btn:hover { background:var(--surface2); }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .btn.primary:hover { background:var(--primary-hover); }
+  .mini-btn { display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:12px; font-family:var(--font); cursor:pointer; }
+  .mini-btn:hover { background:var(--surface2); }
+  .mini-btn.prime { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+
+  /* ============ 搜索页 ============ */
+  .headline { display:flex; align-items:baseline; gap:10px; margin-bottom:16px; }
+  .headline .q { font-size:19px; font-weight:500; letter-spacing:.02em; }
+  .headline .total { font-size:12.5px; color:var(--text2); }
+  .headline .spacer { flex:1; }
+  .headline .clear-all { font-size:12px; color:var(--text2); background:none; border:0; cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+  .schips { display:flex; align-items:center; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .schip { display:inline-flex; align-items:center; gap:7px; height:28px; padding:0 12px; border-radius:999px; border:1px solid var(--border); background:rgba(244,241,237,.72); font-size:12px; color:var(--text2); }
+  .schip .x { color:var(--text3); cursor:pointer; }
+  .fbar { display:flex; align-items:center; gap:22px; padding:11px 18px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); margin-bottom:24px; font-size:12.5px; color:var(--text2); }
+  .fbar .fgroup { display:inline-flex; align-items:center; gap:8px; }
+  .fbar .fsel { display:inline-flex; align-items:center; gap:6px; color:var(--text); }
+  .fbar .spacer { flex:1; }
+
+  .grp-head { display:flex; align-items:center; gap:9px; margin:0 0 13px; }
+  .grp-head h2 { font-size:13px; font-weight:500; letter-spacing:.06em; }
+  .grp-head .n { font-family:var(--mono); font-size:10.5px; color:var(--text3); border:1px solid var(--border); border-radius:999px; padding:1px 7px; }
+  .grp-head .spacer { flex:1; }
+  .grp-head .hint { font-size:11.5px; color:var(--text3); }
+  .grp { margin-bottom:26px; }
+
+  .mrows { display:flex; flex-direction:column; gap:8px; }
+  .mrow { display:flex; align-items:center; gap:13px; padding:12px 16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-md); box-shadow:var(--shadow-card); transition:box-shadow .4s cubic-bezier(.32,.72,0,1); }
+  .mrow:hover { box-shadow:var(--shadow-lift); }
+  .mrow .mkic { width:26px; height:26px; border-radius:8px; flex:none; display:inline-flex; align-items:center; justify-content:center; background:rgba(196,165,122,.15); color:var(--oat); }
+  .mrow .mr-main { flex:1; min-width:0; }
+  .mrow .mr-t { font-size:13.5px; display:flex; align-items:center; gap:8px; }
+  .mrow .mr-t mark { background:rgba(196,165,122,.28); color:var(--text); padding:0 1px; border-radius:3px; }
+  .mrow .mr-sub { font-size:11.5px; color:var(--text2); margin-top:4px; display:flex; align-items:center; gap:8px; }
+  .mrow .mr-sub .sep { color:var(--text3); }
+  .mrow .mr-time { font-family:var(--mono); font-size:12px; color:var(--text); background:var(--surface2); border:1px solid var(--border); border-radius:7px; padding:4px 9px; flex:none; }
+  .mrow .mr-go { flex:none; }
+  .mrow .thumb { width:64px; height:40px; border-radius:6px; flex:none; }
+  .th1 { background:linear-gradient(140deg,#7d95a8,#5d7288); }
+  .th2 { background:linear-gradient(140deg,#c4a57a,#a98862); }
+  .th3 { background:linear-gradient(140deg,#9a8aa0,#7a6c85); }
+  .th4 { background:linear-gradient(140deg,#6e8a72,#56705b); }
+  .th5 { background:linear-gradient(140deg,#b0766a,#936055); }
+  .th6 { background:linear-gradient(140deg,#8a97a3,#6d7a88); }
+
+  .sgrid { display:grid; grid-template-columns:repeat(8,1fr); gap:14px; }
+  .sthumb { aspect-ratio:1; border-radius:var(--r-md); position:relative; overflow:hidden; box-shadow:0 1px 3px rgba(65,64,60,.08); }
+  .sthumb .veil { position:absolute; inset:0; background:linear-gradient(180deg, rgba(233,228,222,.14), transparent 36%); }
+  .sthumb .kindbadge { position:absolute; left:7px; top:7px; height:19px; padding:0 7px; border-radius:999px; background:rgba(20,24,29,.42); color:#eef1f4; font-size:10px; display:inline-flex; align-items:center; gap:4px; }
+  .sthumb .mkhint { position:absolute; right:7px; bottom:7px; height:19px; padding:0 7px; border-radius:999px; background:rgba(196,165,122,.92); color:#3a3226; font-size:10px; display:inline-flex; align-items:center; gap:4px; font-family:var(--mono); }
+
+  /* ============ 对话框 ============ */
+  .dlg-stage { display:flex; gap:24px; align-items:flex-start; }
+  .dlg { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow-lift); overflow:hidden; }
+  .dlg-head { padding:16px 20px 13px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+  .dlg-head h3 { font-size:14px; font-weight:500; letter-spacing:.04em; }
+  .dlg-head .spacer { flex:1; }
+  .dlg-body { padding:16px 20px; }
+  .dlg-foot { padding:13px 20px 16px; border-top:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+  .dlg-foot .spacer { flex:1; }
+
+  .fl { margin-bottom:14px; }
+  .fl > label { display:block; font-size:11.5px; color:var(--text2); margin-bottom:6px; letter-spacing:.03em; }
+  .inp { width:100%; height:36px; padding:0 12px; border:1px solid var(--border); border-radius:9px; background:#fbf9f6; font-family:var(--font); font-size:13px; color:var(--text); outline:none; }
+  .inp.mono { font-family:var(--mono); font-size:12.5px; letter-spacing:.06em; }
+  .inrow { display:flex; gap:8px; }
+  .inrow .inp { flex:1; }
+  .ckrow { display:flex; gap:18px; flex-wrap:wrap; }
+  .rk { display:inline-flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; }
+  .rk input { accent-color:var(--primary); width:14px; height:14px; }
+  .ck { display:flex; align-items:flex-start; gap:9px; font-size:12.5px; cursor:pointer; }
+  .ck input { accent-color:var(--primary); width:14px; height:14px; margin-top:2px; flex:none; }
+  .ck .ck-d { font-size:11px; color:var(--text3); line-height:1.6; }
+
+  .section-sep { border-top:1px solid var(--border); margin:4px 0 14px; }
+  .scope-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .scope-head .sh-t { font-size:12.5px; font-weight:500; }
+  .scope-head .sh-n { font-family:var(--mono); font-size:10.5px; color:var(--text3); }
+  .scope-head .spacer { flex:1; }
+  .scope-box { border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; background:#faf8f5; }
+  .scope-opt { display:flex; align-items:flex-start; gap:10px; padding:11px 14px; border-bottom:1px solid var(--border); cursor:pointer; }
+  .scope-opt:last-child { border-bottom:0; }
+  .scope-opt input { accent-color:var(--primary); margin-top:2px; }
+  .scope-opt .so-t { font-size:12.5px; }
+  .scope-opt .so-d { font-size:11px; color:var(--text3); margin-top:3px; line-height:1.6; }
+  .scope-list { padding:6px 10px 10px; background:var(--surface); border-top:1px solid var(--border); }
+  .ml-item { display:flex; align-items:center; gap:10px; padding:8px 8px; border-radius:8px; }
+  .ml-item:hover { background:var(--surface2); }
+  .ml-item input { accent-color:var(--primary); flex:none; }
+  .ml-item .ml-ic { color:var(--oat); }
+  .ml-item .ml-t { flex:1; font-size:12.5px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ml-item .ml-time { font-family:var(--mono); font-size:11px; color:var(--text2); }
+  .ml-item .ml-media { font-size:11px; color:var(--text3); }
+
+  /* 相册级：按视频列表 */
+  .pml-row { display:flex; align-items:center; gap:11px; padding:10px 8px; border-bottom:1px dashed var(--border); }
+  .pml-row:last-child { border-bottom:0; }
+  .pml-row .pml-thumb { width:52px; height:33px; border-radius:5px; flex:none; }
+  .pml-row .pml-name { flex:1; font-size:12.5px; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pml-row .pml-cnt { font-family:var(--mono); font-size:10.5px; color:var(--text3); }
+  .tri-opt { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; flex:none; }
+  .tri-opt .to { appearance:none; border:0; background:var(--surface); color:var(--text2); font-family:var(--font); font-size:11px; padding:4px 9px; cursor:pointer; border-right:1px solid var(--border); }
+  .tri-opt .to:last-child { border-right:0; }
+  .tri-opt .to.on { background:var(--primary); color:#eef1f4; }
+
+  /* ============ 分享观看页 ============ */
+  .share-stage { border-radius:var(--r-lg); overflow:hidden; background:var(--player); position:relative; }
+  .noticebar { display:flex; align-items:center; gap:11px; padding:11px 18px; background:rgba(196,165,122,.16); border-bottom:1px solid rgba(196,165,122,.32); color:var(--player-text); font-size:12.5px; }
+  .noticebar .ic { color:var(--oat); }
+  .noticebar b { font-weight:500; }
+  .noticebar .spacer { flex:1; }
+  .noticebar .nb-btn { padding:5px 12px; border-radius:8px; border:1px solid rgba(196,165,122,.6); background:rgba(196,165,122,.18); color:#f0e6d6; font-size:11.5px; font-family:var(--font); cursor:pointer; }
+  .share-player { height:392px; position:relative;
+    background:radial-gradient(120% 90% at 62% 26%, #2c3a44 0%, #1d262e 44%, #14181d 100%); }
+  .share-scene { position:absolute; left:-6%; right:-6%; bottom:96px; height:170px;
+    background:linear-gradient(178deg, rgba(154,167,180,.20) 0%, rgba(74,90,106,.26) 46%, rgba(20,24,29,0) 100%);
+    clip-path:polygon(0 62%, 9% 40%, 17% 55%, 27% 22%, 38% 48%, 50% 30%, 62% 52%, 74% 26%, 86% 50%, 100% 34%, 100% 100%, 0 100%); }
+  .share-controls { position:absolute; left:0; right:0; bottom:0; padding:12px 18px 14px; }
+  .share-track { position:relative; height:4px; border-radius:2px; background:rgba(230,235,240,.18); margin-bottom:10px; }
+  .share-track .played { position:absolute; left:0; top:0; bottom:0; width:31%; border-radius:2px; background:rgba(230,235,240,.86); }
+  .share-track .head { position:absolute; left:31%; top:50%; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%; background:#fff; }
+  .mk { position:absolute; bottom:6px; width:3px; height:11px; border-radius:2px; background:var(--oat); }
+  .mkclip { position:absolute; bottom:6px; height:5px; border-radius:3px; background:rgba(196,165,122,.72); }
+  .share-ctlrow { display:flex; align-items:center; gap:14px; color:var(--player-text); font-family:var(--mono); font-size:12px; }
+  .share-ctlrow .spacer { flex:1; }
+  .share-ctlrow .dim { color:var(--player-dim); }
+
+  .share-body { background:var(--bg); padding:20px 24px 24px; }
+  .sb-head { display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
+  .sb-head h2 { font-size:15.5px; font-weight:500; }
+  .sb-head .sb-meta { font-family:var(--mono); font-size:11px; color:var(--text2); margin-top:5px; }
+  .sb-head .spacer { flex:1; }
+  .readonly-note { font-size:11.5px; color:var(--text3); display:inline-flex; align-items:center; gap:6px; }
+
+  .moments { display:flex; flex-wrap:wrap; gap:8px 7px; }
+  .mc { display:inline-flex; align-items:center; gap:7px; height:30px; padding:0 12px; border-radius:999px; background:var(--surface2); border:1px solid var(--border); font-size:12.5px; cursor:pointer; }
+  .mc .ic { color:var(--text2); }
+  .mc .tm { font-family:var(--mono); font-size:10.5px; color:var(--text3); }
+  .mc.on { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .mc.on .ic, .mc.on .tm { color:rgba(238,241,244,.78); }
+
+  .reuse-panel { margin-top:18px; background:var(--surface); border:1px solid rgba(196,165,122,.5); border-radius:var(--r-lg); box-shadow:var(--shadow-lift); overflow:hidden; }
+  .rp-head { padding:14px 18px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+  .rp-head h3 { font-size:13.5px; font-weight:500; display:inline-flex; align-items:center; gap:8px; }
+  .rp-head h3 .ic { color:var(--oat); }
+  .rp-head .spacer { flex:1; }
+  .rp-body { padding:12px 18px 8px; }
+  .rp-target { display:flex; align-items:center; gap:11px; padding:11px 13px; background:rgba(74,90,106,.05); border:1px solid var(--border); border-radius:var(--r-md); margin-bottom:14px; }
+  .rp-target .ic { color:var(--primary); }
+  .rp-target .rt-t { font-size:12.5px; }
+  .rp-target .rt-d { font-size:11px; color:var(--text3); margin-top:3px; }
+  .rp-foot { padding:12px 18px 16px; display:flex; align-items:center; gap:10px; }
+  .rp-foot .spacer { flex:1; }
+  .rp-foot .note { font-size:11.5px; color:var(--text3); }
+
+  .anno { display:flex; align-items:flex-start; gap:9px; margin:16px 0 0; padding:12px 15px; background:rgba(74,90,106,.055); border:1px solid var(--border); border-radius:var(--r-md); }
+  .anno .ic { color:var(--primary); margin-top:1px; }
+  .anno p { font-size:12.5px; color:var(--text2); line-height:1.78; }
+  .anno p b { font-weight:500; color:var(--text); }
+  .anno .mono { font-family:var(--mono); font-size:11px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ================================================================= -->
+  <!-- VIEW.17 搜索结果 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.17 · /search — 统一搜索 · 新增「视频回忆」结果分组</p>
+    <div class="page">
+      <div class="headline">
+        <span class="q">"火烧云"</span><span class="total">共 9 项 · 其中视频回忆 3 条</span>
+        <div class="spacer"></div>
+        <button class="clear-all">清除</button>
+      </div>
+
+      <div class="schips">
+        <span class="schip">类型 <span style="color:var(--text)">视频</span> <span class="x">×</span></span>
+        <span class="schip">时间 <span style="color:var(--text)">2026</span> <span class="x">×</span></span>
+      </div>
+
+      <div class="fbar">
+        <span class="fgroup">类型 <span class="fsel">全部 ▾</span></span>
+        <span class="fgroup">拍摄时间 <span class="fsel">2026 年 ▾</span></span>
+        <span class="fgroup">地点 <span class="fsel">不限 ▾</span></span>
+        <span class="fgroup">人物 <span class="fsel">不限 ▾</span></span>
+        <div class="spacer"></div>
+        <button class="btn primary" style="padding:7px 16px;font-size:12.5px">应用筛选</button>
+      </div>
+
+      <!-- 分组 1：视频回忆 -->
+      <div class="grp">
+        <div class="grp-head">
+          <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--oat)" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+          <h2>视频回忆</h2><span class="n">3</span>
+          <div class="spacer"></div>
+          <span class="hint">点击直接跳到视频对应时间点</span>
+        </div>
+        <div class="mrows">
+          <div class="mrow">
+            <span class="mkic">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+            </span>
+            <span class="thumb th2"></span>
+            <div class="mr-main">
+              <div class="mr-t"><mark>火烧云</mark>极盛</div>
+              <div class="mr-sub">洱海日落延时.mp4 <span class="sep">·</span> 2026-08-14 <span class="sep">·</span> 全景视频</div>
+            </div>
+            <span class="mr-time">02:16</span>
+            <button class="mini-btn prime mr-go">
+              <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+              跳转
+            </button>
+          </div>
+
+          <div class="mrow">
+            <span class="mkic">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+            </span>
+            <span class="thumb th5"></span>
+            <div class="mr-main">
+              <div class="mr-t"><mark>火烧云</mark> · 收尾镜头</div>
+              <div class="mr-sub">洱海日落延时.mp4 <span class="sep">·</span> 2026-08-14 <span class="sep">·</span> 全景视频</div>
+            </div>
+            <span class="mr-time">03:01 – 03:14</span>
+            <button class="mini-btn prime mr-go">
+              <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+              跳转
+            </button>
+          </div>
+
+          <div class="mrow">
+            <span class="mkic">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+            </span>
+            <span class="thumb th3"></span>
+            <div class="mr-main">
+              <div class="mr-t"><mark>火烧云</mark>极盛</div>
+              <div class="mr-sub">2026-08-14 洱海.mp4 <span class="sep">·</span> 2026-08-14 <span class="sep">·</span> 普通视频</div>
+            </div>
+            <span class="mr-time">01:48</span>
+            <button class="mini-btn prime mr-go">
+              <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+              跳转
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分组 2：媒体 -->
+      <div class="grp">
+        <div class="grp-head">
+          <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9h18"/></svg>
+          <h2>媒体</h2><span class="n">6</span>
+          <div class="spacer"></div>
+          <span class="hint">文件名 / 地点 / 文件夹 / 标签 匹配</span>
+        </div>
+        <div class="sgrid">
+          <div class="sthumb th1"><div class="veil"></div><span class="kindbadge">
+            <svg class="ic" width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>全景视频</span>
+            <span class="mkhint">3 处</span></div>
+          <div class="sthumb th2"><div class="veil"></div><span class="kindbadge">
+            <svg class="ic" width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>视频</span>
+            <span class="mkhint">1 处</span></div>
+          <div class="sthumb th3"><div class="veil"></div><span class="kindbadge">
+            <svg class="ic" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="2"/></svg>照片</span></div>
+          <div class="sthumb th4"><div class="veil"></div><span class="kindbadge">
+            <svg class="ic" width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>视频</span>
+            <span class="mkhint">2 处</span></div>
+          <div class="sthumb th5"><div class="veil"></div><span class="kindbadge">
+            <svg class="ic" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="2"/></svg>照片</span></div>
+          <div class="sthumb th6"><div class="veil"></div><span class="kindbadge">
+            <svg class="ic" width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>全景视频</span>
+            <span class="mkhint">1 处</span></div>
+        </div>
+      </div>
+
+      <div class="anno">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>为何回忆单独成组而不是混排进媒体</b>：搜索回忆标题是"精确命中"而非"相关度排序"（用户搜的是一句他记得的话），
+        混排会被庞大的媒体结果淹没。<b>结果项自带时间与「跳转」按钮</b>，一次点击直达对应时刻（全景视频同时恢复当时的视角与 FOV）。
+        媒体缩略图右下角的燕麦色角标（如「3 处」）表示该视频内含有回忆。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.18 分享勾选 · 视频级 / 相册级 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.18 · 创建分享 · 新增「回忆标签」勾选（左：视频级 · 右：相册级）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">SHARE</span><h1>分享勾选</h1>
+        <span class="sub">默认「不包含」—— 分享是外发行为，默认做最小暴露</span>
+      </div>
+
+      <div class="dlg-stage">
+        <!-- 视频级 -->
+        <div class="dlg">
+          <div class="dlg-head">
+            <h3>创建分享 · 视频</h3>
+            <div class="spacer"></div>
+            <button class="mini-btn" style="border:0;background:transparent;color:var(--text2)">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <div class="dlg-body">
+            <div class="fl">
+              <label>分享标题</label>
+              <input class="inp" value="洱海日落延时" />
+            </div>
+            <div class="fl">
+              <label>有效期</label>
+              <div class="ckrow">
+                <label class="rk"><input type="radio" name="e1" /> 1 天</label>
+                <label class="rk"><input type="radio" name="e1" checked /> 7 天</label>
+                <label class="rk"><input type="radio" name="e1" /> 30 天</label>
+                <label class="rk"><input type="radio" name="e1" /> 永久</label>
+              </div>
+            </div>
+            <div class="fl">
+              <label>访问密码（选填，4–8 位）</label>
+              <input class="inp mono" placeholder="不设置则凭链接访问" />
+            </div>
+            <div class="fl">
+              <label class="ck">
+                <input type="checkbox" />
+                <span>
+                  微信 H5 链接
+                  <span class="ck-d" style="display:block">仅支持在线播放，不提供文件下载</span>
+                </span>
+              </label>
+            </div>
+
+            <div class="section-sep"></div>
+
+            <div class="scope-head">
+              <span class="sh-t">回忆标签</span>
+              <span class="sh-n">4 条 · 观看者可跳转，不可编辑</span>
+            </div>
+            <div class="scope-box">
+              <label class="scope-opt">
+                <input type="radio" name="s1" />
+                <span><span class="so-t">不包含</span><span class="so-d" style="display:block">观看者只能看视频本身</span></span>
+              </label>
+              <label class="scope-opt">
+                <input type="radio" name="s1" />
+                <span><span class="so-t">全部包含</span><span class="so-d" style="display:block">把该视频现有的 4 条回忆一并分享</span></span>
+              </label>
+              <div class="scope-opt" style="align-items:center">
+                <input type="radio" name="s1" checked />
+                <span style="flex:1"><span class="so-t">自定义（已选 2 / 4）</span></span>
+              </div>
+              <div class="scope-list">
+                <div class="ml-item"><input type="checkbox" checked />
+                  <svg class="ic ml-ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  <span class="ml-t">开场海浪</span><span class="ml-time">00:32</span></div>
+                <div class="ml-item"><input type="checkbox" checked />
+                  <svg class="ic ml-ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                  <span class="ml-t">渔船入镜</span><span class="ml-time">01:04 – 01:27</span></div>
+                <div class="ml-item"><input type="checkbox" />
+                  <svg class="ic ml-ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  <span class="ml-t">火烧云极盛</span><span class="ml-time">02:16</span></div>
+                <div class="ml-item"><input type="checkbox" />
+                  <svg class="ic ml-ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  <span class="ml-t">收尾</span><span class="ml-time">03:01</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="dlg-foot">
+            <span style="font-size:11.5px;color:var(--text3)">分享出去的是引用，之后你的编辑会同步生效</span>
+            <div class="spacer"></div>
+            <button class="btn">取消</button>
+            <button class="btn primary">创建分享</button>
+          </div>
+        </div>
+
+        <!-- 相册级 -->
+        <div class="dlg">
+          <div class="dlg-head">
+            <h3>创建分享 · 相册</h3>
+            <div class="spacer"></div>
+            <button class="mini-btn" style="border:0;background:transparent;color:var(--text2)">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <div class="dlg-body">
+            <div class="fl">
+              <label>分享标题</label>
+              <input class="inp" value="大理之行" />
+            </div>
+            <div class="fl">
+              <label>有效期</label>
+              <div class="ckrow">
+                <label class="rk"><input type="radio" name="e2" /> 1 天</label>
+                <label class="rk"><input type="radio" name="e2" checked /> 7 天</label>
+                <label class="rk"><input type="radio" name="e2" /> 30 天</label>
+                <label class="rk"><input type="radio" name="e2" /> 永久</label>
+              </div>
+            </div>
+            <div class="fl">
+              <label>访问密码（选填，4–8 位）</label>
+              <input class="inp mono" value="7429" />
+            </div>
+
+            <div class="section-sep"></div>
+
+            <div class="scope-head">
+              <span class="sh-t">回忆标签</span>
+              <span class="sh-n">相册含 3 个视频 · 共 7 条回忆</span>
+            </div>
+            <div class="scope-box">
+              <label class="scope-opt">
+                <input type="radio" name="s2" />
+                <span><span class="so-t">不包含</span><span class="so-d" style="display:block">观看者只能浏览相册本身</span></span>
+              </label>
+              <label class="scope-opt">
+                <input type="radio" name="s2" />
+                <span><span class="so-t">全部包含</span><span class="so-d" style="display:block">7 条回忆全部分享</span></span>
+              </label>
+              <div class="scope-opt" style="align-items:center">
+                <input type="radio" name="s2" checked />
+                <span style="flex:1"><span class="so-t">自定义 · 按视频选择</span></span>
+              </div>
+              <div class="scope-list" style="padding:4px 12px 8px">
+                <div class="pml-row">
+                  <span class="pml-thumb th2"></span>
+                  <span class="pml-name">洱海日落延时.mp4</span>
+                  <span class="pml-cnt">4 条</span>
+                  <div class="tri-opt"><button class="to">不含</button><button class="to on">全部</button><button class="to">部分</button></div>
+                </div>
+                <div class="pml-row">
+                  <span class="pml-thumb th4"></span>
+                  <span class="pml-name">古城漫步.mp4</span>
+                  <span class="pml-cnt">2 条</span>
+                  <div class="tri-opt"><button class="to">不含</button><button class="to on">全部</button><button class="to">部分</button></div>
+                </div>
+                <div class="pml-row">
+                  <span class="pml-thumb th3"></span>
+                  <span class="pml-name">客栈院子里的猫.mp4</span>
+                  <span class="pml-cnt">1 条</span>
+                  <div class="tri-opt"><button class="to on">不含</button><button class="to">全部</button><button class="to">部分</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="dlg-foot">
+            <span style="font-size:11.5px;color:var(--text3)">「部分」可下钻到逐条回忆勾选</span>
+            <div class="spacer"></div>
+            <button class="btn">取消</button>
+            <button class="btn primary">创建分享</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="anno">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>相册分享为什么用"三级"而不是逐条勾选</b>：相册若有 3 个视频 × 若干回忆，逐条列出是 N×M 的界面灾难。
+        因此顶层只给三个选择（不含 / 全部 / 自定义），选「自定义」后按视频行做三态（不含 / 全部 / 部分），
+        仅在选「部分」时才下钻到单条回忆 —— 三层之下才见到最细粒度，绝大多数用户停在第一层。</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.19 分享观看页（只读）与同源复用 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.19 · /public/shares/:token — 分享观看页 · 回忆只读展示 + 同源复用</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">VIEW</span><h1>分享观看页</h1>
+        <span class="sub">匿名可看；已登录且名下有同源视频时，出现复用入口</span>
+      </div>
+
+      <div style="display:flex; gap:22px; align-items:flex-start">
+        <div style="flex:1; min-width:0">
+          <div class="share-stage">
+            <div class="noticebar">
+              <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+              你名下也有这个视频（源文件完全相同）：<b>洱海日落延时.mp4</b>
+              <div class="spacer"></div>
+              <button class="nb-btn">复用标注</button>
+            </div>
+            <div class="share-player">
+              <div class="share-scene"></div>
+              <div class="share-controls">
+                <div class="share-track">
+                  <div class="played"></div>
+                  <span class="mk" style="left:15.6%"></span>
+                  <span class="mk" style="left:41.2%"></span>
+                  <span class="mk" style="left:88.3%"></span>
+                  <span class="mkclip" style="left:31.4%; width:11.2%"></span>
+                  <div class="head"></div>
+                </div>
+                <div class="share-ctlrow">
+                  <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>
+                  <span>01:03</span><span class="dim">/ 03:24</span>
+                  <div class="spacer"></div>
+                  <span class="dim">视角 132.4° · FOV 78</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="share-body">
+              <div class="sb-head">
+                <div>
+                  <h2>洱海日落延时</h2>
+                  <div class="sb-meta">由 warlocks 分享 · 7 天内有效 · 共 2 条回忆</div>
+                </div>
+                <div class="spacer"></div>
+                <span class="readonly-note">
+                  <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+                  只读 · 点击可跳转
+                </span>
+              </div>
+              <div class="moments">
+                <span class="mc"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg><span class="tm">00:32</span>开场海浪</span>
+                <span class="mc on"><svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg><span class="tm">01:04–01:27</span>渔船入镜</span>
+              </div>
+              <div style="font-size:11.5px; color:var(--text3); margin-top:11px; line-height:1.7">
+                分享者选择了这 2 条回忆（共 4 条）。未分享的回忆不会出现在这里，也无法通过任何方式访问。
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 复用面板 -->
+        <div style="width:428px; flex:none">
+          <div class="reuse-panel" style="margin-top:0">
+            <div class="rp-head">
+              <h3>
+                <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M11 7h4a2 2 0 0 1 2 2v4"/></svg>
+                复用标注到我的视频
+              </h3>
+              <div class="spacer"></div>
+              <button class="mini-btn" style="border:0;background:transparent;color:var(--text2)">
+                <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </div>
+            <div class="rp-body">
+              <div class="rp-target">
+                <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.6 2.6L16 9.5"/></svg>
+                <div>
+                  <div class="rt-t">已匹配到你的视频：洱海日落延时.mp4</div>
+                  <div class="rt-d">源文件字节完全相同（sha256 校验通过），时间轴可直接对齐</div>
+                </div>
+              </div>
+
+              <div class="scope-head">
+                <span class="sh-t">选择要复用的回忆</span>
+                <span class="sh-n">已选 2 / 2</span>
+              </div>
+              <div class="scope-list" style="border:1px solid var(--border); border-radius:var(--r-md); background:#faf8f5">
+                <div class="ml-item"><input type="checkbox" checked />
+                  <svg class="ic ml-ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                  <span class="ml-t">开场海浪</span><span class="ml-time">00:32</span><span class="ml-media">点</span></div>
+                <div class="ml-item"><input type="checkbox" checked />
+                  <svg class="ic ml-ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                  <span class="ml-t">渔船入镜</span><span class="ml-time">01:04 – 01:27</span><span class="ml-media">片段</span></div>
+              </div>
+              <div style="font-size:11.5px; color:var(--text3); margin-top:10px; line-height:1.72">
+                复用的是一份副本：应用后两端互不影响，对方后续的编辑不会改变你的数据。
+                全景视角（132.4° · -6.8° · FOV 78）将随回忆一并复制。
+              </div>
+            </div>
+            <div class="rp-foot">
+              <span class="note">你的视频已有 3 条回忆，剩余可用 47 条</span>
+              <div class="spacer"></div>
+              <button class="btn">取消</button>
+              <button class="btn primary">应用到我的视频</button>
+            </div>
+          </div>
+
+          <div class="anno" style="margin-top:14px">
+            <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+            <p><b>同源判定必须由服务端强制</b>：以 <span class="mono">media.hash</span>（sha256 内容哈希）比对，
+            而不是文件名或时长。匿名访问时不出现此入口（复用需要登录身份与目标视频）；转码过、重新导出的文件哈希不同，<b>不算同源</b>。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

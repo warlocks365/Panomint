@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Panomint 原型 · 视频热点回忆 — 设置页与标签管理</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:#e9e4de; --surface:#f4f1ed; --surface2:#efebe5; --deep:#e3ded7;
+    --border:#ddd8d0; --text:#41403c; --text2:#7d7a73; --text3:#a5a29a;
+    --primary:#4a5a6a; --primary-hover:#3d4b58; --primary-soft:rgba(143,163,173,.16);
+    --danger:#b0685c; --success:#6e8a72; --oat:#c4a57a;
+    --shadow-card:0 1px 3px rgba(65,64,60,.05), 0 10px 34px rgba(65,64,60,.07);
+    --shadow-lift:0 2px 6px rgba(65,64,60,.06), 0 14px 40px rgba(65,64,60,.12);
+    --font:"Outfit","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:ui-monospace,"SF Mono",Consolas,monospace;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#ded9d2; font-family:var(--font); color:var(--text); font-weight:300; letter-spacing:.01em; padding:28px 0 48px; }
+  .canvas { width:1440px; margin:0 auto; }
+  .frame { background:var(--bg); border-radius:18px; overflow:hidden; box-shadow:var(--shadow-card); margin-bottom:40px; }
+  .view-tag { font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text3); padding:14px 36px 0; }
+  .page { padding:26px 36px 40px; }
+  .ph { display:flex; align-items:baseline; gap:12px; margin-bottom:22px; }
+  .ph .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:var(--text3); }
+  .ph h1 { font-size:16px; font-weight:500; letter-spacing:.1em; }
+  .ph .sub { font-size:12px; color:var(--text2); }
+  .ph .spacer { flex:1; }
+  .ic { display:inline-flex; flex:none; }
+  .mono { font-family:var(--mono); }
+
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 15px; border-radius:var(--r-md); font-size:13px; font-family:var(--font); cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--text); transition:all .45s cubic-bezier(.32,.72,0,1); }
+  .btn:hover { background:var(--surface2); }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+  .btn.primary:hover { background:var(--primary-hover); }
+  .mini-btn { display:inline-flex; align-items:center; gap:5px; padding:5px 11px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:12px; font-family:var(--font); cursor:pointer; }
+  .mini-btn:hover { background:var(--surface2); }
+  .mini-btn.prime { background:var(--primary); border-color:var(--primary); color:#eef1f4; }
+
+  /* ======= 设置页：卡片 ======= */
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:20px; box-shadow:var(--shadow-card); margin-bottom:16px; }
+  .card-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .card-title { font-size:14px; font-weight:500; letter-spacing:.06em; display:inline-flex; align-items:center; gap:8px; }
+  .card-title .ic { color:var(--oat); }
+  .card-head .spacer { flex:1; }
+  .state { font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; padding:3px 9px; border-radius:999px; border:1px solid var(--border); color:var(--text2); }
+  .state--on { color:#5d7660; border-color:rgba(110,138,114,.45); background:rgba(110,138,114,.10); }
+  .state--off { color:var(--text3); }
+  .card-desc { font-size:12.5px; color:var(--text2); line-height:1.8; margin-bottom:14px; }
+  .card-desc code { font-family:var(--mono); font-size:11.5px; background:var(--surface2); border:1px solid var(--border); border-radius:5px; padding:0 4px; }
+
+  .form { display:flex; flex-direction:column; gap:0; }
+  .srow { display:flex; align-items:flex-start; gap:12px; padding:13px 0; border-top:1px solid var(--border); }
+  .srow:first-child { border-top:0; padding-top:2px; }
+  .srow .s-label { width:150px; flex:none; font-size:12.5px; color:var(--text2); padding-top:2px; }
+  .srow .s-label .req { color:var(--oat); }
+  .srow .s-body { flex:1; min-width:0; }
+  .srow .s-note { font-size:11.5px; color:var(--text3); margin-top:6px; line-height:1.7; }
+  .srow.sub { padding-left:26px; background:rgba(74,90,106,.028); border-radius:var(--r-md); margin:2px 0; padding-right:12px; }
+
+  .ck { display:flex; align-items:flex-start; gap:9px; font-size:13px; color:var(--text); cursor:pointer; }
+  .ck input { accent-color:var(--primary); width:15px; height:15px; margin-top:2px; flex:none; }
+  .ck .ck-t { display:flex; flex-direction:column; gap:3px; }
+  .ck .ck-d { font-size:11.5px; color:var(--text3); line-height:1.65; }
+  .ck + .ck { margin-top:11px; }
+
+  .ckrow { display:flex; gap:22px; flex-wrap:wrap; }
+  .rk { display:inline-flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; }
+  .rk input { accent-color:var(--primary); width:14px; height:14px; }
+  .rk .rk-d { color:var(--text3); font-size:11px; }
+
+  .inp { height:34px; padding:0 11px; border:1px solid var(--border); border-radius:9px; background:#fbf9f6; font-family:var(--font); font-size:12.5px; color:var(--text); outline:none; }
+  .inp:focus { border-color:#b9c3cb; background:#fff; }
+  .inp.mono { font-family:var(--mono); font-size:12px; letter-spacing:.04em; }
+  .inp.w80 { width:80px; text-align:center; }
+  .inp.w220 { width:220px; }
+  .inp.w100 { width:100%; }
+  .inp.wide { flex:1; }
+  .inrow { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .inrow .tilde { color:var(--text3); font-family:var(--mono); font-size:12px; }
+  .inrow .unit { font-size:11.5px; color:var(--text3); }
+
+  .statusbar { display:flex; align-items:center; gap:16px; padding:11px 14px; background:#faf8f5; border:1px solid var(--border); border-radius:var(--r-md); font-size:12px; color:var(--text2); flex-wrap:wrap; }
+  .statusbar .sb { display:inline-flex; align-items:center; gap:6px; }
+  .statusbar .sb .n { font-family:var(--mono); color:var(--text); }
+  .statusbar .spacer { flex:1; }
+  .dotmark { width:6px; height:6px; border-radius:50%; background:var(--success); }
+
+  .actions-row { display:flex; align-items:center; gap:10px; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); }
+  .actions-row .spacer { flex:1; }
+  .hint-inline { font-size:11.5px; color:var(--text3); }
+
+  .offvis { border:1px dashed var(--border); border-radius:var(--r-md); padding:14px 16px; background:rgba(165,162,154,.06); }
+  .offvis .ov-head { font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--text3); margin-bottom:10px; }
+  .offvis .ov-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .ovcell { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+  .ovcell .cellname { font-size:11.5px; color:var(--text2); }
+  .ovcell .ghostchip { display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 10px; border-radius:999px; border:1px dashed var(--border); color:var(--text3); font-size:11.5px; background:transparent; }
+  .ovcell .ghostbtn { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:8px; border:1px dashed var(--border); color:var(--text3); font-size:11.5px; background:transparent; }
+  .ovcell .strike { text-decoration:line-through; color:var(--text3); }
+
+  /* ======= 标签管理页 ======= */
+  .tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:20px; }
+  .tab { appearance:none; border:0; background:transparent; font-family:var(--font); font-size:13.5px; color:var(--text2); padding:10px 16px 12px; cursor:pointer; position:relative; letter-spacing:.02em; }
+  .tab.on { color:var(--text); font-weight:500; }
+  .tab.on::after { content:""; position:absolute; left:12px; right:12px; bottom:-1px; height:2px; background:var(--primary); border-radius:2px; }
+  .tab .n { font-family:var(--mono); font-size:10px; color:var(--text3); margin-left:5px; }
+
+  .toolbar { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .search { display:flex; align-items:center; gap:8px; width:280px; height:36px; padding:0 12px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text3); font-size:12.5px; }
+  .toolbar .spacer { flex:1; }
+
+  .clusterlist { display:flex; flex-direction:column; gap:10px; }
+  .cl { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-card); overflow:hidden; }
+  .cl-head { display:flex; align-items:center; gap:11px; padding:14px 18px; cursor:pointer; }
+  .cl-head .ic { color:var(--oat); }
+  .cl-head .cl-t { font-size:13.5px; }
+  .cl-head .cl-meta { font-family:var(--mono); font-size:10.5px; color:var(--text3); }
+  .cl-head .spacer { flex:1; }
+  .cl-head .caret { color:var(--text3); }
+  .cl-body { border-top:1px solid var(--border); background:#faf8f5; padding:8px 12px 12px; }
+  .cv-row { display:flex; align-items:center; gap:11px; padding:8px 8px; border-radius:9px; }
+  .cv-row:hover { background:var(--surface2); }
+  .cv-row .cv-thumb { width:56px; height:36px; border-radius:6px; flex:none; }
+  .th1 { background:linear-gradient(140deg,#7d95a8,#5d7288); }
+  .th2 { background:linear-gradient(140deg,#c4a57a,#a98862); }
+  .th3 { background:linear-gradient(140deg,#9a8aa0,#7a6c85); }
+  .th4 { background:linear-gradient(140deg,#6e8a72,#56705b); }
+  .th5 { background:linear-gradient(140deg,#b0766a,#936055); }
+  .cv-row .cv-name { font-size:12.5px; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cv-row .cv-time { font-family:var(--mono); font-size:11px; color:var(--text2); }
+  .cv-row .cv-kind { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--text3); width:96px; }
+  .cv-row .cv-go { color:var(--text2); }
+
+  .cloud { display:flex; flex-wrap:wrap; align-items:center; gap:12px 14px; padding:22px 26px; background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--shadow-card); }
+  .chip { display:inline-flex; align-items:center; gap:7px; padding:7px 15px; border-radius:999px; background:rgba(244,241,237,.82); border:1px solid transparent; box-shadow:0 1px 3px rgba(65,64,60,.08); color:var(--text); font-size:13px; cursor:pointer; }
+  .chip .cnt { font-family:var(--mono); font-size:10px; color:var(--text2); }
+  .chip.s1 { font-size:16px; } .chip.s2 { font-size:14px; } .chip.s3 { font-size:12.5px; color:var(--text2); }
+  .chip .ai-dot { width:6px; height:6px; border-radius:50%; background:var(--oat); }
+  .chip .pend { font-size:9px; color:var(--oat); border:1px solid var(--oat); border-radius:5px; padding:0 3px; }
+  .side { width:322px; flex:none; }
+
+  .anno { display:flex; align-items:flex-start; gap:9px; margin:16px 0 0; padding:12px 15px; background:rgba(74,90,106,.055); border:1px solid var(--border); border-radius:var(--r-md); }
+  .anno .ic { color:var(--primary); margin-top:1px; }
+  .anno p { font-size:12.5px; color:var(--text2); line-height:1.78; }
+  .anno p b { font-weight:500; color:var(--text); }
+  .anno .mono { font-family:var(--mono); font-size:11px; }
+  .lay2 { display:flex; gap:18px; align-items:flex-start; }
+  .lay2 .main { flex:1; min-width:0; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ================================================================= -->
+  <!-- VIEW.15 设置页 · 视频热点回忆卡片 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.15 · /settings — 设置页新增卡片「视频热点回忆」（总开关 + AI 子项）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">SET</span><h1>设置</h1>
+        <span class="sub">新增卡片插在「Agent 语义接口 · LLM 上游」之后</span>
+      </div>
+
+      <div class="lay2">
+        <div class="main">
+          <!-- 卡片：开启态 -->
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">
+                <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                视频热点回忆
+              </h2>
+              <div class="spacer"></div>
+              <span class="state state--on">已启用</span>
+            </div>
+            <p class="card-desc">
+              在视频时间轴上标注值得重看的「回忆点」与「回忆片段」，可跳转、可搜索、可随分享外发；
+              同源视频（源文件字节完全相同）之间可显式复用标注。关闭总开关后，全站隐藏相关入口。
+            </p>
+
+            <div class="form">
+              <div class="srow">
+                <div class="s-label">总开关</div>
+                <div class="s-body">
+                  <label class="ck">
+                    <input type="checkbox" checked />
+                    <span class="ck-t">
+                      <span>启用视频热点回忆</span>
+                      <span class="ck-d">关闭后：详情页回忆块、添加/列表按钮、搜索中的回忆条目、分享勾选全部隐藏；已有分享链接中已勾选的回忆仍可查看（不追溯破坏历史链接）。</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="srow">
+                <div class="s-label">AI 自动打点</div>
+                <div class="s-body">
+                  <label class="ck">
+                    <input type="checkbox" checked />
+                    <span class="ck-t">
+                      <span>启用「AI 智能回忆点 / 片段自动标签」</span>
+                      <span class="ck-d">AI 仅生成候选建议，需逐条采纳后才成为正式回忆；不占用 50 条上限。</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="srow sub">
+                <div class="s-label">生效时段</div>
+                <div class="s-body">
+                  <div class="inrow">
+                    <input class="inp mono w80" value="02:00" />
+                    <span class="tilde">–</span>
+                    <input class="inp mono w80" value="06:00" />
+                    <label class="rk"><input type="checkbox" /> 不限时段（立即执行）</label>
+                  </div>
+                  <div class="s-note">仅在此时间窗内运行 AI 任务，避开日间与转码 / 索引的资源竞争。</div>
+                </div>
+              </div>
+
+              <div class="srow sub">
+                <div class="s-label">触发方式</div>
+                <div class="s-body">
+                  <div class="ckrow">
+                    <label class="rk"><input type="checkbox" checked /> 手动</label>
+                    <label class="rk"><input type="checkbox" checked /> 定时扫描</label>
+                    <label class="rk"><input type="checkbox" /> 新视频自动
+                      <span class="rk-d">（单次最多 5 个）</span>
+                    </label>
+                  </div>
+                  <div class="s-note">「定时扫描」在生效时段内对尚未分析的视频排队；「新视频自动」默认关闭 —— 批量导入时会产生任务风暴。</div>
+                </div>
+              </div>
+
+              <div class="srow sub">
+                <div class="s-label">模型来源</div>
+                <div class="s-body">
+                  <div class="ckrow" style="flex-direction:column; gap:11px">
+                    <label class="rk"><input type="radio" name="m-src" checked /> 复用「Agent 语义接口 · LLM 上游」</label>
+                    <label class="rk"><input type="radio" name="m-src" /> 单独配置专用大模型 API</label>
+                  </div>
+                  <div class="s-note">
+                    复用模式经 <code style="font-family:var(--mono);font-size:11.5px">/agent/llm/v1</code> 同源代理调用，密钥保存在服务端、永不下发浏览器；
+                    每视频一次文本调用（约 1–3k token）。
+                  </div>
+                </div>
+              </div>
+
+              <div class="srow sub">
+                <div class="s-label">配额</div>
+                <div class="s-body">
+                  <div class="inrow">
+                    <span style="font-size:12.5px;color:var(--text2)">单日最多分析</span>
+                    <input class="inp mono w80" value="20" />
+                    <span class="unit">个视频</span>
+                    <span style="width:14px"></span>
+                    <span style="font-size:12.5px;color:var(--text2)">单视频候选点上限</span>
+                    <input class="inp mono w80" value="8" />
+                    <span class="unit">条</span>
+                  </div>
+                  <div class="s-note">达到单日配额后任务排队至次日。全局并发固定为 1，与转码 / 索引错峰。</div>
+                </div>
+              </div>
+
+              <div class="srow">
+                <div class="s-label">运行状态</div>
+                <div class="s-body">
+                  <div class="statusbar">
+                    <span class="sb"><span class="dotmark"></span>今日已用 <span class="n">7 / 20</span></span>
+                    <span class="sb">队列中 <span class="n">0</span></span>
+                    <span class="sb">上次运行 <span class="n">2026-10-10 03:12</span></span>
+                    <span class="sb">待分析视频 <span class="n">23</span></span>
+                    <div class="spacer"></div>
+                    <button class="mini-btn">
+                      <svg class="ic" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8M20 12a8 8 0 0 1-13.66 5.66L4 16"/></svg>
+                      立即扫描
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="actions-row">
+              <span class="hint-inline">此卡片含服务端密钥配置，仅管理员可见</span>
+              <div class="spacer"></div>
+              <button class="btn primary">保存配置</button>
+            </div>
+          </div>
+
+          <!-- 卡片：关闭态（示意入口隐藏范围） -->
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title">
+                <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                视频热点回忆
+              </h2>
+              <div class="spacer"></div>
+              <span class="state state--off">未启用</span>
+            </div>
+            <label class="ck" style="margin-top:6px">
+              <input type="checkbox" />
+              <span class="ck-t">
+                <span>启用视频热点回忆</span>
+                <span class="ck-d">AI 子项随总开关一并置灰。</span>
+              </span>
+            </label>
+
+            <div class="offvis" style="margin-top:16px">
+              <div class="ov-head">关闭后 · 全站入口隐藏清单（共 7 处）</div>
+              <div class="ov-grid">
+                <div class="ovcell"><span class="cellname">详情页</span><span class="ghostchip"><span class="strike">回忆块</span></span></div>
+                <div class="ovcell"><span class="cellname">列表浮层</span><span class="ghostbtn"><span class="strike">全部回忆</span></span></div>
+                <div class="ovcell"><span class="cellname">搜索结果</span><span class="ghostchip"><span class="strike">视频回忆分组</span></span></div>
+                <div class="ovcell"><span class="cellname">标签管理</span><span class="ghostchip"><span class="strike">视频回忆 tab</span></span></div>
+                <div class="ovcell"><span class="cellname">视频分享</span><span class="ghostbtn"><span class="strike">回忆标签勾选</span></span></div>
+                <div class="ovcell"><span class="cellname">相册分享</span><span class="ghostbtn"><span class="strike">回忆标签勾选</span></span></div>
+                <div class="ovcell"><span class="cellname">分享观看页</span><span class="ghostchip">历史链接<span style="color:var(--oat);margin-left:4px">仍可见</span></span></div>
+                <div class="ovcell"><span class="cellname">设置页</span><span class="ghostbtn"><span class="strike">AI 子项</span></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧说明 -->
+        <div class="side">
+          <div class="card" style="margin-bottom:0">
+            <div class="card-title" style="font-size:13px; margin-bottom:10px">设计说明</div>
+            <div style="font-size:12.5px; color:var(--text2); line-height:1.85">
+              <div>· 总开关走<b style="font-weight:500;color:var(--text)">服务端配置</b>而非浏览器偏好 —— 否则每个用户状态不同，分享页判定会出现矛盾</div>
+              <div>· 开关用原生 checkbox + accent-color，与全站一致（仓库内无独立 Switch 组件）</div>
+              <div>· 「复用人脸识别模块」选项已移除：人脸管线是单帧清扫式，无视频时序能力，技术上不成立</div>
+              <div>· AI 子项含密钥配置，整卡按 403 权限门控制（同「Agent 语义接口 · LLM 上游」卡片）</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- VIEW.16 标签管理 · 四类切换 -->
+  <!-- ================================================================= -->
+  <div class="frame">
+    <p class="view-tag">VIEW.16 · /tags — 标签管理 · 新增第四类「视频回忆」（含分类搜索）</p>
+    <div class="page">
+      <div class="ph">
+        <span class="eyebrow">TAGS</span><h1>标签管理</h1>
+        <span class="sub">现有视图新增「视频回忆」独立 tab —— 它不是标签表的一类，而是独立实体</span>
+      </div>
+
+      <div class="tabs">
+        <button class="tab">全部 <span class="n">86</span></button>
+        <button class="tab">标签（AI） <span class="n">23</span></button>
+        <button class="tab">标签（手工） <span class="n">63</span></button>
+        <button class="tab on">视频回忆 <span class="n">31</span></button>
+      </div>
+
+      <div class="lay2">
+        <div class="main">
+          <div class="toolbar">
+            <div class="search">
+              <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+              按回忆标题或描述搜索
+            </div>
+            <div class="spacer"></div>
+            <span class="hint-inline" style="font-size:11.5px;color:var(--text3)">按标题聚合 · 共 12 组</span>
+          </div>
+
+          <div class="clusterlist">
+            <div class="cl">
+              <div class="cl-head">
+                <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                <span class="cl-t">火烧云极盛</span>
+                <span class="cl-meta">出现 3 次 · 涉及 3 个视频</span>
+                <div class="spacer"></div>
+                <span class="caret">
+                  <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </span>
+              </div>
+              <div class="cl-body">
+                <div class="cv-row">
+                  <span class="cv-thumb th1"></span>
+                  <span class="cv-name">洱海日落延时.mp4</span>
+                  <span class="cv-kind">
+                    <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                    回忆点
+                  </span>
+                  <span class="cv-time">02:16</span>
+                  <span class="cv-go"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+                </div>
+                <div class="cv-row">
+                  <span class="cv-thumb th2"></span>
+                  <span class="cv-name">2026-08-14 洱海.mp4</span>
+                  <span class="cv-kind">
+                    <svg class="ic" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="8.4"/></svg>
+                    回忆点
+                  </span>
+                  <span class="cv-time">01:48</span>
+                  <span class="cv-go"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="cl">
+              <div class="cl-head">
+                <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                <span class="cl-t">囡囡跳舞</span>
+                <span class="cl-meta">出现 5 次 · 涉及 2 个视频</span>
+                <div class="spacer"></div>
+                <span class="caret">
+                  <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </span>
+              </div>
+            </div>
+
+            <div class="cl">
+              <div class="cl-head">
+                <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="8" width="19" height="8" rx="3"/><path d="M7 8v8M17 8v8" stroke-width="1.2"/></svg>
+                <span class="cl-t">开场海浪</span>
+                <span class="cl-meta">出现 2 次 · 涉及 2 个视频</span>
+                <div class="spacer"></div>
+                <span class="caret">
+                  <svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="side">
+          <div class="cloud" style="margin-bottom:14px">
+            <div style="width:100%; font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; color:var(--text3); margin-bottom:2px;">「全部」TAB · 现有标签云（沿用）</div>
+            <span class="chip s1">大理 <span class="cnt">18</span></span>
+            <span class="chip s1">女儿 <span class="cnt">16</span></span>
+            <span class="chip s2">日落 <span class="cnt">9</span></span>
+            <span class="chip s2"><span class="ai-dot"></span>延时摄影 <span class="pend">待</span> <span class="cnt">6</span></span>
+            <span class="chip s3">洱海 <span class="cnt">5</span></span>
+            <span class="chip s3">露营 <span class="cnt">3</span></span>
+          </div>
+          <div class="card" style="margin-bottom:0">
+            <div class="card-title" style="font-size:13px; margin-bottom:10px">为什么不做成平级第四类标签</div>
+            <div style="font-size:12.5px; color:var(--text2); line-height:1.85">
+              <div>· 回忆标签<b style="font-weight:500;color:var(--text)">带时间轴与视角</b>，是独立实体（video_moments），不是媒体级标签</div>
+              <div>· 做成平级 tab 会让人以为它与「AI 标签/手工标签」同一体系，随后在分享勾选、搜索里产生概念错乱</div>
+              <div>· 因此 tab 名为「视频回忆」，视图改为<b style="font-weight:500;color:var(--text)">按标题聚合</b>：同名回忆跨视频合并展示</div>
+              <div>· 分类搜索 = 在此 tab 内直接匹配标题与描述</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="anno">
+        <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <p><b>聚合视图的实际价值</b>：用户给同一个时刻起的名字往往重复（「火烧云极盛」在 3 个视频里都出现过）。
+        聚合后一眼能看出"这类回忆我有多少"，这是标签管理页存在的理由；如果只按视频罗列，与详情页重复、没有必要。</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
