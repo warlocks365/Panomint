@@ -131,18 +131,27 @@ export function useTimelineSeek({
       // 随后 resolveAnchorIndex 在只含首屏的 flat 里找不到目标 → 静默 return。
       // 直接问「命中了吗」把加载与定位绑死，不依赖任何推断。
       while (guard < 300) {
-        idx = resolveAnchorIndex(headerIndex.value, key)
-        if (idx >= 0) break
+        // 只认**精确命中**：目标分组必须真的已加载。
+        //
+        // 为什么不用 resolveAnchorIndex 的兜底（最后一个 <= key 的分组）作为终止条件：
+        // 兜底在「目标尚未加载」时也会返回一个**靠前的**分组（实测跳 2024-11-03
+        // 却命中 2026-06 附近的组，scrollTop 落在 1845 处），于是提前 break，
+        // 滚动到一个看起来「滚动了但没到位」的位置。
+        // 先用精确命中把数据加载到位，兜底只用于「该日期本就没有独立分组」的退化情形。
+        const exact = headerIndex.value.index.get(key)
+        if (exact != null) { idx = exact; break }
         // AC-14：在途请求不 abort —— 等它落地（响应由 pager 的代次守卫正常并入）。
         // 等待不消耗翻页预算，否则一次并发就能耗尽 300 次预算并静默定位失败。
         if (loading.value) {
           await whenSettled()
           continue
         }
-        if (finished.value) break // 真的加载完了还找不到 → 放弃（不再静默，给出降级事件）
+        if (finished.value) break // 真的加载完了仍无该分组 → 走退化查找
         await loadMore()
         guard++
       }
+      // 退化：目标日期没有独立分组（如该日无媒体）时，退到「最后一个 <= key 的分组」。
+      if (idx < 0) idx = resolveAnchorIndex(headerIndex.value, key)
       if (idx < 0) {
         // 加载完毕仍无法定位：必须可见，不能像原来那样无声return。
         reportDegraded('anchor-not-found', { want, key, loaded: items.length })
