@@ -134,8 +134,20 @@ const cellSize = computed(() => {
 
 const rowHeight = computed(() => cellSize.value + GAP)
 
+// Job000145：档位真源是 props，本组件只消费不持有；接线见 useTimelineStream 顶部的不变式说明
+const { pager, grouping, seek, headerHeight, captureAnchor, restoreAnchor } = useTimelineStream(props, cols, rowHeight)
+
 // DESIGN.md §8 grid-stagger（虚拟滚动安全版）：仅对**首屏首批**渲染的缩略图做一次瀑布进入，
 // 后续滚动加载不做动画（DynamicScroller DOM 复用会让重复动画错位）；clearProps 防残留 transform。
+//
+// 🔴 位置约束（勿上移）：此 watch **必须** 排在上面 useTimelineStream 解构之后。
+// Vue 的 watch(source, cb) 会**同步求值** source（首次收集依赖时立即执行一次 getter），
+// 而 `pager` 是 const 声明 —— 若把本 watch 放到解构之前，`() => pager.items.length`
+// 会在 const 的暂时性死区（TDZ）里被同步读取，抛
+// `ReferenceError: Cannot access 'pano' before initialization`（线上实测，压缩后
+// 变量名变成 `$`，一度误判为 page-agent 或循环依赖）。
+// 对照：上面 allIds 同样是引用 pager 的箭头函数，但因为是**延迟调用**（只在用户点全选时
+// 才求值）所以不报错 —— 这正是「同文件里一个抛一个不抛」的原因，别以为是随机现象。
 let firstStaggerDone = false
 watch(
   () => pager.items.length,
@@ -159,9 +171,6 @@ watch(
     }
   }
 )
-
-// Job000145：档位真源是 props，本组件只消费不持有；接线见 useTimelineStream 顶部的不变式说明
-const { pager, grouping, seek, headerHeight, captureAnchor, restoreAnchor } = useTimelineStream(props, cols, rowHeight)
 
 const emptyText = computed(() => {
   if (props.favorites) return '暂无收藏的媒体'
