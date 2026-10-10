@@ -76,13 +76,6 @@ export function useTimelineSeek({
   }
 
   /** 最后一条**有日期**媒体的当前档位键（媒体按时间倒序，故末条即最旧）。 */
-  function lastLoadedKey() {
-    for (let i = items.length - 1; i >= 0; i--) {
-      const d = itemDate(items[i])
-      if (d) return headerKeyOf(dimension.value, d)
-    }
-    return ''
-  }
 
   /**
    * 锚点跳转。载荷必须是 { dimension, key } 对象——靠字符串长度推断档位会让
@@ -102,22 +95,34 @@ export function useTimelineSeek({
     if (seeking.value) return
     seeking.value = true
     try {
+      if (!scrollEl) return
       let guard = 0
-      while (!finished.value && guard < 300) {
+      let idx = -1
+      // 以「能否命中目标分组」为终止条件，而不是用 lastLoadedKey 与 key 比字典序。
+      //
+      // 为什么改：切档后 items 被 reset 清空并正在重载，此时 lastLoadedKey 反映的是
+      // 新档位**首屏**的末尾（较新），它与 key 的字典序比较会得出「已在范围内」的错误结论
+      // （实测：跳 2024-11-03 却停在 2026-09-27），于是循环立刻 break，
+      // 随后 resolveAnchorIndex 在只含首屏的 flat 里找不到目标 → 静默 return。
+      // 直接问「命中了吗」把加载与定位绑死，不依赖任何推断。
+      while (guard < 300) {
+        idx = resolveAnchorIndex(headerIndex.value, key)
+        if (idx >= 0) break
         // AC-14：在途请求不 abort —— 等它落地（响应由 pager 的代次守卫正常并入）。
-        // 等待**不消耗翻页预算**：否则一次并发就能把 300 次预算耗尽并静默定位失败。
+        // 等待不消耗翻页预算，否则一次并发就能耗尽 300 次预算并静默定位失败。
         if (loading.value) {
           await whenSettled()
           continue
         }
-        const last = lastLoadedKey()
-        // 媒体按时间倒序：last <= key 说明目标已在加载范围内；无日期可定位时兜底退出
-        if (!last || last <= key) break
+        if (finished.value) break // 真的加载完了还找不到 → 放弃（不再静默，给出降级事件）
         await loadMore()
         guard++
       }
-      const idx = resolveAnchorIndex(headerIndex.value, key)
-      if (idx < 0 || !scrollEl) return
+      if (idx < 0) {
+        // 加载完毕仍无法定位：必须可见，不能像原来那样无声return。
+        reportDegraded('anchor-not-found', { want, key, loaded: items.length })
+        return
+      }
       scrollEl.scrollTo({ top: offsets.value[idx], behavior: 'smooth' })
     } finally {
       seeking.value = false
