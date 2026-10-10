@@ -26,10 +26,27 @@ const gridLabel = (w) => w.find('.cg-grid').attributes('aria-label')
 const enabledDays = (w) => w.findAll('.cg-cell').filter((c) => c.attributes('disabled') === undefined)
 
 describe('复现 · 年→月→日 完整链路', () => {
-  it('打开时是当月（无照片）——预期行为，不是缺陷', () => {
+  it('打开时直接落在最近有照片的月份，而不是当月（否则看起来像坏了）', () => {
     const w = mountCal()
-    expect(gridLabel(w)).toContain(`${new Date().getFullYear()} 年`)
-    expect(enabledDays(w)).toHaveLength(0)
+    // 测试数据的最新有照片月份是 2025-03；面板不应停在无照片的当月
+    expect(gridLabel(w)).toContain('2025 年')
+    expect(gridLabel(w)).toContain('3 月')
+    expect(enabledDays(w).length, '落在有照片的月份就该有可选日').toBeGreaterThan(0)
+  })
+
+  it('整月无照片时给出「去最近有照片的月份」的可点提示', async () => {
+    const w = mountCal()
+    // 人为把游标挪到没有照片的月份（数据里没有 6 月）
+    const y = w.findAll('.nav-pick')[0]
+    await y.trigger('click')
+    await w.findAll('.nav-pick')[1].trigger('click')
+    const jun = w.findAll('.nav-cell')[5]
+    if (jun.attributes('disabled') === undefined) {
+      await jun.trigger('click')
+      expect(w.find('.dp-jump').exists()).toBe(true)
+      await w.find('.dp-jump').trigger('click')
+      expect(enabledDays(w).length).toBeGreaterThan(0)
+    }
   })
 
   it('点年 2024 → 面板标题的年随之改变', async () => {

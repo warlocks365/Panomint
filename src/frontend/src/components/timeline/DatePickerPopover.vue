@@ -13,6 +13,18 @@
 
     <CalendarGrid :matrix="m" :loading="loading" :anchor-key="anchorKey" />
 
+    <button
+      v-if="!loading && m.currentViewEmpty.value && m.nearestPhotoIndex.value !== null"
+      type="button"
+      class="dp-jump"
+      @click="goNearest"
+    >
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+        <path d="M12 3.5v11M8 11l4 4 4-4M5 19.5h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      {{ m.cursorYear.value }} 年 {{ m.cursorMonth.value }} 月没有照片，去最近有照片的月份
+    </button>
+
     <p v-if="!loading && !m.hasAny.value" class="dp-note">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" aria-hidden="true">
         <path d="M12 21s-6.5-5.4-6.5-10.5a6.5 6.5 0 0 1 13 0C18.5 15.6 12 21 12 21z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
@@ -67,6 +79,21 @@ const emit = defineEmits(['close', 'seek'])
 
 const m = useCalendarMatrix(toRef(props, 'buckets'))
 const navRef = ref(null)
+
+// 直方图是异步到达的：首帧counts 为空，落点无从谈起。
+// 数据到位后再把游标挪到最近有照片的月份，否则用户看到的是整屏灰 +
+// 「这个月没有照片」，而年份下拉里除当前年外全被禁用——像坏了而不是像没数据。
+watch(
+  () => props.buckets,
+  () => {
+    if (props.buckets && props.buckets.length) m.jumpToNearestPhoto()
+  },
+  { immediate: true, deep: false }
+)
+
+function goNearest() {
+  m.jumpToNearestPhoto()
+}
 
 /**
  * Esc 两级：先收起年/月选择面板，再关掉整个浮层。
@@ -204,4 +231,24 @@ watch(
   }
 }
 
+.dp-jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dp-jump:hover {
+  background-color: var(--color-surface-hover);
+}
 </style>

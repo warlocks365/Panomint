@@ -66,6 +66,38 @@ export function useCalendarMatrix(buckets) {
 
   const canNext = computed(() => cursorIndex.value < maxIndex.value)
 
+  /**
+   * 最近一个**有照片**的月份（<= 当前月），没有则null。
+   *
+   * 用途：面板默认落点。实测场景——账号最新照片停在 2026-09，而面板默认开在当月
+   * 2026-10，于是整屏灰 + 「这个月没有照片」，年份下拉里除当前年外全部禁用，
+   * **用户看到的就是「点不动」，其实是落点选错了**。
+   */
+  const nearestPhotoIndex = computed(() => {
+    if (!counts.value.size) return null
+    let best = null
+    for (const k of counts.value.keys()) {
+      const y = Number(k.slice(0, 4))
+      const m = Number(k.slice(5, 7))
+      if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12) continue
+      const idx = monthIndexOf(y, m)
+      if (idx > maxIndex.value) continue // 未来月份不参与
+      if (best === null || idx > best) best = idx
+    }
+    return best
+  })
+
+  /** 把游标落到最近有照片的月份；已在该月或无数据时返回 false（不空转）。 */
+  function jumpToNearestPhoto() {
+    if (nearestPhotoIndex.value === null) return false
+    const r = yearMonthOf(nearestPhotoIndex.value)
+    if (r.year === cursorYear.value && r.month === cursorMonth.value) return false
+    cursorYear.value = r.year
+    cursorMonth.value = r.month
+    pickedKey.value = ''
+    return true
+  }
+
   const cells = computed(() =>
     buildMonthMatrix(cursorYear.value, cursorMonth.value).map((c) => {
       const future = c.ts > now.getTime()
@@ -79,6 +111,11 @@ export function useCalendarMatrix(buckets) {
         today: c.key === todayKey
       }
     })
+  )
+
+  /** 当前视图整月无照片——用于给出「去最近有照片的月份」提示。 */
+  const currentViewEmpty = computed(
+    () => counts.value.size > 0 && !cells.value.some((c) => c.inMonth && c.hasPhoto)
   )
 
   const hasAny = computed(() => cells.value.some((c) => c.hasPhoto))
@@ -185,6 +222,9 @@ export function useCalendarMatrix(buckets) {
     canNext,
     cells,
     hasAny,
+    nearestPhotoIndex,
+    jumpToNearestPhoto,
+    currentViewEmpty,
     shiftMonth,
     jumpToday,
     select,
