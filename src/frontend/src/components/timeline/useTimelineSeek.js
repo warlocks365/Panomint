@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { itemDate } from './useTimelineGrouping'
 import {
   bucketRange,
@@ -78,17 +78,42 @@ export function useTimelineSeek({
   /** 最后一条**有日期**媒体的当前档位键（媒体按时间倒序，故末条即最旧）。 */
 
   /**
+   * 挂起的定位请求（目标档位尚未生效时暂存，档位到位后自动补发）。
+   *
+   * 为什么必须由**这里**等，而不是让调用方等：
+   * 档位真源是 props.dimension（TimelineView 持有），而调用方
+   * （useTimelineDimensionPanel）手里只有 useTimelineDimension 的**内部 ref**——
+   * 内部 ref 先变、props 后变。若调用方在内部 ref 变化时就补发，
+   * 这里读到的 dimension.value 仍是旧档位，守卫会把请求丢掉
+   * （实测：跳转 2024-11-03 报 dimension-mismatch want=day current=month）。
+   * 本 composable 拿的是 props 派生的权威 dimension，由它来等才不会抢跑。
+   */
+  let pendingSeek = null
+
+  watch(dimension, (d) => {
+    if (pendingSeek && pendingSeek.dimension === d) {
+      const p = pendingSeek
+      pendingSeek = null
+      // 下一帧再执行，确保 props 变更已完成子组件取数与渲染
+      requestAnimationFrame(() => seekTo(p, pendingScrollEl))
+    }
+  })
+
+  /** 最近一次 seekTo 收到的滚动容器（供挂起请求补发时复用）。 */
+  let pendingScrollEl = null
+
+  /**
    * 锚点跳转。载荷必须是 { dimension, key } 对象——靠字符串长度推断档位会让
    * 「档位不匹配」静默走错分支（ADR-001 记录的踩坑），对象载荷让它显式失败。
    */
   async function seekTo(payload, scrollEl) {
     if (!payload || typeof payload !== 'object') return
     const { dimension: want, key } = payload
+    pendingScrollEl = scrollEl
     if (want !== dimension.value) {
-      // 原为静默 return，导致「点查看这一天毫无反应」且无任何线索。
-      // 仍不猜测该定位到哪一档（那会跳到错误位置），但必须**可见**：
-      // 上报降级事件，宿主可据此提示用户或先行切档。
-      reportDegraded('dimension-mismatch', { want, current: dimension.value })
+      // 目标档位尚未生效：挂起等它到位，而不是丢弃。上报一次降级便于观测。
+      pendingSeek = payload
+      reportDegraded('dimension-mismatch', { want, current: dimension.value, deferred: true })
       return
     }
     if (!isValidKey(want, key)) return
