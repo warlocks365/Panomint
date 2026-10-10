@@ -103,27 +103,48 @@ export function useTimelineSeek({
   let pendingScrollEl = null
 
   /**
-   * 两段式滚动到目标分组。
+   * 在滚动容器内按**真实 DOM** 量出目标分组头的位置；未渲染则返回 -1。
    *
-   * 为什么必须两段：时间轴用 DynamicScroller 虚拟滚动，未渲染的项按
-   * `min-item-size` 估算高度。于是 `offsets`（按行高/标题高精确累加）算出的目标
-   * 可能**超出当前 scrollHeight**——实测目标偏移 4420，而当时
-   * scrollHeight 仅 4057（可滚动上限 3309），首滚被浏览器 clamp 到 2577，
-   * 表现为「滚动了但停在半路」。
-   *
-   * 第一滚把虚拟列表带到目标附近，渲染后 scrollHeight 随之增长；
-   * 再等一帧用**同一个 idx** 重算目标并校正，即可落到精确位置。
-   * 不用重新查索引——数据已加载完，idx 稳定，重查反而可能因渲染时序拿到不同的 flat。
+   * 为什么必须实测而不能用 offsets：offsets 是按「行高 + 标题高」理论累加的，
+   * 而真实渲染高度与之不符（实测 scrollHeight 4057 ≠ offsets 理论最大值），
+   * 于是 scrollTo(offsets[idx]) 会被浏览器 clamp 到当前可滚动上限，
+   * 表现为「滚动了但停在半路」（实测目标偏移 4420 超出上限 3309，停在 2577）。
+   * 实测法直接问 DOM「这个分组头现在在哪」，彻底摆脱理论值与渲染值的耦合。
+   */
+  function locateInDom(el, label) {
+    if (!label) return -1
+    const cRect = el.getBoundingClientRect()
+    const heads = el.querySelectorAll('.tl-header')
+    for (const h of heads) {
+      if (h.textContent.trim() === label) {
+        return Math.round(h.getBoundingClientRect().top - cRect.top + el.scrollTop)
+      }
+    }
+    return -1
+  }
+
+  /**
+   * 滚到目标分组：先用理论偏移把虚拟列表带到附近（让目标被渲染），
+   * 再用 DOM 实测值校正。虚拟列表可能尚未渲染目标，故最多重试若干帧。
    */
   function scrollToTarget(el, idx) {
-    const go = () => el.scrollTo({ top: offsets.value[idx], behavior: 'smooth' })
-    go()
-    const retry = () => requestAnimationFrame(() => {
-      const target = offsets.value[idx]
-      // 已经到位就不动，避免无谓动画打断用户
-      if (Math.abs(el.scrollTop - target) > 2) el.scrollTo({ top: target, behavior: 'smooth' })
-    })
-    requestAnimationFrame(() => requestAnimationFrame(retry))
+    const label = flat.value[idx] && flat.value[idx].label
+    el.scrollTo({ top: offsets.value[idx], behavior: 'smooth' })
+    let tries = 0
+    const correct = () => {
+      const real = locateInDom(el, label)
+      if (real >= 0) {
+        if (Math.abs(el.scrollTop - real) > 2) el.scrollTo({ top: real, behavior: 'smooth' })
+        return true
+      }
+      // 目标尚未渲染：继续等下一帧（虚拟列表滚动后才渲染新项）
+      if (++tries > 30) {
+        reportDegraded('anchor-not-rendered', { label, tries })
+        return true
+      }
+      requestAnimationFrame(correct)
+    }
+    requestAnimationFrame(() => requestAnimationFrame(correct))
   }
 
   /**
