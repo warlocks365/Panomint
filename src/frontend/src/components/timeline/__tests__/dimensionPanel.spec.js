@@ -185,13 +185,32 @@ describe('AC-16 · 拖拽滑块期间拒绝切档', () => {
 })
 
 describe('AC-12/15 · 日历跳转', () => {
-  it('跳转只发 seek 意图，不改媒体查询参数（grid.seekTo 收到对象载荷）', () => {
+  it('已在日档时：直接发 seek 意图，不改媒体查询参数', async () => {
     const stub = makeGridStub()
     const w = mountPanel(stub)
+    w.vm.panel.onDimensionChange('day')
+    await w.vm.$nextTick()
     w.vm.panel.toggleCalendar()
     w.vm.panel.onDaySeek({ dimension: 'day', key: '2024-06-14' })
     expect(stub.calls.seek).toHaveLength(1)
     expect(stub.calls.seek[0]).toEqual({ dimension: 'day', key: '2024-06-14' })
+    expect(w.vm.panel.anchorDayKey.value).toBe('2024-06-14')
+  })
+
+  it('不在日档时：先切到日档，切档完成后补发 seek（否则定位被静默丢弃）', async () => {
+    const stub = makeGridStub()
+    const w = mountPanel(stub)
+    // 默认档位是 month，日历只会请求按日定位
+    expect(w.vm.panel.dim.dimension.value).not.toBe('day')
+    w.vm.panel.toggleCalendar()
+    w.vm.panel.onDaySeek({ dimension: 'day', key: '2024-06-14' })
+    // 此刻应已请求切档，但定位尚未发出
+    expect(w.vm.panel.dim.dimension.value).toBe('day')
+    expect(stub.calls.seek).toHaveLength(0)
+    await w.vm.$nextTick()
+    expect(stub.calls.seek).toHaveLength(1)
+    expect(stub.calls.seek[0]).toEqual({ dimension: 'day', key: '2024-06-14' })
+    // 锚点立即写入，不等定位完成
     expect(w.vm.panel.anchorDayKey.value).toBe('2024-06-14')
   })
 

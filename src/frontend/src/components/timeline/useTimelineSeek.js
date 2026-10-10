@@ -91,7 +91,13 @@ export function useTimelineSeek({
   async function seekTo(payload, scrollEl) {
     if (!payload || typeof payload !== 'object') return
     const { dimension: want, key } = payload
-    if (want !== dimension.value) return // 档位守卫：不匹配即失败，不猜
+    if (want !== dimension.value) {
+      // 原为静默 return，导致「点查看这一天毫无反应」且无任何线索。
+      // 仍不猜测该定位到哪一档（那会跳到错误位置），但必须**可见**：
+      // 上报降级事件，宿主可据此提示用户或先行切档。
+      reportDegraded('dimension-mismatch', { want, current: dimension.value })
+      return
+    }
     if (!isValidKey(want, key)) return
     if (seeking.value) return
     seeking.value = true

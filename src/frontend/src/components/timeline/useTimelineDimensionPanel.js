@@ -44,6 +44,7 @@ export function useTimelineDimensionPanel({ gridRef, hasAnyMedia }) {
   })
 
   const anchorDayKey = ref('')
+  let pendingSeek = null // 等档位切到日档后补发的定位请求
   const calendarOpen = ref(false)
   // 注：此处曾有一个 calendarBtnRef 供「关闭后焦点回到按钮」使用，但模板里写的是
   // ref="panel.calendarBtnRef" —— Vue 3.5 的点号字符串 ref 只对 setupState 里直接声明的
@@ -70,8 +71,25 @@ export function useTimelineDimensionPanel({ gridRef, hasAnyMedia }) {
   function onDaySeek(payload) {
     closeCalendar()
     anchorDayKey.value = payload.key
+    // 日历只会请求「按日定位」（payload.dimension 恒为 'day'），而 seekTo 有档位守卫：
+    // 时间轴不在日档时请求会被丢弃 —— 表现为「点查看这一天毫无反应」。
+    // 故先请求切到日档，等切换真正完成再发定位。
+    if (dim.dimension.value !== 'day') {
+      pendingSeek = payload
+      dim.requestDimension('day')
+      return
+    }
     gridRef.value?.seekTo?.(payload)
   }
+
+  // 档位切换完成后补发挂起的定位（requestDimension 在分页中会排队，故必须等到位）
+  watch(() => dim.dimension.value, (d) => {
+    if (d === 'day' && pendingSeek) {
+      const p = pendingSeek
+      pendingSeek = null
+      gridRef.value?.seekTo?.(p)
+    }
+  })
 
   return {
     dim,

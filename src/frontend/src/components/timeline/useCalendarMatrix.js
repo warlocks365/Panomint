@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import { buildMonthMatrix, headerKeyOf } from './timelineDimensions'
+import { buildMonthMatrix, headerKeyOf, pad2 } from './timelineDimensions'
 import {
   monthIndexOf,
   yearMonthOf,
@@ -161,6 +161,19 @@ export function useCalendarMatrix(buckets) {
     minIndex.value === null ? now.getFullYear() : yearMonthOf(minIndex.value).year)
   const maxYear = computed(() => now.getFullYear())
 
+  /** 该月是否有媒体（月桶键 YYYY-MM）。 */
+  function hasPhotoIn(year, month) {
+    return (counts.value.get(`${year}-${pad2(month)}`) || 0) > 0
+  }
+
+  /** 该年**最小**的有媒体月份（1..12），没有则 null。 */
+  function firstPhotoMonthInYear(year) {
+    for (let mm = 1; mm <= 12; mm++) {
+      if ((counts.value.get(`${year}-${pad2(mm)}`) || 0) > 0) return mm
+    }
+    return null
+  }
+
   /** 该年是否有照片（年选择器据此标注可跳/ 无照片）。 */
   const photoYears = computed(() => {
     const s = new Set()
@@ -190,7 +203,12 @@ export function useCalendarMatrix(buckets) {
     if (monthIndexOf(cursorYear.value, cursorMonth.value) > maxIndex.value) {
       cursorMonth.value = now.getMonth() + 1
     }
-    if (cursorMonth.value > 12) cursorMonth.value = 12
+    // 该年当前月没有媒体时（实测：切到 2024 年，原来停留的 9 月无媒体），
+    // 面板会显示一整月灰格，看起来像「坏了」。改为从 1 月起找该年**最小**的有媒体月份。
+    if (!hasPhotoIn(cursorYear.value, cursorMonth.value)) {
+      const mm = firstPhotoMonthInYear(cursorYear.value)
+      if (mm !== null) cursorMonth.value = mm
+    }
     pickedKey.value = ''
     return true
   }
@@ -255,6 +273,7 @@ export function useCalendarMatrix(buckets) {
     yearChoices,
     hasAnyYear,
     yearHasPhoto,
+    firstPhotoMonthInYear,
     setYear,
     setMonth,
     monthLength,
