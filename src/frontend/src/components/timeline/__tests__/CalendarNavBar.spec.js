@@ -85,7 +85,7 @@ describe('CalendarNavBar · 年份切换', () => {
     await w.findAll('.nav-pick')[0].trigger('click') // 打开年网格
     const cells = w.findAll('.nav-cell')
     expect(cells.length).toBeGreaterThan(0)
-    const target = cells.find((c) => c.text() === String(new Date().getFullYear() - 1))
+    const target = cells.find((c) => /^\d{4} 年$/.test(c.text()) && c.text().startsWith(String(new Date().getFullYear() - 1)))
     expect(target).toBeTruthy()
     expect(target.attributes('disabled')).toBeUndefined()
     await target.trigger('click')
@@ -96,7 +96,7 @@ describe('CalendarNavBar · 年份切换', () => {
   it('超出可导航范围的年份被禁用（有照片的最早年 ~ 当前年）', async () => {
     const { m, w } = setup([{ bucket: day(-400), count: 1 }, { bucket: day(-2), count: 1 }])
     await w.findAll('.nav-pick')[0].trigger('click')
-    const early = w.findAll('.nav-cell').find((c) => Number(c.text()) < m.minYear.value)
+    const early = w.findAll('.nav-cell').find((c) => parseInt(c.text(), 10) < m.minYear.value)
     expect(early).toBeTruthy()
     expect(early.attributes('disabled')).toBeDefined()
   })
@@ -148,7 +148,7 @@ describe('CalendarNavBar · 月份切换', () => {
     const { m, w } = setup([{ bucket: day(-400), count: 1 }, { bucket: day(-2), count: 1 }])
     await w.findAll('.nav-pick')[1].trigger('click')
     const cells = w.findAll('.nav-cell')
-    const target = cells.find((c) => !c.attributes('disabled') && c.text().startsWith('6'))
+    const target = cells.find((c) => !c.attributes('disabled') && /^6 月/.test(c.text()))
     if (target) {
       await target.trigger('click')
       expect(m.cursorMonth.value).toBe(6)

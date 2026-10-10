@@ -37,7 +37,6 @@
           {{ m.cursorMonth.value }} 月
         </button>
       </div>
-
       <button
         type="button"
         class="nav-step"
@@ -64,7 +63,7 @@
         :aria-selected="y === m.cursorYear.value"
         :disabled="y < m.minYear.value || y > m.maxYear.value"
         @click="pickYear(y)"
-      >{{ y }}</button>
+      >{{ y }} 年</button>
     </div>
 
     <!-- 月选择：2 月标注 28/29 天（闰年差异可视化） -->
@@ -80,7 +79,7 @@
         :disabled="!monthInRange(mm)"
         :title="monthTitle(mm)"
         @click="pickMonth(mm)"
-      >{{ mm }}<span class="nav-cell-sub">{{ m.monthLength(m.cursorYear.value, mm) }}天</span></button>
+      >{{ mm }} 月<span class="nav-cell-sub">共 {{ m.monthLength(m.cursorYear.value, mm) }} 天</span></button>
     </div>
   </div>
 </template>
