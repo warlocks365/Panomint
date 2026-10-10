@@ -24,7 +24,7 @@
       :disabled="!c.selectable"
       @click="matrix.select(c.key)"
     >
-      {{ c.day }} 日
+      {{ c.day }}
     </button>
   </div>
 </template>

@@ -84,7 +84,7 @@ describe('复现 · 年→月→日 完整链路', () => {
     await w.findAll('.nav-cell')[1].trigger('click') // 2 月
     expect(gridLabel(w)).toContain('2 月')
     // 2 月格子：29 日那格应可选
-    const feb29 = w.findAll('.cg-cell').find((c) => /^29 日$/.test(c.text()) && c.attributes('data-has') === 'photo')
+    const feb29 = w.findAll('.cg-cell').find((c) => /^29$/.test(c.text()) && c.attributes('data-has') === 'photo')
     expect(feb29, '2024-02-29 不在网格里或不可选').toBeTruthy()
   })
 

@@ -80,17 +80,6 @@ const emit = defineEmits(['close', 'seek'])
 const m = useCalendarMatrix(toRef(props, 'buckets'))
 const navRef = ref(null)
 
-// 直方图是异步到达的：首帧counts 为空，落点无从谈起。
-// 数据到位后再把游标挪到最近有照片的月份，否则用户看到的是整屏灰 +
-// 「这个月没有照片」，而年份下拉里除当前年外全被禁用——像坏了而不是像没数据。
-watch(
-  () => props.buckets,
-  () => {
-    if (props.buckets && props.buckets.length) m.jumpToNearestPhoto()
-  },
-  { immediate: true, deep: false }
-)
-
 function goNearest() {
   m.jumpToNearestPhoto()
 }

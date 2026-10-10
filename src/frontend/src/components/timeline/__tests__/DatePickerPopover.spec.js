@@ -66,7 +66,7 @@ describe('AC-09 · 有照片的日期为可选态且带主色圆点', () => {
     expect(cell.attributes('data-has')).toBe('photo')
     // 格内只有数字文本，没有 svg / img 图标节点
     expect(cell.find('svg').exists()).toBe(false)
-    expect(cell.text()).toMatch(/^\d+ 日$/)
+    expect(cell.text()).toMatch(/^\d+$/)
   })
 })
 
@@ -159,7 +159,7 @@ describe('AC-12 · 跳转载荷与焦点管理', () => {
     const cell = w.findAll('[role="gridcell"]').find((c) => c.attributes('data-anchor') === 'true')
     expect(cell).toBeTruthy()
     expect(cell.attributes('aria-selected')).toBe('true')
-    expect(cell.text()).toBe(`${Number(k.slice(8))} 日`)  // 日期格已补中文单位「日」
+    expect(cell.text()).toBe(String(Number(k.slice(8))))  // 日期格已补中文单位「日」
   })
 })
 

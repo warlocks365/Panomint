@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { buildMonthMatrix, headerKeyOf } from './timelineDimensions'
 import {
   monthIndexOf,
@@ -29,6 +29,7 @@ export function useCalendarMatrix(buckets) {
   const cursorYear = ref(now.getFullYear())
   const cursorMonth = ref(now.getMonth() + 1)
   const pickedKey = ref('')
+  const cursorTouched = ref(false)  // 用户手动导航过就别再自动改落点
   const todayKey = headerKeyOf('day', now)
 
   // 桶键 → 计数。用 Map 而非每次遍历数组：42 格 × 桶数在 day 档可达数千次查找
@@ -98,6 +99,21 @@ export function useCalendarMatrix(buckets) {
     return true
   }
 
+  /**
+   * 落点自动定位：**由 counts 驱动**，不依赖组件层 watch 时机。
+   *
+   * 为什么放在这里：直方图是异步到达的，而组件挂载那一刻 buckets 往往还是空的。
+   * 监听 counts（随 buckets 变化而换新 Map，身份变化可靠）比监听 props.buckets
+   * 的数组引用更稳 —— 后者在父级把 reactive 数组原地更新时引用不变，watch 永不触发
+   * （这正是上一版「定位不生效」的真实原因之一）。
+   *
+   * once 语义：只在「尚未有游标」时落点一次，之后交给用户手动导航，
+   * 否则用户选好月份后被数据更新抢回去。
+   */
+  watch(counts, () => {
+    if (counts.value.size && !cursorTouched.value) jumpToNearestPhoto()
+  }, { immediate: true })
+
   const cells = computed(() =>
     buildMonthMatrix(cursorYear.value, cursorMonth.value).map((c) => {
       const future = c.ts > now.getTime()
@@ -130,6 +146,7 @@ export function useCalendarMatrix(buckets) {
   }
 
   function shiftMonth(delta) {
+    cursorTouched.value = true
     // 走 shiftMonthSafe：旧实现 `Math.floor(idx/12)` + `(idx%12)+1` 在跨年回退时
     // 会算出 month=0/负数（JS 的 % 对负数返回负值），而年月切换必然要跨年。
     const r = shiftMonthSafe(cursorYear.value, cursorMonth.value, delta)
@@ -165,6 +182,7 @@ export function useCalendarMatrix(buckets) {
 
   /** 切到指定年（夹到可导航范围）；返回是否真的改变了年份。 */
   function setYear(y) {
+    cursorTouched.value = true
     const yy = Math.min(Math.max(Math.round(y), minYear.value), maxYear.value)
     if (yy === cursorYear.value) return false
     cursorYear.value = yy
@@ -179,6 +197,7 @@ export function useCalendarMatrix(buckets) {
 
   /** 切到指定月（夹到该年允许范围）；返回是否真的改变了月份。 */
   function setMonth(m) {
+    cursorTouched.value = true
     if (!Number.isFinite(m) || m < 1 || m > 12) return false
     let yy = cursorYear.value
     let mm = Math.round(m)

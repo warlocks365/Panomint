@@ -242,8 +242,13 @@ defineExpose({
   removeById: pager.removeById,
   reload: pager.reset,
   loading: pager.loading,
-  dayBuckets: pager.histograms.day,
-  unknownCount: pager.unknownCount,
+  // 用 getter 而非直接取值：defineExpose 的对象在 setup 时求值一次，
+  // 直接写 pager.histograms.day 会把**当时的**数组引用（初始空数组）固化下来，
+  // 之后 histograms.day 被整体替换也不会反映到宿主 —— 直方图到不了日历，
+  // 表现为「所有日期都点不动」。函数形式把求值推迟到调用时，
+  // 且宿主放在 computed 里调用时能正确建立依赖。
+  dayBuckets: () => pager.histograms.day,
+  unknownCount: () => pager.unknownCount,
   captureAnchor: () => captureAnchor(scrollEl),
   restoreAnchor: (a) => restoreAnchor(scrollEl, a),
   seekTo: (payload) => seek.seekTo(payload, scrollEl)

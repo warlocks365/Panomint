@@ -140,8 +140,10 @@ const gridItems = computed(() => gridRef.value?.items ?? [])
 const hasAnyMedia = computed(() => gridItems.value.length > 0)
 // day 粒度直方图由 pager 在挂载时取齐（见 useTimelinePager.loadHistograms），
 // 日历与滑块共用同一份 count，且切档/开日历都不发请求（AC-04）
-const dayBuckets = computed(() => gridRef.value?.dayBuckets ?? [])
-const unknownCount = computed(() => gridRef.value?.unknownCount ?? 0)
+// getter 形式（见 TimelineGrid defineExpose 注释）：调用发生在 computed 内，
+// reactive 读取才会被追踪到，数据到位后自动重算。
+const dayBuckets = computed(() => gridRef.value?.dayBuckets?.() ?? [])
+const unknownCount = computed(() => gridRef.value?.unknownCount?.() ?? 0)
 
 function is360(item) {
   return !!(item?.is_360 || item?.type === '360')
